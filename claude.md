@@ -1,273 +1,104 @@
 # valuationFramework
 
+AI-only repo contract.
+
 ## Purpose
 
-This repository is for building a practical stock valuation framework.
+Build a practical stock-financials and valuation backbone.
 
-The scope is general: the code should support valuing many public companies.
+Current branch priority:
 
-The priority case is Berkshire Hathaway, where the goal is to estimate intrinsic value as precisely as reasonably possible without turning the repo into an overbuilt research platform.
+- `main` should be useful on its own for generic company inspection
+- `brk` is the Berkshire-specific proving ground
 
-This is also a hobby project. It does not need a rigid product end-state upfront. The repo should support exploration, with enough structure that experimental work can later be turned into reusable tooling.
+Long-term direction:
 
-## Project Philosophy
+- a smaller personal alternative to the financial-data side of TradingView
+- more emphasis on statements, balance sheets, and cash flows
+- free-first where practical
+- CLI first, thin API/UI later
 
-The right approach is to build by example:
+## Documentation Rules
 
-- start with one hard case: Berkshire Hathaway
-- use that case to discover what generic tooling is actually needed
-- extract reusable pieces into `main` only after they prove useful
-- allow the project to remain a research backend for a while before deciding whether it becomes an app
+- `README.md` is for humans
+- `claude.md` and subtree `CLAUDE.md` files are AI-only readmes
+- keep `claude.md` current so a new chat can resume work quickly
+- add subtree `CLAUDE.md` files only when module-specific context is genuinely useful
 
-Possible end states are all acceptable:
-
-- a strong personal valuation research backend
-- a CLI tool that produces repeatable valuation tables
-- a local API/backend that powers a UI later
-- a small portfolio of company-specific valuation modules built on one common core
-
-The project does not need a final product decision now. The immediate goal is to make it useful, inspectable, and extensible.
-
-## Documentation Policy
-
-Keep documentation short, current, and close to the code:
-
-- `README.md` should stay concise and human-oriented
-- `claude.md` is the longer-lived agent bootstrap and repo contract
-- core modules should explain intent with docstrings
-- use short comments only where behavior or design assumptions are non-obvious
-- update docs whenever the repo shape, runtime baseline, or workflow changes
-
-## Core Rules
-
-- Default language is Python.
-- Target modern Python, not the system Python.
-- Use C++ only if a real bottleneck appears later.
-- The repo must remain free to run.
-- Favor simple scripts, clear modules, and reproducible outputs over notebook-only workflows.
-- Default outputs should be tables: terminal tables, Markdown tables, CSV, and optionally Parquet.
-- Prefer official or primary-source fundamentals data when possible.
-- Treat market quotes and fundamentals as separate concerns.
-- Do not build a trading bot. This is a valuation repo.
-- `main` is for general-purpose valuation infrastructure.
-- `brk` is the working branch for Berkshire-specific valuation logic and experiments.
-- Code copied or adapted from other projects is acceptable only if the license allows it and attribution is preserved.
-
-## Branch Strategy
-
-Use the branches with different responsibilities:
-
-- `main`: generic data connectors, normalized financial tables, reusable valuation models, reporting, and later API/backend layers
-- `brk`: Berkshire-specific data loaders, Berkshire tables, sum-of-the-parts logic, and any temporary exploratory code needed to refine the Berkshire approach
-
-Rules for merging from `brk` back to `main`:
-
-- only merge code that is genuinely reusable
-- if a Berkshire implementation reveals a generic need, extract the reusable layer first
-- keep Berkshire assumptions out of generic modules unless they are parameterized cleanly
-
-This means Berkshire is the first example-driven implementation, not the permanent design center of `main`.
-
-## What Exists Already
-
-There are already several ways to get stock data in Python. The main distinction is not Python vs. C++; it is free-and-simple vs. licensed-and-reliable.
-
-### Data Source Scan
-
-| Option | Best for | Pros | Limits | Initial verdict |
-| --- | --- | --- | --- | --- |
-| SEC EDGAR APIs (`submissions`, `companyfacts`, filings) | Fundamentals, filings, share counts, segment data | Official, free, strong for audited data | Not a quote feed; requires respectful access and a proper `User-Agent` | Must use |
-| `yfinance` | Fast prototype quotes and historical prices | Very easy, zero key, good enough for research prototypes | Not an official exchange feed; quote quality and availability can vary | Use first |
-| Financial Modeling Prep | Unified market + fundamentals API | Broad coverage, easy integration | API key, commercial dependency, quality varies by endpoint/plan | Do not depend on it in core repo |
-| Finnhub | Realtime quotes/news/fundamentals | Good API design, useful for live data | API key and plan limits | Do not depend on it in core repo |
-| Polygon | Higher-grade market data | Better for serious realtime workflows | Paid, more infrastructure commitment | Out of scope for free-first repo |
-| OpenBB | Unified research interface | Can speed up exploration across providers | Extra abstraction layer; may hide source-specific details | Optional, not core |
-
-## Recommendation For Phase 1
-
-Use a Python-first stack:
-
-- `requests` or `httpx` for API calls
-- `pandas` for tables
-- `pyarrow` for Parquet when needed
-- `tabulate` or `rich` for readable terminal tables
-- SEC EDGAR as the primary fundamentals source
-- `yfinance` as the initial price/market-data source
-
-Runtime baseline:
-
-- package metadata should target modern Python (`>=3.12`)
-- local development can standardize on Python 3.14
-- avoid bending core dependency choices around old machine-specific interpreters
-- SEC access requires a proper `VALUATION_SEC_USER_AGENT` with contact information
-
-This gives the fastest path to a working repo with no paid dependency on day one.
-
-Free-first interpretation:
-
-- no required paid APIs
-- no required SaaS backend
-- no hidden dependency on proprietary terminals or datasets
-- optional adapters for paid providers can exist later, but the repo must work without them
-
-Important: "realtime stock data in Python directly" usually means calling an HTTP or WebSocket API from Python. That is normal. True exchange-grade realtime data is usually paid. For a simple start, Python is enough.
-
-## Berkshire Hathaway Focus
-
-Do not treat Berkshire like a normal single-business DCF case.
-
-The primary Berkshire model should be a sum-of-the-parts valuation:
-
-1. Public equity portfolio marked to market
-2. Cash, cash equivalents, and Treasury bills
-3. Insurance operations and float
-4. Railroad, utility/energy, manufacturing, service, and retail operating businesses
-5. Debt, minority interests, and other balance-sheet adjustments
-6. Per-share value for `BRK.B`, with `BRK.A` handled via the 1:1500 conversion
-
-### Berkshire Notes
-
-- `BRK.B` is the practical market ticker to anchor price comparisons.
-- 13F data is useful, but it is only part of Berkshire's full economic value.
-- The official annual report and quarterly filings matter more than market-screening APIs for Berkshire.
-- We should expect a Berkshire-specific model module, not just reuse a generic DCF.
-
-## Planned Outputs
-
-Every important script should be able to produce tables in at least one of these forms:
-
-- terminal table for quick inspection
-- Markdown table for notes and agent summaries
-- CSV for spreadsheet work
-- Parquet for local storage and later analysis
-
-Examples of outputs we want:
-
-- current market snapshot
-- historical valuation multiples table
-- inputs table for a valuation run
-- Berkshire sum-of-the-parts bridge table
-- sensitivity table
-- valuation summary table with bull/base/bear cases
-
-## Architecture Direction
-
-The repo should be backend-first.
-
-Start with a library plus CLI/report layer. Add a web/API interface only after the data pipeline and valuation outputs are stable.
+## Current Architecture
 
 Preferred flow:
 
 1. provider adapters fetch raw data
-2. normalization layer converts raw inputs into clean tables
-3. model layer consumes normalized tables
-4. report layer emits terminal, Markdown, CSV, and Parquet outputs
-5. later, an API layer can expose the same report/model functions
+2. normalization turns provider payloads into stable tables
+3. report/render layer emits terminal, Markdown, CSV, later API responses
+4. model layer should stay separate from rendering
 
-The important design rule is that table generation should be easy and consistent. Models should return structured tabular outputs, not only free-form text.
+Rules:
 
-## Proposed Repo Shape
+- keep exact raw numeric values in backend tables
+- apply human-readable formatting only in report/render layers
+- treat `security_id` as the canonical backend identifier
+- treat ticker as a market-data alias, not the only identity
+- prefer official SEC facts for financial statements
+- use Yahoo mainly for market snapshot convenience and identifier search
 
-This is the intended direction, not a final structure:
+## Main Branch Goal
 
-```text
-valuationFramework/
-  claude.md
-  src/
-    valuation/
-      data/
-        providers/
-        normalize/
-      models/
-      reports/
-      api/
-      utils/
-  tests/
-  data/
-    raw/
-    processed/
-    cache/
-  outputs/
-    tables/
-    reports/
-```
+`main` should provide a clean generic company workflow:
 
-Suggested module intent:
+- accept flexible identifiers such as ticker, CIK, CUSIP, and ISIN when the free path supports them
+- resolve them into one company/ticker view
+- output a simple baseline similar to a financials-first TradingView page:
+  - resolution
+  - company metadata
+  - market snapshot
+  - key financial facts
+  - recent filings
 
-- `data/providers/`: source-specific fetchers such as SEC and `yfinance`
-- `data/normalize/`: convert provider-specific payloads into common tables
-- `models/`: DCF, multiples, owner-earnings, and later Berkshire sum-of-the-parts
-- `reports/`: Markdown, terminal, CSV, and Parquet renderers
-- `api/`: later FastAPI or similar backend layer, only after the core library is stable
+Keep `main` generic. Do not leak Berkshire assumptions into generic modules.
 
-## First Implementation Plan
+## Berkshire Branch Goal
 
-### Phase 1: Bootstrap
+`brk` is for:
 
-- set up Python project basics
-- add a small data client for SEC EDGAR
-- add a small data client for `yfinance`
-- add normalized table schemas for prices, shares, income statement, balance sheet, and cash flow
-- add a table output utility
-- prove a clean pipeline for one ticker
+- latest 13F holdings
+- optional live-price revaluation
+- liquidity bridge
+- operating segment extraction
+- later Berkshire sum-of-the-parts logic
 
-### Phase 2: Generic Valuation Framework
+Reusable pieces discovered there should be extracted back into `main`.
 
-- normalized financial statement loader
-- basic multiples valuation
-- simple DCF / owner-earnings model
-- report builder that emits Markdown and CSV tables
-- ensure all generic models can run without Berkshire-specific assumptions
+## Current Main Features
 
-### Phase 3: Berkshire-Specific Valuation
+As of 2026-04-09, `main` should contain or move toward:
 
-- ingest Berkshire annual and quarterly filings
-- build public holdings and cash/investments bridge
-- estimate operating-business value by segment
-- produce a Berkshire sum-of-the-parts table
-- compare intrinsic value range vs. market price
-- keep reusable pieces extractable back into `main`
+- repo-local launcher via `./vf`
+- generic `valuation company <identifier>` CLI
+- ticker / CIK / CUSIP / ISIN resolution through SEC + Yahoo
+- compact terminal tables with shorter headers
+- selected generic SEC financial facts
 
-### Phase 4: Interface Layer
+## Current Commands
 
-- add a simple CLI entrypoint for repeatable runs
-- optionally add FastAPI endpoints for tables and valuation summaries
-- keep the interface as a thin layer over the core library
+- `./setup`
+- `./vf company BRK-B`
+- `./vf company US0846707026`
+- `./vf snapshot BRK-B`
 
-## Near-Term Decision
+## Quality Bar
 
-Unless there is a strong objection, the first code milestone should be:
+- prioritize code quality over feature count
+- prefer fewer, clearer modules over many thin wrappers
+- delete code that is not pulling its weight
+- keep tests that protect real behavior; skip decorative or low-signal tests
+- preserve a clean path for later API/UI work without adding that surface too early
 
-1. bootstrap a small Python package
-2. fetch `BRK-B` quote/history with `yfinance`
-3. fetch Berkshire filing/fundamental data from SEC sources
-4. render the first Markdown and terminal tables
+## Git / Publication
 
-Bootstrap status as of 2026-04-09:
-
-- Python package scaffold exists
-- CLI snapshot command exists
-- `yfinance` snapshot pull works on modern Python
-- SEC pull works only when `VALUATION_SEC_USER_AGENT` is explicitly set
-- snapshot tables are written to `outputs/`, which should remain gitignored
-
-## Agent Guidance
-
-- Keep the framework general, but let Berkshire drive the first serious design decisions.
-- Prefer transparent calculations over black-box finance packages.
-- When choosing between a simple direct implementation and a more abstract system, choose the simple direct implementation first.
-- Preserve table-first outputs.
-- Document data provenance in reports.
-- If code is borrowed from elsewhere, verify license compatibility and keep attribution notes in the repo.
-- Build generic abstractions only after one concrete implementation proves the shape.
-
-## Reference Links To Revisit
-
-These were the useful anchors for the initial scan on 2026-04-09:
-
-- SEC EDGAR API documentation: https://api.edgarfiling.sec.gov/edgar-api.pdf
-- Berkshire Hathaway 2024 annual report / 10-K: https://www.berkshirehathaway.com/2024ar/202410-k.pdf
-- OpenBB docs: https://docs.openbb.co/
-- Financial Modeling Prep quote docs: https://site.financialmodelingprep.com/developer/docs/quote-order-quote
-
-Future updates to this file should keep the repo intent stable and refine the concrete implementation plan as the codebase appears.
+- repo remote: `https://github.com/AndrazTom/valuationFramework`
+- keep the GitHub repo private unless the user explicitly changes that
+- keep commits organized by reusable concern
+- push stable `brk` checkpoints freely
+- when generic work is ready, port it cleanly to `main`

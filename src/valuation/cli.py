@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional, Sequence
 
+from valuation.company.service import fetch_company_snapshot
+from valuation.company.tables import build_key_financials_table, resolution_to_table
 from valuation.data.normalize.tables import (
     recent_filings_to_table,
     sec_company_to_table,
@@ -33,7 +35,25 @@ def build_parser() -> argparse.ArgumentParser:
     snapshot_parser.add_argument("--outdir", default="outputs/tables")
     snapshot_parser.add_argument(
         "--filings-limit",
-        type=int,
+        type=_non_negative_int,
+        default=10,
+        help="Number of recent SEC filings to show.",
+    )
+
+    company_parser = subparsers.add_parser(
+        "company",
+        help="Fetch a generic company snapshot from ticker, CIK, CUSIP, or ISIN.",
+    )
+    company_parser.add_argument("identifier")
+    company_parser.add_argument(
+        "--identifier-kind",
+        choices=("auto", "ticker", "cik", "cusip", "isin"),
+        default="auto",
+    )
+    company_parser.add_argument("--outdir", default="outputs/tables")
+    company_parser.add_argument(
+        "--filings-limit",
+        type=_non_negative_int,
         default=10,
         help="Number of recent SEC filings to show.",
     )
@@ -55,23 +75,33 @@ def run_snapshot(ticker: str, outdir: str, filings_limit: int) -> int:
         limit=filings_limit,
     )
 
-    sections = [
-        ("Company", company_table),
-        ("Market Snapshot", snapshot_table),
-        ("Recent Filings", filings_table),
-    ]
+    _emit_sections(
+        [
+            ("Company", company_table),
+            ("Market Snapshot", snapshot_table),
+            ("Recent Filings", filings_table),
+        ],
+        Path(outdir) / ticker.upper().replace(".", "-"),
+    )
+    return 0
 
-    for title, frame in sections:
-        print(f"\n## {title}\n")
-        print(render_terminal_table(frame))
 
-    output_dir = Path(outdir) / ticker.upper().replace(".", "-")
-    # Keep filenames deterministic so later tooling can read generated tables.
-    for name, frame in _named_tables(sections):
-        write_csv(frame, output_dir / f"{name}.csv")
-        write_markdown(frame, output_dir / f"{name}.md")
-
-    print(f"\nWrote tables to {output_dir}")
+def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limit: int) -> int:
+    """Fetch a generic company view from a flexible identifier input."""
+    bundle = fetch_company_snapshot(
+        identifier,
+        identifier_kind=identifier_kind,
+    )
+    _emit_sections(
+        [
+            ("Resolution", resolution_to_table(bundle.resolution)),
+            ("Company", sec_company_to_table(bundle.resolution.sec_company)),
+            ("Market Snapshot", snapshot_to_table(bundle.market_snapshot)),
+            ("Key Financials", build_key_financials_table(bundle.company_facts)),
+            ("Recent Filings", recent_filings_to_table(bundle.submissions, limit=filings_limit)),
+        ],
+        Path(outdir) / bundle.resolution.ticker.upper().replace(".", "-"),
+    )
     return 0
 
 
@@ -82,14 +112,33 @@ def _named_tables(sections: Iterable[tuple[str, object]]):
         yield slug, frame
 
 
-def main() -> int:
+def _emit_sections(sections: Iterable[tuple[str, object]], output_dir: Path) -> None:
+    for title, frame in sections:
+        print(f"\n## {title}\n")
+        print(render_terminal_table(frame))
+
+    for name, frame in _named_tables(sections):
+        write_csv(frame, output_dir / f"{name}.csv")
+        write_markdown(frame, output_dir / f"{name}.md")
+
+    print(f"\nWrote tables to {output_dir}")
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     try:
         if args.command == "snapshot":
             return run_snapshot(
                 ticker=args.ticker,
+                outdir=args.outdir,
+                filings_limit=args.filings_limit,
+            )
+        if args.command == "company":
+            return run_company(
+                identifier=args.identifier,
+                identifier_kind=args.identifier_kind,
                 outdir=args.outdir,
                 filings_limit=args.filings_limit,
             )
@@ -99,6 +148,13 @@ def main() -> int:
 
     parser.error("Unknown command")
     return 2
+
+
+def _non_negative_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("value must be non-negative")
+    return parsed
 
 
 if __name__ == "__main__":

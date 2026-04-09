@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if command -v python3.14 >/dev/null 2>&1; then
+  PYTHON_BIN="python3.14"
+elif command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="python3"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="python"
+else
+  echo "Error: no suitable Python interpreter found." >&2
+  exit 1
+fi
+
+if [ ! -d ".venv" ]; then
+  "$PYTHON_BIN" -m venv .venv
+fi
+
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install ".[dev]"
+
+cat <<'EOF'
+
+Setup complete.
+
+`./vf` runs the current source tree through the local virtualenv.
+
+Next:
+  export VALUATION_SEC_USER_AGENT="valuationFramework/0.1 your-email@example.com"
+  ./vf company BRK-B
+  ./vf company US0846707026
+  ./vf snapshot BRK-B
+EOF
