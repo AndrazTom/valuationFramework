@@ -86,6 +86,10 @@ As of 2026-04-09, `main` should contain or move toward:
   - annual and quarterly
   - optional start/end year filters
   - optional start/end quarter filters for quarterly views
+  - quarterly handling is metric-aware:
+    - additive flows may derive from YTD/FY
+    - balance-sheet items stay instant
+    - diluted EPS / diluted shares should prefer direct-quarter facts and avoid subtraction
 
 ## Current Commands
 

@@ -25,11 +25,13 @@ INCOME_STATEMENT_DEFINITIONS = (
         "diluted_eps",
         (("us-gaap", "EarningsPerShareDiluted"),),
         unit="USD/shares",
+        quarterly_value_kind="direct",
     ),
     CompanyFactQuery(
         "diluted_shares",
         (("us-gaap", "WeightedAverageNumberOfDilutedSharesOutstanding"),),
         unit="shares",
+        quarterly_value_kind="direct",
     ),
 )
 

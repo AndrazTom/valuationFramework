@@ -344,3 +344,75 @@ def test_company_facts_to_statement_table_filters_by_year_and_quarter_range():
     )
 
     assert list(frame.columns) == ["metric", "unit", "2025 Q2", "2025 Q1"]
+
+
+def test_company_facts_to_statement_table_direct_quarter_metrics_do_not_subtract_ytd():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "WeightedAverageNumberOfDilutedSharesOutstanding": {
+                    "units": {
+                        "shares": [
+                            {
+                                "val": 150.0,
+                                "fy": 2025,
+                                "fp": "FY",
+                                "start": "2024-10-01",
+                                "end": "2025-09-30",
+                                "filed": "2025-11-01",
+                                "form": "10-K",
+                            },
+                            {
+                                "val": 152.0,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2024-10-01",
+                                "end": "2025-06-30",
+                                "filed": "2025-08-01",
+                                "form": "10-Q",
+                            },
+                            {
+                                "val": 149.0,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2025-04-01",
+                                "end": "2025-06-30",
+                                "filed": "2025-08-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q2",
+                            },
+                            {
+                                "val": 151.0,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "start": "2025-01-01",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q1",
+                            },
+                        ]
+                    }
+                }
+            }
+        }
+    }
+
+    frame = company_facts_to_statement_table(
+        company_facts,
+        [
+            CompanyFactQuery(
+                "diluted_shares",
+                (("us-gaap", "WeightedAverageNumberOfDilutedSharesOutstanding"),),
+                unit="shares",
+                quarterly_value_kind="direct",
+            )
+        ],
+        period="quarterly",
+        value_kind="duration",
+        limit=4,
+    )
+
+    assert frame.iloc[0]["2025 Q2"] == 149.0
+    assert frame.iloc[0]["2025 Q1"] == 151.0
+    assert "2025 Q3" not in frame.columns

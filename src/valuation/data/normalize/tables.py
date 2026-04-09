@@ -17,6 +17,7 @@ class CompanyFactQuery:
     metric: str
     candidates: Sequence[tuple[str, str]]
     unit: Optional[str] = "USD"
+    quarterly_value_kind: Optional[str] = None
 
 
 def snapshot_to_table(snapshot: Mapping[str, Any]) -> pd.DataFrame:
@@ -132,11 +133,12 @@ def company_facts_to_statement_table(
 
     rows = []
     for query in definitions:
+        query_value_kind = query.quarterly_value_kind or value_kind
         values_by_period = _statement_values_by_period(
             company_facts,
             query,
             period=period,
-            value_kind=value_kind,
+            value_kind=query_value_kind,
         )
         row = {
             "metric": query.metric,
@@ -198,11 +200,12 @@ def _statement_periods(
 ) -> list[Mapping[str, Any]]:
     periods_by_key: dict[tuple[Any, ...], Mapping[str, Any]] = {}
     for query in queries:
+        query_value_kind = query.quarterly_value_kind or value_kind
         values_by_period = _statement_values_by_period(
             company_facts,
             query,
             period=period,
-            value_kind=value_kind,
+            value_kind=query_value_kind,
         )
         for key, value in values_by_period.items():
             existing = periods_by_key.get(key)
@@ -242,6 +245,11 @@ def _statement_values_by_period(
             )
         elif value_kind == "duration":
             candidates = _quarterly_duration_statement_candidates(
+                units.get(selected_unit, []),
+                unit=selected_unit,
+            )
+        elif value_kind == "direct":
+            candidates = _quarterly_direct_statement_candidates(
                 units.get(selected_unit, []),
                 unit=selected_unit,
             )
@@ -302,6 +310,37 @@ def _quarterly_instant_statement_candidates(
 ) -> list[Mapping[str, Any]]:
     candidates = []
     for entry in entries:
+        quarter_key = _calendar_quarter_key(entry)
+        if quarter_key is None:
+            continue
+        year, quarter = quarter_key
+        candidates.append(
+            {
+                "value": entry.get("val"),
+                "unit": unit,
+                "end": entry.get("end"),
+                "filed": entry.get("filed"),
+                "form": entry.get("form"),
+                "frame": entry.get("frame"),
+                "key": ("quarterly", year, quarter),
+                "label": f"{year} Q{quarter}",
+                "sort_key": (year, quarter, str(entry.get("end") or ""), str(entry.get("filed") or "")),
+                "year": year,
+                "quarter": quarter,
+            }
+        )
+    return candidates
+
+
+def _quarterly_direct_statement_candidates(
+    entries: Sequence[Mapping[str, Any]],
+    *,
+    unit: str,
+) -> list[Mapping[str, Any]]:
+    candidates = []
+    for entry in entries:
+        if not _is_single_quarter_duration_entry(entry):
+            continue
         quarter_key = _calendar_quarter_key(entry)
         if quarter_key is None:
             continue
