@@ -167,6 +167,7 @@ def test_company_facts_to_statement_table_builds_annual_period_columns():
             CompanyFactQuery("net_income", (("us-gaap", "NetIncomeLoss"),)),
         ],
         period="annual",
+        value_kind="duration",
         limit=2,
     )
 
@@ -209,8 +210,137 @@ def test_company_facts_to_statement_table_builds_quarterly_labels():
         company_facts,
         [CompanyFactQuery("net_income", (("us-gaap", "NetIncomeLoss"),))],
         period="quarterly",
+        value_kind="duration",
         limit=2,
     )
 
     assert list(frame.columns) == ["metric", "unit", "2025 Q2", "2025 Q1"]
     assert frame.iloc[0]["2025 Q2"] == 7.0
+
+
+def test_company_facts_to_statement_table_derives_missing_q4_from_ytd_and_fy():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "NetCashProvidedByUsedInOperatingActivities": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 120.0,
+                                "fy": 2025,
+                                "fp": "FY",
+                                "start": "2024-10-01",
+                                "end": "2025-09-30",
+                                "filed": "2025-11-01",
+                                "form": "10-K",
+                            },
+                            {
+                                "val": 90.0,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2024-10-01",
+                                "end": "2025-06-30",
+                                "filed": "2025-08-01",
+                                "form": "10-Q",
+                            },
+                            {
+                                "val": 50.0,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "start": "2024-10-01",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                            },
+                            {
+                                "val": 20.0,
+                                "fy": 2025,
+                                "fp": "Q1",
+                                "start": "2024-10-01",
+                                "end": "2024-12-31",
+                                "filed": "2025-02-01",
+                                "form": "10-Q",
+                            },
+                        ]
+                    }
+                }
+            }
+        }
+    }
+
+    frame = company_facts_to_statement_table(
+        company_facts,
+        [
+            CompanyFactQuery(
+                "operating_cash_flow",
+                (("us-gaap", "NetCashProvidedByUsedInOperatingActivities"),),
+            )
+        ],
+        period="quarterly",
+        value_kind="duration",
+        limit=4,
+    )
+
+    assert list(frame.columns) == ["metric", "unit", "2025 Q3", "2025 Q2", "2025 Q1", "2024 Q4"]
+    assert frame.iloc[0]["2025 Q3"] == 30.0
+    assert frame.iloc[0]["2025 Q2"] == 40.0
+    assert frame.iloc[0]["2025 Q1"] == 30.0
+    assert frame.iloc[0]["2024 Q4"] == 20.0
+
+
+def test_company_facts_to_statement_table_filters_by_year_and_quarter_range():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "NetIncomeLoss": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 11.0,
+                                "fy": 2026,
+                                "fp": "Q1",
+                                "start": "2025-10-01",
+                                "end": "2025-12-31",
+                                "filed": "2026-02-01",
+                                "form": "10-Q",
+                            },
+                            {
+                                "val": 10.0,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2025-04-01",
+                                "end": "2025-06-30",
+                                "filed": "2025-08-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q2",
+                            },
+                            {
+                                "val": 9.0,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "start": "2025-01-01",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q1",
+                            },
+                        ]
+                    }
+                }
+            }
+        }
+    }
+
+    frame = company_facts_to_statement_table(
+        company_facts,
+        [CompanyFactQuery("net_income", (("us-gaap", "NetIncomeLoss"),))],
+        period="quarterly",
+        value_kind="duration",
+        limit=10,
+        start_year=2025,
+        start_quarter=1,
+        end_year=2025,
+        end_quarter=2,
+    )
+
+    assert list(frame.columns) == ["metric", "unit", "2025 Q2", "2025 Q1"]

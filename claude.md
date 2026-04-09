@@ -84,6 +84,8 @@ As of 2026-04-09, `main` should contain or move toward:
   - balance
   - cashflow
   - annual and quarterly
+  - optional start/end year filters
+  - optional start/end quarter filters for quarterly views
 
 ## Current Commands
 

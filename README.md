@@ -52,6 +52,7 @@ Examples:
 ./vf company US0378331005
 ./vf statements AAPL --statement income --period annual
 ./vf statements AAPL --statement balance --period quarterly
+./vf statements AAPL --statement cashflow --period quarterly --start-year 2025 --start-quarter 1 --end-year 2025 --end-quarter 4
 ```
 
 ## Output Shape

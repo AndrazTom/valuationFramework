@@ -126,7 +126,7 @@ def test_statements_cli_writes_files(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(
         cli,
         "build_statement_table",
-        lambda company_facts, statement, period, limit=4: __import__("pandas").DataFrame(
+        lambda company_facts, statement, period, limit=4, **kwargs: __import__("pandas").DataFrame(
             [{"metric": "revenue", "unit": "USD", "FY 2025": 100.0}]
         ),
     )
@@ -147,3 +147,33 @@ def test_statements_cli_writes_files(monkeypatch, tmp_path: Path):
     assert result == 0
     assert (tmp_path / "AAPL" / "income_statement_annual.csv").exists()
     assert (tmp_path / "AAPL" / "company.md").exists()
+
+
+def test_statements_cli_rejects_invalid_quarter():
+    with pytest.raises(SystemExit):
+        cli.main(["statements", "AAPL", "--start-quarter", "5"])
+
+
+def test_statements_cli_rejects_quarter_without_year():
+    result = cli.main(["statements", "AAPL", "--start-quarter", "2"])
+
+    assert result == 1
+
+
+def test_statements_cli_rejects_reversed_range():
+    result = cli.main(
+        [
+            "statements",
+            "AAPL",
+            "--start-year",
+            "2025",
+            "--start-quarter",
+            "4",
+            "--end-year",
+            "2025",
+            "--end-quarter",
+            "2",
+        ]
+    )
+
+    assert result == 1

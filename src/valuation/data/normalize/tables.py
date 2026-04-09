@@ -105,11 +105,29 @@ def company_facts_to_statement_table(
     queries: Iterable[CompanyFactQuery],
     *,
     period: str,
+    value_kind: str,
     limit: int = 4,
+    start_year: int | None = None,
+    end_year: int | None = None,
+    start_quarter: int | None = None,
+    end_quarter: int | None = None,
 ) -> pd.DataFrame:
     """Return a statement-like table with one row per metric and one column per period."""
     definitions = tuple(queries)
-    periods = _statement_periods(company_facts, definitions, period=period)
+    periods = _statement_periods(
+        company_facts,
+        definitions,
+        period=period,
+        value_kind=value_kind,
+    )
+    periods = _filter_statement_periods(
+        periods,
+        period=period,
+        start_year=start_year,
+        end_year=end_year,
+        start_quarter=start_quarter,
+        end_quarter=end_quarter,
+    )
     selected_periods = periods[: max(0, limit)]
 
     rows = []
@@ -118,6 +136,7 @@ def company_facts_to_statement_table(
             company_facts,
             query,
             period=period,
+            value_kind=value_kind,
         )
         row = {
             "metric": query.metric,
@@ -175,13 +194,15 @@ def _statement_periods(
     queries: Sequence[CompanyFactQuery],
     *,
     period: str,
+    value_kind: str,
 ) -> list[Mapping[str, Any]]:
-    periods_by_key: dict[tuple[str, str], Mapping[str, Any]] = {}
+    periods_by_key: dict[tuple[Any, ...], Mapping[str, Any]] = {}
     for query in queries:
         values_by_period = _statement_values_by_period(
             company_facts,
             query,
             period=period,
+            value_kind=value_kind,
         )
         for key, value in values_by_period.items():
             existing = periods_by_key.get(key)
@@ -199,9 +220,10 @@ def _statement_values_by_period(
     query: CompanyFactQuery,
     *,
     period: str,
-) -> dict[tuple[str, str], Mapping[str, Any]]:
+    value_kind: str,
+) -> dict[tuple[Any, ...], Mapping[str, Any]]:
     facts = company_facts.get("facts", {})
-    selected: dict[tuple[str, str], Mapping[str, Any]] = {}
+    selected: dict[tuple[Any, ...], Mapping[str, Any]] = {}
     for candidate_index, (taxonomy, concept) in enumerate(query.candidates):
         units = facts.get(taxonomy, {}).get(concept, {}).get("units", {})
         if not units:
@@ -213,24 +235,28 @@ def _statement_values_by_period(
         if selected_unit is None or selected_unit not in units:
             continue
 
-        for entry in units.get(selected_unit, []):
-            period_key = _statement_period_key(entry, period=period)
-            if period_key is None:
-                continue
-            period_label = _statement_period_label(entry, period=period)
+        if period == "annual":
+            candidates = _annual_statement_candidates(
+                units.get(selected_unit, []),
+                unit=selected_unit,
+            )
+        elif value_kind == "duration":
+            candidates = _quarterly_duration_statement_candidates(
+                units.get(selected_unit, []),
+                unit=selected_unit,
+            )
+        else:
+            candidates = _quarterly_instant_statement_candidates(
+                units.get(selected_unit, []),
+                unit=selected_unit,
+            )
+
+        for candidate in candidates:
             candidate = {
-                "value": entry.get("val"),
-                "unit": selected_unit,
-                "end": entry.get("end"),
-                "filed": entry.get("filed"),
-                "form": entry.get("form"),
-                "frame": entry.get("frame"),
-                "key": period_key,
-                "label": period_label,
-                "sort_key": _statement_sort_key(entry, period=period),
+                **candidate,
                 "candidate_priority": -candidate_index,
             }
-            existing = selected.get(period_key)
+            existing = selected.get(candidate["key"])
             if existing is None or (
                 candidate["sort_key"],
                 candidate["candidate_priority"],
@@ -238,59 +264,263 @@ def _statement_values_by_period(
                 existing["sort_key"],
                 existing["candidate_priority"],
             ):
-                selected[period_key] = candidate
+                selected[candidate["key"]] = candidate
     return selected
 
 
-def _statement_period_key(
-    entry: Mapping[str, Any],
+def _annual_statement_candidates(
+    entries: Sequence[Mapping[str, Any]],
     *,
-    period: str,
-) -> tuple[str, str] | None:
-    fy = str(entry.get("fy") or "")
-    fp = str(entry.get("fp") or "")
-    end = str(entry.get("end") or "")
-    if period == "annual":
-        if fp == "FY":
-            return ("annual", fy or end[:4])
-        if _is_annual_form(entry):
-            return ("annual", fy or end[:4])
-        return None
+    unit: str,
+) -> list[Mapping[str, Any]]:
+    candidates = []
+    for entry in entries:
+        year = _annual_year(entry)
+        if year is None:
+            continue
+        candidates.append(
+            {
+                "value": entry.get("val"),
+                "unit": unit,
+                "end": entry.get("end"),
+                "filed": entry.get("filed"),
+                "form": entry.get("form"),
+                "frame": entry.get("frame"),
+                "key": ("annual", year),
+                "label": f"FY {year}",
+                "sort_key": (year, str(entry.get("end") or ""), str(entry.get("filed") or "")),
+                "year": year,
+            }
+        )
+    return candidates
 
-    if fp.startswith("Q"):
-        return ("quarterly", f"{fy}:{fp}")
-    if _is_quarterly_form(entry) and end:
-        return ("quarterly", end)
+
+def _quarterly_instant_statement_candidates(
+    entries: Sequence[Mapping[str, Any]],
+    *,
+    unit: str,
+) -> list[Mapping[str, Any]]:
+    candidates = []
+    for entry in entries:
+        quarter_key = _calendar_quarter_key(entry)
+        if quarter_key is None:
+            continue
+        year, quarter = quarter_key
+        candidates.append(
+            {
+                "value": entry.get("val"),
+                "unit": unit,
+                "end": entry.get("end"),
+                "filed": entry.get("filed"),
+                "form": entry.get("form"),
+                "frame": entry.get("frame"),
+                "key": ("quarterly", year, quarter),
+                "label": f"{year} Q{quarter}",
+                "sort_key": (year, quarter, str(entry.get("end") or ""), str(entry.get("filed") or "")),
+                "year": year,
+                "quarter": quarter,
+            }
+        )
+    return candidates
+
+
+def _quarterly_duration_statement_candidates(
+    entries: Sequence[Mapping[str, Any]],
+    *,
+    unit: str,
+) -> list[Mapping[str, Any]]:
+    grouped: dict[int, dict[str, Mapping[str, Any]]] = {}
+    for entry in entries:
+        fy = _fiscal_year(entry)
+        if fy is None:
+            continue
+        fp = str(entry.get("fp") or "").upper()
+        bucket = grouped.setdefault(fy, {})
+
+        if fp in {"Q1", "Q2", "Q3"}:
+            if _is_single_quarter_duration_entry(entry):
+                key = f"{fp}_direct"
+            else:
+                key = f"{fp}_ytd"
+        elif fp == "FY" or _is_annual_form(entry):
+            key = "FY"
+        else:
+            continue
+
+        existing = bucket.get(key)
+        if existing is None or _company_fact_sort_key(entry) > _company_fact_sort_key(existing):
+            bucket[key] = entry
+
+    candidates = []
+    for fy, bucket in grouped.items():
+        q1_entry = bucket.get("Q1_direct") or bucket.get("Q1_ytd")
+        q2_entry = bucket.get("Q2_direct")
+        if q2_entry is None and bucket.get("Q2_ytd") is not None and q1_entry is not None:
+            q2_entry = _derive_duration_entry(bucket["Q2_ytd"], q1_entry)
+
+        q3_entry = bucket.get("Q3_direct")
+        if q3_entry is None and bucket.get("Q3_ytd") is not None:
+            base = bucket.get("Q2_ytd") or q2_entry
+            if base is not None:
+                q3_entry = _derive_duration_entry(bucket["Q3_ytd"], base)
+
+        q4_entry = None
+        if bucket.get("FY") is not None and bucket.get("Q3_ytd") is not None:
+            q4_entry = _derive_duration_entry(bucket["FY"], bucket["Q3_ytd"])
+
+        for entry in (q1_entry, q2_entry, q3_entry, q4_entry):
+            if entry is None:
+                continue
+            quarter_key = _calendar_quarter_key(entry)
+            if quarter_key is None:
+                continue
+            year, quarter = quarter_key
+            candidates.append(
+                {
+                    "value": entry.get("val"),
+                    "unit": unit,
+                    "end": entry.get("end"),
+                    "filed": entry.get("filed"),
+                    "form": entry.get("form"),
+                    "frame": entry.get("frame"),
+                    "key": ("quarterly", year, quarter),
+                    "label": f"{year} Q{quarter}",
+                    "sort_key": (
+                        year,
+                        quarter,
+                        str(entry.get("end") or ""),
+                        str(entry.get("filed") or ""),
+                    ),
+                    "year": year,
+                    "quarter": quarter,
+                }
+            )
+    return candidates
+
+
+def _annual_year(entry: Mapping[str, Any]) -> int | None:
+    fp = str(entry.get("fp") or "").upper()
+    fy = entry.get("fy")
+    if fy is not None and (fp == "FY" or _is_annual_form(entry)):
+        try:
+            return int(fy)
+        except (TypeError, ValueError):
+            pass
+    if _is_annual_form(entry):
+        timestamp = _entry_end_timestamp(entry)
+        if timestamp is not None:
+            return int(timestamp.year)
     return None
 
 
-def _statement_period_label(
-    entry: Mapping[str, Any],
-    *,
-    period: str,
-) -> str:
-    fy = str(entry.get("fy") or "").strip()
-    fp = str(entry.get("fp") or "").strip()
-    end = str(entry.get("end") or "").strip()
-    if period == "annual":
-        if fy:
-            return f"FY {fy}"
-        return end
-    if fy and fp.startswith("Q"):
-        return f"{fy} {fp}"
-    return end
+def _fiscal_year(entry: Mapping[str, Any]) -> int | None:
+    fy = entry.get("fy")
+    if fy is None:
+        return None
+    try:
+        return int(fy)
+    except (TypeError, ValueError):
+        return None
 
 
-def _statement_sort_key(
-    entry: Mapping[str, Any],
+def _calendar_quarter_key(entry: Mapping[str, Any]) -> tuple[int, int] | None:
+    timestamp = _entry_end_timestamp(entry)
+    if timestamp is None:
+        return None
+    quarter = ((int(timestamp.month) - 1) // 3) + 1
+    return int(timestamp.year), quarter
+
+
+def _entry_end_timestamp(entry: Mapping[str, Any]) -> pd.Timestamp | None:
+    end = entry.get("end")
+    if not end:
+        return None
+    timestamp = pd.to_datetime(end, errors="coerce")
+    if pd.isna(timestamp):
+        return None
+    return timestamp
+
+
+def _duration_days(entry: Mapping[str, Any]) -> int | None:
+    start = entry.get("start")
+    end = entry.get("end")
+    if not start or not end:
+        return None
+    start_ts = pd.to_datetime(start, errors="coerce")
+    end_ts = pd.to_datetime(end, errors="coerce")
+    if pd.isna(start_ts) or pd.isna(end_ts):
+        return None
+    return int((end_ts - start_ts).days) + 1
+
+
+def _is_single_quarter_duration_entry(entry: Mapping[str, Any]) -> bool:
+    fp = str(entry.get("fp") or "").upper()
+    if fp == "Q1":
+        return True
+    days = _duration_days(entry)
+    if days is None:
+        return True
+    return days is not None and days <= 120
+
+
+def _derive_duration_entry(
+    total_entry: Mapping[str, Any],
+    base_entry: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    return {
+        "val": (total_entry.get("val") or 0) - (base_entry.get("val") or 0),
+        "end": total_entry.get("end"),
+        "filed": total_entry.get("filed"),
+        "form": total_entry.get("form"),
+        "frame": total_entry.get("frame"),
+    }
+
+
+def _filter_statement_periods(
+    periods: Sequence[Mapping[str, Any]],
     *,
     period: str,
-) -> tuple[str, str, str]:
-    return (
-        str(entry.get("fy") or ""),
-        str(entry.get("end") or ""),
-        str(entry.get("filed") or ""),
-    )
+    start_year: int | None,
+    end_year: int | None,
+    start_quarter: int | None,
+    end_quarter: int | None,
+) -> list[Mapping[str, Any]]:
+    if (
+        start_year is None
+        and end_year is None
+        and start_quarter is None
+        and end_quarter is None
+    ):
+        return list(periods)
+
+    filtered = []
+    for item in periods:
+        year = item.get("year")
+        quarter = item.get("quarter")
+        if start_year is not None:
+            if year is None or year < start_year:
+                continue
+            if (
+                period == "quarterly"
+                and year == start_year
+                and start_quarter is not None
+                and quarter is not None
+                and quarter < start_quarter
+            ):
+                continue
+        if end_year is not None:
+            if year is None or year > end_year:
+                continue
+            if (
+                period == "quarterly"
+                and year == end_year
+                and end_quarter is not None
+                and quarter is not None
+                and quarter > end_quarter
+            ):
+                continue
+        filtered.append(item)
+    return filtered
 
 
 def _statement_unit(

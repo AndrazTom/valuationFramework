@@ -85,6 +85,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=4,
         help="Number of periods to show.",
     )
+    statements_parser.add_argument("--start-year", type=int)
+    statements_parser.add_argument("--end-year", type=int)
+    statements_parser.add_argument("--start-quarter", type=_quarter_int)
+    statements_parser.add_argument("--end-quarter", type=_quarter_int)
     statements_parser.add_argument("--outdir", default="outputs/tables")
     return parser
 
@@ -140,9 +144,20 @@ def run_statements(
     statement: str,
     period: str,
     limit: int,
+    start_year: int | None,
+    end_year: int | None,
+    start_quarter: int | None,
+    end_quarter: int | None,
     outdir: str,
 ) -> int:
     """Fetch one generic statement table from SEC companyfacts."""
+    _validate_statement_range(
+        period=period,
+        start_year=start_year,
+        end_year=end_year,
+        start_quarter=start_quarter,
+        end_quarter=end_quarter,
+    )
     bundle = fetch_company_facts(
         identifier,
         identifier_kind=identifier_kind,
@@ -152,6 +167,10 @@ def run_statements(
         statement=statement,
         period=period,
         limit=limit,
+        start_year=start_year,
+        end_year=end_year,
+        start_quarter=start_quarter,
+        end_quarter=end_quarter,
     )
     title = f"{statement.title()} Statement {period.title()}"
     _emit_sections(
@@ -209,6 +228,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 statement=args.statement,
                 period=args.period,
                 limit=args.limit,
+                start_year=args.start_year,
+                end_year=args.end_year,
+                start_quarter=args.start_quarter,
+                end_quarter=args.end_quarter,
                 outdir=args.outdir,
             )
     except Exception as exc:
@@ -224,6 +247,34 @@ def _non_negative_int(value: str) -> int:
     if parsed < 0:
         raise argparse.ArgumentTypeError("value must be non-negative")
     return parsed
+
+
+def _quarter_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1 or parsed > 4:
+        raise argparse.ArgumentTypeError("quarter must be between 1 and 4")
+    return parsed
+
+
+def _validate_statement_range(
+    *,
+    period: str,
+    start_year: int | None,
+    end_year: int | None,
+    start_quarter: int | None,
+    end_quarter: int | None,
+) -> None:
+    if period != "quarterly" and (start_quarter is not None or end_quarter is not None):
+        raise ValueError("quarter bounds are only valid with --period quarterly")
+    if start_quarter is not None and start_year is None:
+        raise ValueError("--start-quarter requires --start-year")
+    if end_quarter is not None and end_year is None:
+        raise ValueError("--end-quarter requires --end-year")
+    if start_year is not None and end_year is not None:
+        start_boundary = (start_year, start_quarter or 1)
+        end_boundary = (end_year, end_quarter or 4)
+        if start_boundary > end_boundary:
+            raise ValueError("statement range start must be before or equal to range end")
 
 
 if __name__ == "__main__":

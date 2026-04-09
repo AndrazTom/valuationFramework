@@ -99,6 +99,12 @@ STATEMENT_DEFINITIONS = {
     "cashflow": CASH_FLOW_DEFINITIONS,
 }
 
+STATEMENT_VALUE_KINDS = {
+    "income": "duration",
+    "balance": "instant",
+    "cashflow": "duration",
+}
+
 
 def build_statement_table(
     company_facts: dict,
@@ -106,6 +112,10 @@ def build_statement_table(
     statement: str,
     period: str,
     limit: int = 4,
+    start_year: int | None = None,
+    end_year: int | None = None,
+    start_quarter: int | None = None,
+    end_quarter: int | None = None,
 ) -> pd.DataFrame:
     """Return one generic statement table from SEC companyfacts."""
     definitions = STATEMENT_DEFINITIONS[statement]
@@ -113,5 +123,10 @@ def build_statement_table(
         company_facts,
         definitions,
         period=period,
+        value_kind=STATEMENT_VALUE_KINDS[statement],
         limit=limit,
+        start_year=start_year,
+        end_year=end_year,
+        start_quarter=start_quarter,
+        end_quarter=end_quarter,
     )
