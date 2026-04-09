@@ -8,9 +8,10 @@ if [ -f ".env" ]; then
   set +a
 fi
 
-if [ ! -x ".venv/bin/valuation" ]; then
-  echo "Error: local CLI not found. Run ./setup first." >&2
+if [ ! -x ".venv/bin/python" ]; then
+  echo "Error: local environment not found. Run ./setup first." >&2
   exit 1
 fi
 
-exec ./.venv/bin/valuation "$@"
+export PYTHONPATH="src${PYTHONPATH:+:$PYTHONPATH}"
+exec ./.venv/bin/python -m valuation.cli "$@"

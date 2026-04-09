@@ -1,4 +1,9 @@
-from valuation.brk.service import BRK_B_TICKER, fetch_brk_overview, find_brk_13f_filings
+from valuation.brk.service import (
+    BRK_B_TICKER,
+    fetch_brk_liquidity,
+    fetch_brk_overview,
+    find_brk_13f_filings,
+)
 from valuation.data.providers.sec import SecCompany
 
 
@@ -32,6 +37,13 @@ def test_fetch_brk_overview_assembles_bundle():
 
     assert bundle.company.ticker == "BRK-B"
     assert bundle.market_snapshot["last_price"] == 500.0
+
+
+def test_fetch_brk_liquidity_assembles_bundle():
+    bundle = fetch_brk_liquidity(sec_client=FakeSecClient())
+
+    assert bundle.company.ticker == "BRK-B"
+    assert bundle.company_facts == {"facts": {}}
 
 
 def test_find_brk_13f_filings_finds_first_matching_form():

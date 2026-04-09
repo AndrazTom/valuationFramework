@@ -39,6 +39,51 @@ BRK_FACT_DEFINITIONS: Sequence[CompanyFactQuery] = (
     ),
 )
 
+BRK_LIQUIDITY_FACT_DEFINITIONS: Sequence[CompanyFactQuery] = (
+    CompanyFactQuery(
+        "cash_and_equivalents",
+        (
+            ("us-gaap", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"),
+            ("us-gaap", "CashAndCashEquivalentsAtCarryingValue"),
+        ),
+    ),
+    CompanyFactQuery(
+        "cash_equivalents_component",
+        (("us-gaap", "CashEquivalentsAtCarryingValue"),),
+    ),
+    CompanyFactQuery(
+        "available_for_sale_debt_amortized_cost",
+        (("us-gaap", "AvailableForSaleDebtSecuritiesAmortizedCostBasis"),),
+    ),
+    CompanyFactQuery(
+        "available_for_sale_debt_fair_value",
+        (
+            ("us-gaap", "AvailableForSaleSecuritiesDebtSecurities"),
+            ("us-gaap", "AvailableForSaleDebtSecurities"),
+        ),
+    ),
+    CompanyFactQuery(
+        "debt_maturing_within_1y",
+        (("us-gaap", "AvailableForSaleSecuritiesDebtMaturitiesNextRollingTwelveMonthsFairValue"),),
+    ),
+    CompanyFactQuery(
+        "debt_maturing_2_to_5y",
+        (("us-gaap", "AvailableForSaleSecuritiesDebtMaturitiesRollingYearTwoThroughFiveFairValue"),),
+    ),
+    CompanyFactQuery(
+        "debt_maturing_6_to_10y",
+        (("us-gaap", "AvailableForSaleSecuritiesDebtMaturitiesRollingYearSixThroughTenFairValue"),),
+    ),
+    CompanyFactQuery(
+        "debt_maturing_after_10y",
+        (("us-gaap", "AvailableForSaleSecuritiesDebtMaturitiesRollingAfterYearTenFairValue"),),
+    ),
+    CompanyFactQuery(
+        "debt_without_single_maturity",
+        (("us-gaap", "AvailableForSaleSecuritiesDebtMaturitiesWithoutSingleMaturityDateFairValue"),),
+    ),
+)
+
 CORE_BRK_FORMS = ("10-K", "10-Q", "8-K", "DEF 14A", "13F-HR", "13F-HR/A")
 
 
@@ -65,6 +110,46 @@ def build_key_facts_table(company_facts: dict) -> pd.DataFrame:
     return company_facts_to_table(company_facts, BRK_FACT_DEFINITIONS)
 
 
+def build_liquidity_bridge_table(company_facts: dict) -> pd.DataFrame:
+    """Return the raw SEC fact bridge used for Berkshire liquidity estimates."""
+    return company_facts_to_table(company_facts, BRK_LIQUIDITY_FACT_DEFINITIONS)
+
+
+def build_liquidity_summary_table(bridge: pd.DataFrame) -> pd.DataFrame:
+    """Summarize Berkshire liquidity buckets from the bridge facts."""
+    if bridge.empty:
+        return pd.DataFrame(columns=["field", "value"])
+
+    values = {
+        row["metric"]: row["value"]
+        for _, row in bridge.iterrows()
+        if pd.notna(row["value"])
+    }
+    debt_current = values.get("debt_maturing_within_1y")
+    debt_noncurrent = _sum_defined(
+        values.get("debt_maturing_2_to_5y"),
+        values.get("debt_maturing_6_to_10y"),
+        values.get("debt_maturing_after_10y"),
+        values.get("debt_without_single_maturity"),
+    )
+    all_debt_securities = values.get("available_for_sale_debt_fair_value")
+    liquidity_total = _sum_defined(
+        values.get("cash_and_equivalents"),
+        all_debt_securities,
+    )
+
+    return pd.DataFrame(
+        [
+            {"field": "cash_and_equivalents", "value": values.get("cash_and_equivalents")},
+            {"field": "cash_equivalents_component", "value": values.get("cash_equivalents_component")},
+            {"field": "debt_securities_total", "value": all_debt_securities},
+            {"field": "debt_securities_current", "value": debt_current},
+            {"field": "debt_securities_noncurrent", "value": debt_noncurrent},
+            {"field": "liquidity_total_estimate", "value": liquidity_total},
+        ]
+    )
+
+
 def filter_core_filings_table(frame: pd.DataFrame, limit: int = 10) -> pd.DataFrame:
     """Keep the filing types that matter most for Berkshire valuation work."""
     if frame.empty:
@@ -80,6 +165,10 @@ def build_13f_summary_table(
     holdings: pd.DataFrame,
 ) -> pd.DataFrame:
     """Summarize the latest Berkshire 13F at a glance."""
+    holding_count = len(holdings)
+    if not holdings.empty and {"issuer", "class_title", "cusip"}.issubset(holdings.columns):
+        holding_count = len(aggregate_13f_holdings(holdings))
+
     total_value = None
     if not holdings.empty and "value_usd" in holdings:
         total_value = holdings["value_usd"].dropna().sum()
@@ -89,7 +178,7 @@ def build_13f_summary_table(
             {"field": "filing_date", "value": filing_date},
             {"field": "accession_number", "value": accession_number},
             {"field": "information_table_filename", "value": information_table_filename},
-            {"field": "holding_count", "value": len(holdings)},
+            {"field": "holding_count", "value": holding_count},
             {"field": "reported_value_usd", "value": total_value},
         ]
     )
@@ -115,3 +204,10 @@ def build_top_holdings_table(holdings: pd.DataFrame, limit: int = 20) -> pd.Data
         lambda value: (value / total_value) if total_value else None
     )
     return trimmed.head(limit).reset_index(drop=True)
+
+
+def _sum_defined(*values):
+    defined = [value for value in values if value is not None and pd.notna(value)]
+    if not defined:
+        return None
+    return sum(defined)

@@ -1,8 +1,11 @@
 import pandas as pd
 
+from valuation.notation import B, M
 from valuation.brk.tables import (
     build_13f_summary_table,
     build_key_facts_table,
+    build_liquidity_bridge_table,
+    build_liquidity_summary_table,
     build_share_class_table,
     build_top_holdings_table,
     filter_core_filings_table,
@@ -96,8 +99,9 @@ def test_filter_core_filings_table_keeps_relevant_forms():
 def test_build_13f_summary_table():
     holdings = pd.DataFrame(
         [
-            {"issuer": "A", "value_usd": 1000},
-            {"issuer": "B", "value_usd": 2500},
+            {"issuer": "A", "class_title": "COM", "cusip": "1", "value_usd": 1000},
+            {"issuer": "A", "class_title": "COM", "cusip": "1", "value_usd": 500},
+            {"issuer": "B", "class_title": "COM", "cusip": "2", "value_usd": 2500},
         ]
     )
 
@@ -109,7 +113,7 @@ def test_build_13f_summary_table():
     )
 
     assert frame.iloc[3]["value"] == 2
-    assert frame.iloc[4]["value"] == 3500
+    assert frame.iloc[4]["value"] == 4000
 
 
 def test_build_top_holdings_table():
@@ -124,3 +128,40 @@ def test_build_top_holdings_table():
     frame = build_top_holdings_table(holdings, limit=2)
 
     assert list(frame["issuer"]) == ["A", "B"]
+
+
+def test_build_liquidity_bridge_table():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents": {
+                    "units": {
+                        "USD": [
+                            {"val": 52 * B, "filed": "2026-03-02", "end": "2025-12-31", "form": "10-K"}
+                        ]
+                    }
+                }
+            }
+        }
+    }
+
+    frame = build_liquidity_bridge_table(company_facts)
+
+    assert "cash_and_equivalents" in set(frame["metric"])
+
+
+def test_build_liquidity_summary_table():
+    bridge = pd.DataFrame(
+        [
+            {"metric": "cash_and_equivalents", "value": 52 * B},
+            {"metric": "available_for_sale_debt_fair_value", "value": 17.8 * B},
+            {"metric": "debt_maturing_within_1y", "value": 12.9 * B},
+            {"metric": "debt_maturing_2_to_5y", "value": 4 * B},
+            {"metric": "debt_maturing_6_to_10y", "value": 500 * M},
+        ]
+    )
+
+    summary = build_liquidity_summary_table(bridge)
+
+    assert summary[summary["field"] == "debt_securities_noncurrent"].iloc[0]["value"] == 4.5 * B
+    assert summary[summary["field"] == "liquidity_total_estimate"].iloc[0]["value"] == 69.8 * B

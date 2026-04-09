@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from valuation.notation import B
 from valuation.reports.tables import (
     render_markdown_table,
     render_terminal_table,
@@ -18,7 +19,7 @@ def test_render_markdown_table_for_non_empty_frame():
     frame = pd.DataFrame(
         [
             {"field": "ticker", "value": "BRK-B"},
-            {"field": "reported_value_usd", "value": 274_160_086_701},
+            {"field": "reported_value_usd", "value": 274.160086701 * B},
         ]
     )
 

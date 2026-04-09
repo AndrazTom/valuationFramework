@@ -25,6 +25,7 @@ export VALUATION_SEC_USER_AGENT="valuationFramework/0.1 your-email@example.com"
 ./vf snapshot BRK-B
 ./vf brk overview
 ./vf brk holdings
+./vf brk liquidity
 ```
 
 Use a modern interpreter for local work. The current repo baseline is Python 3.12+, and local development is standardized on Python 3.14.
@@ -38,6 +39,8 @@ For development and tests:
 
 On Python 3.14, prefer a normal install over `pip install -e .` for now.
 
+`./vf` runs the current source tree directly, so local commands do not depend on an older installed snapshot.
+
 ## Local Commands
 
 Use the repo-local launcher:
@@ -46,6 +49,7 @@ Use the repo-local launcher:
 ./vf snapshot BRK-B
 ./vf brk overview
 ./vf brk holdings --limit 10
+./vf brk liquidity
 ```
 
 If you keep `VALUATION_SEC_USER_AGENT` in a local `.env` file, `./vf` will load it automatically.
@@ -58,6 +62,20 @@ The project should default to structured outputs:
 - Markdown tables with human-readable values
 - CSV with raw machine-friendly values
 - later Parquet and API responses
+
+## Number Notation
+
+For valuation code and tests, avoid raw large literals when the value is conceptual rather than an identifier.
+
+Use `valuation.notation` instead:
+
+```python
+from valuation.notation import B, M, parse_scaled_number
+
+cash = 52.6 * B
+shares = 400 * M
+target_value = parse_scaled_number("100B")
+```
 
 ## Documentation Policy
 

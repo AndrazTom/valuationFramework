@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from numbers import Real
 from typing import Any, Optional
 
 import pandas as pd
 
-from valuation.utils.scale import BILLION, MILLION, THOUSAND, TRILLION
+from valuation.notation import format_scaled_currency, format_scaled_number
 
 
 def humanize_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -29,16 +30,12 @@ def humanize_frame(frame: pd.DataFrame) -> pd.DataFrame:
 
 def format_currency(value: Any) -> Any:
     """Format a numeric value using valuation-friendly currency notation."""
-    if not _is_number(value):
-        return value
-    return _format_scaled(value, prefix="$")
+    return format_scaled_currency(value)
 
 
 def format_quantity(value: Any) -> Any:
     """Format a numeric quantity such as shares or counts."""
-    if not _is_number(value):
-        return value
-    return _format_quantity_scaled(value)
+    return format_scaled_number(value)
 
 
 def format_percent(value: Any) -> Any:
@@ -103,6 +100,8 @@ def _infer_kind_from_field(field_name: str) -> Optional[str]:
             "high",
             "low",
             "average",
+            "debt",
+            "liquidity",
             "cash",
             "asset",
             "liabil",
@@ -120,51 +119,5 @@ def _infer_kind_from_field(field_name: str) -> Optional[str]:
     return None
 
 
-def _format_scaled(value: Any, prefix: str = "") -> str:
-    numeric = float(value)
-    negative = numeric < 0
-    absolute = abs(numeric)
-
-    if absolute >= TRILLION:
-        rendered = f"{absolute / TRILLION:.2f}T"
-    elif absolute >= BILLION:
-        rendered = f"{absolute / BILLION:.2f}B"
-    elif absolute >= MILLION:
-        rendered = f"{absolute / MILLION:.2f}M"
-    elif absolute >= THOUSAND:
-        rendered = f"{absolute / THOUSAND:.2f}K"
-    elif float(absolute).is_integer():
-        rendered = f"{absolute:,.0f}"
-    else:
-        rendered = f"{absolute:,.2f}"
-
-    rendered = rendered.rstrip("0").rstrip(".")
-    if negative:
-        return f"-{prefix}{rendered}"
-    return f"{prefix}{rendered}"
-
-
-def _format_quantity_scaled(value: Any) -> str:
-    numeric = float(value)
-    negative = numeric < 0
-    absolute = abs(numeric)
-
-    if absolute >= TRILLION:
-        rendered = f"{absolute / TRILLION:.2f}T"
-    elif absolute >= BILLION:
-        rendered = f"{absolute / BILLION:.2f}B"
-    elif absolute >= MILLION:
-        rendered = f"{absolute / MILLION:.2f}M"
-    elif float(absolute).is_integer():
-        rendered = f"{absolute:,.0f}"
-    else:
-        rendered = f"{absolute:,.2f}"
-
-    rendered = rendered.rstrip("0").rstrip(".")
-    if negative:
-        return f"-{rendered}"
-    return rendered
-
-
 def _is_number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return isinstance(value, Real) and not isinstance(value, bool)

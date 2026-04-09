@@ -23,9 +23,12 @@ cat <<'EOF'
 
 Setup complete.
 
+`./vf` runs the current source tree through the local virtualenv.
+
 Next:
   export VALUATION_SEC_USER_AGENT="valuationFramework/0.1 your-email@example.com"
   ./vf snapshot BRK-B
   ./vf brk overview
   ./vf brk holdings
+  ./vf brk liquidity
 EOF

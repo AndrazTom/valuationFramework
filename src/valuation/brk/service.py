@@ -37,6 +37,14 @@ class Brk13FBundle:
     holdings: pd.DataFrame
 
 
+@dataclass
+class BrkLiquidityBundle:
+    """Berkshire company facts bundle for liquidity analysis."""
+
+    company: SecCompany
+    company_facts: Mapping[str, Any]
+
+
 def fetch_brk_overview(
     sec_client: Optional[SecClient] = None,
     yahoo_client: Optional[YahooFinanceClient] = None,
@@ -55,6 +63,19 @@ def fetch_brk_overview(
         company=company_bundle["company"],
         market_snapshot=market_snapshot,
         submissions=company_bundle["submissions"],
+        company_facts=company_bundle["company_facts"],
+    )
+
+
+def fetch_brk_liquidity(sec_client: Optional[SecClient] = None) -> BrkLiquidityBundle:
+    """Fetch the Berkshire facts needed for the liquidity bridge."""
+    sec = sec_client or SecClient()
+    company_bundle = sec.fetch_company_bundle(
+        BRK_B_TICKER,
+        include_company_facts=True,
+    )
+    return BrkLiquidityBundle(
+        company=company_bundle["company"],
         company_facts=company_bundle["company_facts"],
     )
 

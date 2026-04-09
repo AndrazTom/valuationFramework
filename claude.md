@@ -38,6 +38,7 @@ Keep documentation short, current, and close to the code:
 - core modules should explain intent with docstrings
 - use short comments only where behavior or design assumptions are non-obvious
 - update docs whenever the repo shape, runtime baseline, or workflow changes
+- prefer reusable notation helpers for large financial values instead of scattering raw 10- to 12-digit literals through code and tests
 
 ## Cross-Chat Continuity
 
@@ -69,6 +70,7 @@ Near-term usability goal:
 - prefer a CLI-first interface over a heavier application surface
 - optimize for "learnable by using it" rather than a large framework upfront
 - preserve the option to add an API/UI later without forcing that now
+- prefer repo-local commands that run the current source tree, not stale installed snapshots
 
 ## Collaboration Mode
 
@@ -216,6 +218,11 @@ Preferred flow:
 
 The important design rule is that table generation should be easy and consistent. Models should return structured tabular outputs, not only free-form text.
 
+Notation rule:
+
+- for valuation code and tests, prefer `valuation.notation` helpers such as `B`, `M`, `T`, and `parse_scaled_number("100B")`
+- avoid raw large numeric literals unless the value is truly an identifier, accession number, CUSIP, CIK, or other exact code
+
 Interface expectations:
 
 - the core should remain a Python package with importable modules
@@ -308,6 +315,7 @@ Bootstrap status as of 2026-04-09:
 - Python package scaffold exists
 - CLI snapshot command exists
 - installed CLI command is `valuation`
+- repo-local launcher is `./vf` and should be the default way to run the current source tree
 - `yfinance` snapshot pull works on modern Python
 - SEC pull works only when `VALUATION_SEC_USER_AGENT` is explicitly set
 - snapshot tables are written to `outputs/`, which should remain gitignored
@@ -315,6 +323,7 @@ Bootstrap status as of 2026-04-09:
 - Berkshire logic now lives under `valuation.brk`
 - `valuation brk overview` produces live Berkshire overview tables
 - `valuation brk holdings` produces latest Berkshire 13F summary and top-holdings tables
+- `valuation brk liquidity` produces a Berkshire liquidity bridge from SEC company facts
 - tests cover normalization, CLI behavior, SEC ticker normalization, and Berkshire table/service helpers
 - Berkshire 13F XML parsing lives in `valuation.brk.holdings`
 - Python 3.14 editable installs are currently avoided; normal installs are the default path
@@ -334,15 +343,21 @@ Current Berkshire implementation on `brk`:
   - parsed holdings rows
   - aggregated top-holdings table by issuer/CUSIP
   - 13F summary and top-holdings tables
+- `valuation brk liquidity` fetches:
+  - Berkshire cash and debt-security-related company facts
+  - a liquidity summary table
+  - a raw bridge table with source SEC concepts
 - the current per-share convention is `BRK.B` as the primary valuation unit
 - terminal and Markdown tables now default to human-readable numeric formatting
 - CSV remains raw for machine-friendly downstream use
+- `valuation.notation` now provides reusable `K`, `M`, `B`, `T`, and `parse_scaled_number(...)` helpers for valuation code and tests
 
 Current useful commands:
 
 - `./vf snapshot BRK-B`
 - `./vf brk overview`
 - `./vf brk holdings`
+- `./vf brk liquidity`
 - `./setup`
 
 Intentionally deferred for later:
@@ -377,16 +392,19 @@ Important runtime note:
 
 - on Python 3.14, prefer normal installs like `pip install .` or `pip install '.[dev]'`
 - editable installs are currently avoided because Python 3.14 skipped the generated `__editable__...pth` file in this environment
+- `./vf` should be preferred for local usage because it executes `python -m valuation.cli` against the current `src/` tree
+- use `valuation.notation` for large financial values in code and tests instead of raw long literals
 
 Current useful commands:
 
-- `valuation snapshot BRK-B`
-- `valuation brk overview`
-- `valuation brk holdings`
+- `./vf snapshot BRK-B`
+- `./vf brk overview`
+- `./vf brk holdings`
+- `./vf brk liquidity`
 
 Most likely next implementation steps:
 
-1. Berkshire cash + Treasury bridge
+1. improve Berkshire liquidity and Treasury treatment
 2. improve public-equity portfolio outputs
 3. operating-business segment extraction
 4. first Berkshire sum-of-the-parts bridge table
@@ -415,6 +433,12 @@ Current default execution order:
 2. cash + treasuries
 3. operating businesses by segment
 4. first Berkshire sum-of-the-parts bridge
+
+Latest verified state:
+
+- `./vf brk holdings --limit 5` works live and prints human-readable values like `$61.96B` and `400M`
+- `./vf brk liquidity` works live and prints human-readable Berkshire cash and debt-security tables
+- tests last passed at `36 passed`
 
 ## Agent Guidance
 
