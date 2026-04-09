@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import re
 from typing import Any, Mapping, Optional
@@ -51,11 +52,19 @@ def fetch_company_snapshot(
         sec_client=sec,
         yahoo_client=yahoo,
     )
-    company_bundle = sec.fetch_company_bundle(
-        resolution.ticker,
-        include_company_facts=True,
-    )
-    market_snapshot = yahoo.fetch_price_snapshot(resolution.ticker)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        company_bundle_future = executor.submit(
+            sec.fetch_company_bundle,
+            resolution.ticker,
+            include_company_facts=True,
+        )
+        market_snapshot_future = executor.submit(
+            yahoo.fetch_price_snapshot,
+            resolution.ticker,
+        )
+
+        company_bundle = company_bundle_future.result()
+        market_snapshot = market_snapshot_future.result()
     return CompanySnapshotBundle(
         resolution=resolution,
         market_snapshot=market_snapshot,

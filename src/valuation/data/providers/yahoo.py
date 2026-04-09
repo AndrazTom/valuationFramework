@@ -5,9 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict
 
-import pandas as pd
-import yfinance as yf
-
 
 @dataclass(frozen=True)
 class YahooSearchQuote:
@@ -34,22 +31,28 @@ class YahooFinanceClient:
 
     def fetch_price_snapshot(self, ticker: str) -> Dict[str, Any]:
         """Return a small, stable snapshot instead of exposing raw yfinance objects."""
+        yf = _load_yfinance()
         instrument = yf.Ticker(ticker)
         info = instrument.fast_info or {}
-        history = instrument.history(period="5d", interval="1d", auto_adjust=False)
+        last_price = _coerce_float(info.get("last_price"))
         latest_close = None
         latest_date = None
-        if not history.empty:
-            latest_row = history.tail(1).iloc[0]
-            latest_close = float(latest_row.get("Close"))
-            latest_date = history.tail(1).index[0]
+
+        # `history()` is noticeably slower than `fast_info`; only pay that cost when
+        # the primary quote path does not yield a usable last price.
+        if last_price is None:
+            history = instrument.history(period="5d", interval="1d", auto_adjust=False)
+            if not history.empty:
+                latest_row = history.tail(1).iloc[0]
+                latest_close = float(latest_row.get("Close"))
+                latest_date = history.tail(1).index[0]
 
         return {
             "ticker": ticker.upper(),
             "currency": info.get("currency"),
             "exchange": info.get("exchange"),
             "quote_type": info.get("quote_type"),
-            "last_price": _coerce_float(info.get("last_price"), latest_close),
+            "last_price": last_price if last_price is not None else latest_close,
             "previous_close": _coerce_float(info.get("previous_close")),
             "open": _coerce_float(info.get("open")),
             "day_high": _coerce_float(info.get("day_high")),
@@ -71,8 +74,11 @@ class YahooFinanceClient:
         ticker: str,
         period: str = "1mo",
         interval: str = "1d",
-    ) -> pd.DataFrame:
+    ) -> "pd.DataFrame":
         """Return normalized historical OHLCV rows for downstream tables."""
+        import pandas as pd
+
+        yf = _load_yfinance()
         instrument = yf.Ticker(ticker)
         history = instrument.history(
             period=period,
@@ -90,6 +96,7 @@ class YahooFinanceClient:
 
     def search_quotes(self, query: str, max_results: int = 10) -> list[YahooSearchQuote]:
         """Return normalized Yahoo search hits for identifiers like ticker, ISIN, or CUSIP."""
+        yf = _load_yfinance()
         search = yf.Search(query, max_results=max_results)
         quotes = getattr(search, "quotes", []) or []
         results = []
@@ -118,3 +125,9 @@ def _coerce_float(primary: Any, fallback: Any = None) -> Any:
         return float(value)
     except (TypeError, ValueError):
         return value
+
+
+def _load_yfinance():
+    import yfinance as yf
+
+    return yf
