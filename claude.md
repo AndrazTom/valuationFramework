@@ -34,9 +34,58 @@ Keep documentation short, current, and close to the code:
 
 - `README.md` should stay concise and human-oriented
 - `claude.md` is the longer-lived agent bootstrap and repo contract
+- `claude.md` should be updated continuously so a new chat can resume work with clear context
 - core modules should explain intent with docstrings
 - use short comments only where behavior or design assumptions are non-obvious
 - update docs whenever the repo shape, runtime baseline, or workflow changes
+
+## Cross-Chat Continuity
+
+Treat `claude.md` as persistent working memory for future chats.
+
+Keep it current with:
+
+- current branch strategy and active branch
+- current collaboration style with the user
+- current runtime assumptions
+- what is already implemented
+- what is intentionally deferred
+- the next likely implementation steps
+- any open steering questions that future chats should know about
+
+## Collaboration Style
+
+Current working mode:
+
+- the user is steering conceptually, not doing code review at this stage
+- keep working autonomously unless a decision is genuinely blocking
+- ask short steering questions when useful, then continue on reasonable assumptions
+- use parallel sub-agents for bounded side work when it speeds up execution
+- keep `claude.md` current as the living agent contract
+
+Near-term usability goal:
+
+- keep usage relatively simple
+- prefer a CLI-first interface over a heavier application surface
+- optimize for "learnable by using it" rather than a large framework upfront
+- preserve the option to add an API/UI later without forcing that now
+
+## Collaboration Mode
+
+Current expected working style:
+
+- the user leads conceptually, not by reviewing implementation details line by line
+- the agent should keep executing for extended stretches without waiting for constant approval
+- the agent should ask focused steering questions when tradeoffs matter, but continue making progress on other safe work while waiting for answers
+- parallel exploration is encouraged when it speeds up iteration and does not create branch chaos
+- prioritize quality, maintainability, and simplicity over feature count
+
+Review expectations at this stage:
+
+- do not optimize for showing lots of code to the user
+- do not add speculative features just to make the repo look complete
+- prefer small, clean modules with obvious responsibilities
+- keep the default interface simple enough that the user can learn it later through a small CLI
 
 ## Core Rules
 
@@ -100,6 +149,7 @@ Runtime baseline:
 - local development can standardize on Python 3.14
 - avoid bending core dependency choices around old machine-specific interpreters
 - SEC access requires a proper `VALUATION_SEC_USER_AGENT` with contact information
+- on Python 3.14, prefer normal installs over editable installs for now
 
 This gives the fastest path to a working repo with no paid dependency on day one.
 
@@ -166,6 +216,13 @@ Preferred flow:
 
 The important design rule is that table generation should be easy and consistent. Models should return structured tabular outputs, not only free-form text.
 
+Interface expectations:
+
+- the core should remain a Python package with importable modules
+- the first user-facing interface should be a simple CLI
+- any later API or UI should stay thin and call the same underlying library functions
+- avoid machine-specific setup assumptions beyond a modern Python runtime
+
 ## Proposed Repo Shape
 
 This is the intended direction, not a final structure:
@@ -175,6 +232,7 @@ valuationFramework/
   claude.md
   src/
     valuation/
+      brk/
       data/
         providers/
         normalize/
@@ -194,6 +252,7 @@ valuationFramework/
 
 Suggested module intent:
 
+- `brk/`: Berkshire-specific orchestration, table shaping, and CLI hooks that should not leak into generic modules
 - `data/providers/`: source-specific fetchers such as SEC and `yfinance`
 - `data/normalize/`: convert provider-specific payloads into common tables
 - `models/`: DCF, multiples, owner-earnings, and later Berkshire sum-of-the-parts
@@ -247,9 +306,111 @@ Bootstrap status as of 2026-04-09:
 
 - Python package scaffold exists
 - CLI snapshot command exists
+- installed CLI command is `valuation`
 - `yfinance` snapshot pull works on modern Python
 - SEC pull works only when `VALUATION_SEC_USER_AGENT` is explicitly set
 - snapshot tables are written to `outputs/`, which should remain gitignored
+- active implementation branch for Berkshire work is `brk`
+- Berkshire logic now lives under `valuation.brk`
+- `valuation brk overview` produces live Berkshire overview tables
+- `valuation brk holdings` produces latest Berkshire 13F summary and top-holdings tables
+- tests cover normalization, CLI behavior, SEC ticker normalization, and Berkshire table/service helpers
+- Berkshire 13F XML parsing lives in `valuation.brk.holdings`
+- Python 3.14 editable installs are currently avoided; normal installs are the default path
+
+Current Berkshire implementation on `brk`:
+
+- Berkshire-specific CLI group: `valuation brk ...`
+- `valuation brk overview` fetches:
+  - company metadata
+  - share-class conversion table
+  - market snapshot for `BRK-B`
+  - selected SEC company facts
+  - filtered Berkshire-relevant filings
+- `valuation brk holdings` fetches:
+  - latest Berkshire 13F accession
+  - SEC information-table XML
+  - parsed holdings rows
+  - aggregated top-holdings table by issuer/CUSIP
+  - 13F summary and top-holdings tables
+- the current per-share convention is `BRK.B` as the primary valuation unit
+
+Current useful commands:
+
+- `valuation snapshot BRK-B`
+- `valuation brk overview`
+- `valuation brk holdings`
+
+Intentionally deferred for later:
+
+- public-equity portfolio decomposition
+- insurance float-specific treatment
+- private operating-business segment valuation
+- intrinsic-value bridge and bull/base/bear ranges
+
+Open steering question:
+
+- keep using `BRK.B` as the primary valuation unit unless the user asks to flip to `BRK.A`
+
+## Session Handoff
+
+Last updated: 2026-04-09
+
+Current branch:
+
+- `brk`
+
+Current working status:
+
+- `main` has the initial bootstrap commit
+- `brk` adds Berkshire-specific package structure under `valuation.brk`
+- `valuation brk overview` works live
+- `valuation brk holdings` works live
+- latest live 13F holdings output is aggregated by issuer/CUSIP for a cleaner valuation input table
+- tests were last green at `24 passed`
+
+Important runtime note:
+
+- on Python 3.14, prefer normal installs like `pip install .` or `pip install '.[dev]'`
+- editable installs are currently avoided because Python 3.14 skipped the generated `__editable__...pth` file in this environment
+
+Current useful commands:
+
+- `valuation snapshot BRK-B`
+- `valuation brk overview`
+- `valuation brk holdings`
+
+Most likely next implementation steps:
+
+1. Berkshire cash + Treasury bridge
+2. improve public-equity portfolio outputs
+3. operating-business segment extraction
+4. first Berkshire sum-of-the-parts bridge table
+
+Questions to ask the user next:
+
+1. After public holdings, should the next priority be `cash + treasuries` or `operating businesses by segment`?
+2. Keep `BRK.B` as the primary valuation unit, or switch the repo convention to `BRK.A`?
+3. For CLI output, prefer raw numeric values, rounded human-readable values, or both?
+4. Should generated tables stay as Markdown/CSV only for now, or add Parquet next?
+5. When the next checkpoint is stable, should `brk` be committed before continuing further?
+
+## Current Decisions
+
+User decisions now in force:
+
+- primary valuation unit stays `BRK.B`
+- CLI/report output should prefer human-readable values
+- Markdown/CSV remain sufficient for now; Parquet is not currently required
+- commit stable checkpoints on `brk` before continuing deeper work
+- both `cash + treasuries` and `operating businesses by segment` matter; order can be chosen pragmatically
+
+Current default execution order:
+
+1. public holdings
+2. cash + treasuries
+3. operating businesses by segment
+4. first Berkshire sum-of-the-parts bridge
 
 ## Agent Guidance
 

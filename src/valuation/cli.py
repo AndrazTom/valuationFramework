@@ -5,8 +5,9 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional, Sequence
 
+from valuation.brk.cli import register_brk_parser, run_brk_command
 from valuation.data.normalize.tables import (
     recent_filings_to_table,
     sec_company_to_table,
@@ -33,10 +34,11 @@ def build_parser() -> argparse.ArgumentParser:
     snapshot_parser.add_argument("--outdir", default="outputs/tables")
     snapshot_parser.add_argument(
         "--filings-limit",
-        type=int,
+        type=_non_negative_int,
         default=10,
         help="Number of recent SEC filings to show.",
     )
+    register_brk_parser(subparsers)
     return parser
 
 
@@ -82,9 +84,9 @@ def _named_tables(sections: Iterable[tuple[str, object]]):
         yield slug, frame
 
 
-def main() -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     try:
         if args.command == "snapshot":
@@ -93,12 +95,21 @@ def main() -> int:
                 outdir=args.outdir,
                 filings_limit=args.filings_limit,
             )
+        if args.command == "brk":
+            return run_brk_command(args)
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
     parser.error("Unknown command")
     return 2
+
+
+def _non_negative_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("value must be non-negative")
+    return parsed
 
 
 if __name__ == "__main__":

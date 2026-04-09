@@ -10,6 +10,7 @@ The repo is meant to stay general on `main`, while Berkshire Hathaway can be exp
 - Python package, not machine-specific scripts
 - table-oriented outputs
 - CLI first, API later
+- Berkshire work can advance on `brk` while `main` stays reusable
 
 ## Current Data Sources
 
@@ -19,11 +20,24 @@ The repo is meant to stay general on `main`, while Berkshire Hathaway can be exp
 ## Local Setup
 
 ```bash
-python3.14 -m venv .venv
-.venv/bin/python -m pip install -e .
+python -m venv .venv
+.venv/bin/python -m pip install .
 export VALUATION_SEC_USER_AGENT="valuationFramework/0.1 your-email@example.com"
-.venv/bin/python -m valuation.cli snapshot BRK-B
+.venv/bin/valuation snapshot BRK-B
+.venv/bin/valuation brk overview
+.venv/bin/valuation brk holdings
 ```
+
+Use a modern interpreter for local work. The current repo baseline is Python 3.12+, and local development is standardized on Python 3.14.
+
+For development and tests:
+
+```bash
+.venv/bin/python -m pip install '.[dev]'
+.venv/bin/python -m pytest -q
+```
+
+On Python 3.14, prefer a normal install over `pip install -e .` for now.
 
 ## Output Shape
 

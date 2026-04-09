@@ -32,6 +32,7 @@ class SecClient:
 
     def __init__(self, timeout: int = 20) -> None:
         self.timeout = timeout
+        self._company_tickers_cache: Optional[List[SecCompany]] = None
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -56,8 +57,25 @@ class SecClient:
             raise
         return response.json()
 
+    def _get_text(self, url: str) -> str:
+        response = self.session.get(url, timeout=self.timeout)
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            if response.status_code == 403 and using_default_sec_user_agent():
+                raise RuntimeError(
+                    "SEC rejected the default user agent. Set "
+                    "VALUATION_SEC_USER_AGENT to something like "
+                    "'valuationFramework/0.1 your-email@example.com'."
+                ) from exc
+            raise
+        return response.text
+
     def fetch_company_tickers(self) -> List[SecCompany]:
         """Load the SEC ticker-to-CIK mapping once per call."""
+        if self._company_tickers_cache is not None:
+            return self._company_tickers_cache
+
         payload = self._get_json(f"{SEC_FILES_BASE_URL}/company_tickers_exchange.json")
         fields = payload.get("fields", [])
         rows = payload.get("data", [])
@@ -75,6 +93,7 @@ class SecClient:
                     exchange=item.get("exchange"),
                 )
             )
+        self._company_tickers_cache = companies
         return companies
 
     def lookup_company(self, ticker: str) -> SecCompany:
@@ -95,11 +114,37 @@ class SecClient:
             f"{SEC_DATA_BASE_URL}/api/xbrl/companyfacts/CIK{_format_cik(cik)}.json"
         )
 
-    def fetch_company_bundle(self, ticker: str) -> Dict[str, Any]:
-        """Return the minimum SEC payload currently needed by the CLI."""
+    def fetch_filing_index(self, cik: int | str, accession_number: str) -> Mapping[str, Any]:
+        accession = accession_number.replace("-", "")
+        cik_number = int(_format_cik(cik))
+        return self._get_json(
+            f"https://www.sec.gov/Archives/edgar/data/{cik_number}/{accession}/index.json"
+        )
+
+    def fetch_filing_text(
+        self,
+        cik: int | str,
+        accession_number: str,
+        filename: str,
+    ) -> str:
+        accession = accession_number.replace("-", "")
+        cik_number = int(_format_cik(cik))
+        return self._get_text(
+            f"https://www.sec.gov/Archives/edgar/data/{cik_number}/{accession}/{filename}"
+        )
+
+    def fetch_company_bundle(
+        self,
+        ticker: str,
+        include_company_facts: bool = False,
+    ) -> Dict[str, Any]:
+        """Return a small SEC payload bundle for downstream commands."""
         company = self.lookup_company(ticker)
         submissions = self.fetch_submissions(company.cik)
-        return {
+        bundle = {
             "company": company,
             "submissions": submissions,
         }
+        if include_company_facts:
+            bundle["company_facts"] = self.fetch_company_facts(company.cik)
+        return bundle

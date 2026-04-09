@@ -46,3 +46,19 @@ def test_recent_filings_to_table_handles_missing_columns():
     assert frame.shape == (2, 5)
     assert frame.iloc[0]["primary_document"] is None
     assert frame.iloc[1]["is_inline_xbrl"] is None
+
+
+def test_recent_filings_to_table_clamps_negative_limit():
+    submissions = {
+        "filings": {
+            "recent": {
+                "accessionNumber": ["0001"],
+                "filingDate": ["2026-01-01"],
+                "form": ["10-K"],
+            }
+        }
+    }
+
+    frame = recent_filings_to_table(submissions, limit=-5)
+
+    assert frame.empty
