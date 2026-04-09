@@ -106,6 +106,8 @@ def _resolve_latest_company_fact(
     unit: Optional[str],
 ) -> Optional[Mapping[str, Any]]:
     facts = company_facts.get("facts", {})
+    best_fact = None
+    best_key = None
     for taxonomy, concept in candidates:
         units = facts.get(taxonomy, {}).get(concept, {}).get("units", {})
         if not units:
@@ -122,7 +124,7 @@ def _resolve_latest_company_fact(
             continue
 
         latest = max(values, key=_company_fact_sort_key)
-        return {
+        candidate_fact = {
             "taxonomy": taxonomy,
             "concept": concept,
             "unit": selected_unit,
@@ -132,7 +134,11 @@ def _resolve_latest_company_fact(
             "form": latest.get("form"),
             "frame": latest.get("frame"),
         }
-    return None
+        candidate_key = _company_fact_sort_key(latest)
+        if best_key is None or candidate_key > best_key:
+            best_key = candidate_key
+            best_fact = candidate_fact
+    return best_fact
 
 
 def _company_fact_sort_key(entry: Mapping[str, Any]) -> tuple[str, str]:

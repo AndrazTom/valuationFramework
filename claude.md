@@ -28,12 +28,21 @@ Possible end states are all acceptable:
 
 The project does not need a final product decision now. The immediate goal is to make it useful, inspectable, and extensible.
 
+Longer-term direction:
+
+- build a smaller personal alternative to the financial-data side of TradingView
+- emphasize statements, balance sheets, and cash flows more than charting
+- stay free-first where practical
+- treat search, watchlists, and richer UI features as later layers
+
 ## Documentation Policy
 
 Keep documentation short, current, and close to the code:
 
 - `README.md` should stay concise and human-oriented
 - `claude.md` is the longer-lived agent bootstrap and repo contract
+- additional `CLAUDE.md` files may exist in subtrees when module-specific agent context is useful
+- `CLAUDE.md` files are AI-only readmes; human-facing docs belong in `README.md`
 - `claude.md` should be updated continuously so a new chat can resume work with clear context
 - core modules should explain intent with docstrings
 - use short comments only where behavior or design assumptions are non-obvious
@@ -72,6 +81,7 @@ Near-term usability goal:
 - optimize for "learnable by using it" rather than a large framework upfront
 - preserve the option to add an API/UI later without forcing that now
 - prefer repo-local commands that run the current source tree, not stale installed snapshots
+- keep `main` usable for generic company inspection, not only as an internal library branch
 
 ## Collaboration Mode
 
@@ -243,6 +253,7 @@ Interface expectations:
 
 - the core should remain a Python package with importable modules
 - the first user-facing interface should be a simple CLI
+- the generic CLI should accept flexible identifiers when the free data path supports them
 - any later API or UI should stay thin and call the same underlying library functions
 - avoid machine-specific setup assumptions beyond a modern Python runtime
 - prefer repo-local launcher scripts when they materially simplify usage
@@ -342,6 +353,7 @@ Bootstrap status as of 2026-04-09:
 - `valuation brk holdings --live-prices` can revalue the resolved portion of Berkshire's 13F at current Yahoo prices
 - `valuation brk liquidity` produces a Berkshire liquidity bridge from SEC company facts
 - `valuation brk segments` produces a top-level Berkshire operating-segment table from the latest annual filing package
+- generic `valuation company <identifier>` resolves ticker, CIK, CUSIP, or ISIN into a baseline company view
 - tests cover normalization, CLI behavior, SEC ticker normalization, and Berkshire table/service helpers
 - Berkshire 13F XML parsing lives in `valuation.brk.holdings`
 - generic security identity helpers now live under `valuation.securities`
@@ -374,6 +386,12 @@ Current Berkshire implementation on `brk`:
   - the latest Berkshire `10-K` filing package
   - filing-report metadata from `FilingSummary.xml`
   - top-level operating segment revenues, pre-tax earnings, capex, depreciation, goodwill, and assets
+- `valuation company` fetches:
+  - identifier resolution
+  - generic SEC company metadata
+  - Yahoo market snapshot
+  - selected key SEC financial facts
+  - recent SEC filings
 - the current per-share convention is `BRK.B` as the primary valuation unit
 - terminal and Markdown tables now default to human-readable numeric formatting
 - CSV remains raw for machine-friendly downstream use
@@ -383,6 +401,8 @@ Current Berkshire implementation on `brk`:
 Current useful commands:
 
 - `./vf snapshot BRK-B`
+- `./vf company BRK-B`
+- `./vf company US0846707026`
 - `./vf brk overview`
 - `./vf brk holdings`
 - `./vf brk holdings --live-prices`
@@ -415,8 +435,9 @@ Current working status:
 - `brk` adds Berkshire-specific package structure under `valuation.brk`
 - `valuation brk overview` works live
 - `valuation brk holdings` works live
+- `valuation company` works live for ticker and ISIN input
 - latest live 13F holdings output is aggregated by issuer/CUSIP for a cleaner valuation input table
-- tests were last green at `24 passed`
+- tests were last green at `56 passed`
 
 Important runtime note:
 
@@ -471,7 +492,9 @@ Latest verified state:
 - `./vf brk holdings --live-prices --limit 10` works live and revalues 24 currently resolved Berkshire positions using Yahoo prices
 - `./vf brk liquidity` works live and prints human-readable Berkshire cash and debt-security tables
 - `./vf brk segments` works live and prints Berkshire's top-level operating-segment table from the latest `10-K`
-- tests last passed at `48 passed`
+- `./vf company BRK-B` works live as the generic company baseline
+- `./vf company US0846707026` works live via ISIN resolution
+- tests last passed at `56 passed`
 
 Chosen workflow now:
 

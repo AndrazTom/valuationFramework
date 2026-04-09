@@ -2,10 +2,31 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Dict
 
 import pandas as pd
 import yfinance as yf
+
+
+@dataclass(frozen=True)
+class YahooSearchQuote:
+    symbol: str
+    exchange: str | None = None
+    exchange_display: str | None = None
+    short_name: str | None = None
+    long_name: str | None = None
+    quote_type: str | None = None
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "symbol": self.symbol,
+            "exchange": self.exchange,
+            "exchange_display": self.exchange_display,
+            "short_name": self.short_name,
+            "long_name": self.long_name,
+            "quote_type": self.quote_type,
+        }
 
 
 class YahooFinanceClient:
@@ -66,6 +87,27 @@ class YahooFinanceClient:
         ]
         normalized["ticker"] = ticker.upper()
         return normalized
+
+    def search_quotes(self, query: str, max_results: int = 10) -> list[YahooSearchQuote]:
+        """Return normalized Yahoo search hits for identifiers like ticker, ISIN, or CUSIP."""
+        search = yf.Search(query, max_results=max_results)
+        quotes = getattr(search, "quotes", []) or []
+        results = []
+        for quote in quotes:
+            symbol = str(quote.get("symbol", "")).strip()
+            if not symbol:
+                continue
+            results.append(
+                YahooSearchQuote(
+                    symbol=symbol,
+                    exchange=quote.get("exchange"),
+                    exchange_display=quote.get("exchDisp"),
+                    short_name=quote.get("shortname"),
+                    long_name=quote.get("longname"),
+                    quote_type=quote.get("quoteType"),
+                )
+            )
+        return results
 
 
 def _coerce_float(primary: Any, fallback: Any = None) -> Any:

@@ -40,3 +40,24 @@ def test_fetch_company_tickers_uses_cache(monkeypatch):
 
     assert calls["count"] == 1
     assert first[0].ticker == second[0].ticker
+
+
+def test_lookup_company_by_cik(monkeypatch):
+    client = SecClient()
+
+    monkeypatch.setattr(
+        client,
+        "fetch_company_tickers",
+        lambda: [
+            SecCompany(
+                ticker="BRK-B",
+                cik="0001067983",
+                name="BERKSHIRE HATHAWAY INC",
+                exchange="NYSE",
+            )
+        ],
+    )
+
+    company = client.lookup_company_by_cik("1067983")
+
+    assert company.ticker == "BRK-B"

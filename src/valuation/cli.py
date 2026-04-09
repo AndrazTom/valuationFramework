@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
 from valuation.brk.cli import register_brk_parser, run_brk_command
+from valuation.company.service import fetch_company_snapshot
+from valuation.company.tables import build_key_financials_table, resolution_to_table
 from valuation.data.normalize.tables import (
     recent_filings_to_table,
     sec_company_to_table,
@@ -33,6 +35,24 @@ def build_parser() -> argparse.ArgumentParser:
     snapshot_parser.add_argument("ticker")
     snapshot_parser.add_argument("--outdir", default="outputs/tables")
     snapshot_parser.add_argument(
+        "--filings-limit",
+        type=_non_negative_int,
+        default=10,
+        help="Number of recent SEC filings to show.",
+    )
+
+    company_parser = subparsers.add_parser(
+        "company",
+        help="Fetch a generic company snapshot from ticker, CIK, CUSIP, or ISIN.",
+    )
+    company_parser.add_argument("identifier")
+    company_parser.add_argument(
+        "--identifier-kind",
+        choices=("auto", "ticker", "cik", "cusip", "isin"),
+        default="auto",
+    )
+    company_parser.add_argument("--outdir", default="outputs/tables")
+    company_parser.add_argument(
         "--filings-limit",
         type=_non_negative_int,
         default=10,
@@ -77,6 +97,31 @@ def run_snapshot(ticker: str, outdir: str, filings_limit: int) -> int:
     return 0
 
 
+def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limit: int) -> int:
+    """Fetch a generic company view from a flexible identifier input."""
+    bundle = fetch_company_snapshot(
+        identifier,
+        identifier_kind=identifier_kind,
+    )
+    sections = [
+        ("Resolution", resolution_to_table(bundle.resolution)),
+        ("Company", sec_company_to_table(bundle.resolution.sec_company)),
+        ("Market Snapshot", snapshot_to_table(bundle.market_snapshot)),
+        ("Key Financials", build_key_financials_table(bundle.company_facts)),
+        ("Recent Filings", recent_filings_to_table(bundle.submissions, limit=filings_limit)),
+    ]
+    for title, frame in sections:
+        print(f"\n## {title}\n")
+        print(render_terminal_table(frame))
+
+    output_dir = Path(outdir) / bundle.resolution.ticker.upper().replace(".", "-")
+    for name, frame in _named_tables(sections):
+        write_csv(frame, output_dir / f"{name}.csv")
+        write_markdown(frame, output_dir / f"{name}.md")
+    print(f"\nWrote tables to {output_dir}")
+    return 0
+
+
 def _named_tables(sections: Iterable[tuple[str, object]]):
     """Yield stable file-friendly names for output sections."""
     for title, frame in sections:
@@ -92,6 +137,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.command == "snapshot":
             return run_snapshot(
                 ticker=args.ticker,
+                outdir=args.outdir,
+                filings_limit=args.filings_limit,
+            )
+        if args.command == "company":
+            return run_company(
+                identifier=args.identifier,
+                identifier_kind=args.identifier_kind,
                 outdir=args.outdir,
                 filings_limit=args.filings_limit,
             )

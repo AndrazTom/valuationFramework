@@ -4,6 +4,8 @@ Backend-first stock valuation tooling.
 
 The repo is meant to stay general on `main`, while Berkshire Hathaway can be explored in a dedicated `brk` branch and later folded back into generic pieces where appropriate.
 
+Longer term, this should become a small personal alternative to the financial-data side of TradingView, with more emphasis on statements, balance sheets, and cash flows.
+
 ## Current Scope
 
 - free-first data stack
@@ -23,6 +25,8 @@ The repo is meant to stay general on `main`, while Berkshire Hathaway can be exp
 ./setup
 export VALUATION_SEC_USER_AGENT="valuationFramework/0.1 your-email@example.com"
 ./vf snapshot BRK-B
+./vf company BRK-B
+./vf company US0846707026
 ./vf brk overview
 ./vf brk holdings
 ./vf brk liquidity
@@ -49,6 +53,8 @@ Use the repo-local launcher:
 
 ```bash
 ./vf snapshot BRK-B
+./vf company BRK-B
+./vf company US0846707026
 ./vf brk overview
 ./vf brk holdings --limit 10
 ./vf brk liquidity
@@ -57,6 +63,8 @@ Use the repo-local launcher:
 ```
 
 If you keep `VALUATION_SEC_USER_AGENT` in a local `.env` file, `./vf` will load it automatically.
+
+`./vf company ...` is the generic entrypoint. It currently supports common ticker, CIK, CUSIP, and ISIN inputs through the free SEC + Yahoo path.
 
 ## Output Shape
 
@@ -78,6 +86,14 @@ Current recommended Berkshire workflow:
 3. load cash and debt-security liquidity tables
 4. load top-level operating segment tables from the latest annual filing
 5. build a Berkshire sum-of-the-parts bridge on top of those inputs
+
+For non-Berkshire use, start with:
+
+```bash
+./vf company AAPL
+./vf company 0000320193 --identifier-kind cik
+./vf company US0378331005
+```
 
 ## Number Notation
 
@@ -106,4 +122,5 @@ Treat ticker symbols as market-data aliases, not the only identity key.
 
 - `README.md` stays short and human-oriented
 - `claude.md` is the more detailed repo contract for AI agents
+- subtree `CLAUDE.md` files are AI-only notes for specific modules
 - important behavior should be documented in module docstrings and targeted comments near the code

@@ -116,6 +116,14 @@ class SecClient:
                 return company
         raise LookupError("Ticker not found in SEC company mapping: %s" % ticker)
 
+    def lookup_company_by_cik(self, cik: int | str) -> SecCompany:
+        """Resolve a CIK into the SEC's canonical company metadata."""
+        target = _format_cik(cik)
+        for company in self.fetch_company_tickers():
+            if company.cik == target:
+                return company
+        raise LookupError("CIK not found in SEC company mapping: %s" % cik)
+
     def fetch_submissions(self, cik: int | str) -> Mapping[str, Any]:
         return self._get_json(
             f"{SEC_DATA_BASE_URL}/submissions/CIK{_format_cik(cik)}.json"

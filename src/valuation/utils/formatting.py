@@ -48,6 +48,8 @@ def format_percent(value: Any) -> Any:
 def _format_value_for_display(value: Any, column: str, row: pd.Series) -> Any:
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return ""
+    if column.lower() in {"field", "metric"} and isinstance(value, str):
+        return value.replace("_", " ")
     kind = _infer_format_kind(column=column, row=row)
     if kind == "currency":
         return format_currency(value)
