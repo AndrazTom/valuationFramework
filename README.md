@@ -20,12 +20,11 @@ The repo is meant to stay general on `main`, while Berkshire Hathaway can be exp
 ## Local Setup
 
 ```bash
-python -m venv .venv
-.venv/bin/python -m pip install .
+./setup
 export VALUATION_SEC_USER_AGENT="valuationFramework/0.1 your-email@example.com"
-.venv/bin/valuation snapshot BRK-B
-.venv/bin/valuation brk overview
-.venv/bin/valuation brk holdings
+./vf snapshot BRK-B
+./vf brk overview
+./vf brk holdings
 ```
 
 Use a modern interpreter for local work. The current repo baseline is Python 3.12+, and local development is standardized on Python 3.14.
@@ -33,19 +32,31 @@ Use a modern interpreter for local work. The current repo baseline is Python 3.1
 For development and tests:
 
 ```bash
-.venv/bin/python -m pip install '.[dev]'
-.venv/bin/python -m pytest -q
+./setup
+./.venv/bin/python -m pytest -q
 ```
 
 On Python 3.14, prefer a normal install over `pip install -e .` for now.
+
+## Local Commands
+
+Use the repo-local launcher:
+
+```bash
+./vf snapshot BRK-B
+./vf brk overview
+./vf brk holdings --limit 10
+```
+
+If you keep `VALUATION_SEC_USER_AGENT` in a local `.env` file, `./vf` will load it automatically.
 
 ## Output Shape
 
 The project should default to structured outputs:
 
-- terminal tables
-- Markdown tables
-- CSV
+- terminal tables with human-readable values
+- Markdown tables with human-readable values
+- CSV with raw machine-friendly values
 - later Parquet and API responses
 
 ## Documentation Policy

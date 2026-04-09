@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -f ".env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . ./.env
+  set +a
+fi
+
+if [ ! -x ".venv/bin/valuation" ]; then
+  echo "Error: local CLI not found. Run ./setup first." >&2
+  exit 1
+fi
+
+exec ./.venv/bin/valuation "$@"

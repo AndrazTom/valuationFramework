@@ -34,7 +34,8 @@ def test_parse_13f_infotable_returns_sorted_holdings():
     frame = parse_13f_infotable(xml_text)
 
     assert list(frame["issuer"]) == ["AMERICAN EXPRESS CO", "APPLE INC"]
-    assert frame.iloc[0]["value_usd"] == 250000
+    assert frame.iloc[0]["value_usd"] == 250
+    assert frame.iloc[0]["value_thousands"] == 0
 
 
 def test_normalize_13f_holdings_adds_value_usd():

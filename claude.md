@@ -222,6 +222,7 @@ Interface expectations:
 - the first user-facing interface should be a simple CLI
 - any later API or UI should stay thin and call the same underlying library functions
 - avoid machine-specific setup assumptions beyond a modern Python runtime
+- prefer repo-local launcher scripts when they materially simplify usage
 
 ## Proposed Repo Shape
 
@@ -334,12 +335,15 @@ Current Berkshire implementation on `brk`:
   - aggregated top-holdings table by issuer/CUSIP
   - 13F summary and top-holdings tables
 - the current per-share convention is `BRK.B` as the primary valuation unit
+- terminal and Markdown tables now default to human-readable numeric formatting
+- CSV remains raw for machine-friendly downstream use
 
 Current useful commands:
 
-- `valuation snapshot BRK-B`
-- `valuation brk overview`
-- `valuation brk holdings`
+- `./vf snapshot BRK-B`
+- `./vf brk overview`
+- `./vf brk holdings`
+- `./setup`
 
 Intentionally deferred for later:
 

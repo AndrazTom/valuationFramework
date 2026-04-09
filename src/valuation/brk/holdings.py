@@ -22,7 +22,7 @@ def parse_13f_infotable(xml_text: str) -> pd.DataFrame:
             "n:shrsOrPrnAmt/n:sshPrnamt",
             INFO_TABLE_NAMESPACE,
         )
-        value_thousands = _find_text(info_table, "n:value", INFO_TABLE_NAMESPACE)
+        value_usd = _find_text(info_table, "n:value", INFO_TABLE_NAMESPACE)
         sole = _find_text(info_table, "n:votingAuthority/n:Sole", INFO_TABLE_NAMESPACE)
         shared = _find_text(
             info_table,
@@ -43,7 +43,7 @@ def parse_13f_infotable(xml_text: str) -> pd.DataFrame:
                     INFO_TABLE_NAMESPACE,
                 ),
                 "cusip": _find_text(info_table, "n:cusip", INFO_TABLE_NAMESPACE),
-                "value_thousands": _to_int(value_thousands),
+                "value_usd": _to_int(value_usd),
                 "shares_or_principal": _to_int(shares),
                 "share_type": _find_text(
                     info_table,

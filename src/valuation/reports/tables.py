@@ -7,17 +7,21 @@ from pathlib import Path
 import pandas as pd
 from tabulate import tabulate
 
+from valuation.utils.formatting import humanize_frame
+
 
 def render_terminal_table(frame: pd.DataFrame) -> str:
     if frame.empty:
         return "(no rows)"
-    return tabulate(frame.fillna(""), headers="keys", tablefmt="github", showindex=False)
+    display = humanize_frame(frame)
+    return tabulate(display.fillna(""), headers="keys", tablefmt="github", showindex=False)
 
 
 def render_markdown_table(frame: pd.DataFrame) -> str:
     if frame.empty:
         return "(no rows)\n"
-    return frame.fillna("").to_markdown(index=False) + "\n"
+    display = humanize_frame(frame)
+    return display.fillna("").to_markdown(index=False) + "\n"
 
 
 def write_csv(frame: pd.DataFrame, path: str | Path) -> None:

@@ -15,12 +15,18 @@ def test_render_terminal_table_for_empty_frame():
 
 
 def test_render_markdown_table_for_non_empty_frame():
-    frame = pd.DataFrame([{"field": "ticker", "value": "BRK-B"}])
+    frame = pd.DataFrame(
+        [
+            {"field": "ticker", "value": "BRK-B"},
+            {"field": "reported_value_usd", "value": 274_160_086_701},
+        ]
+    )
 
     rendered = render_markdown_table(frame)
 
     assert "| field" in rendered
     assert "BRK-B" in rendered
+    assert "$274.16B" in rendered
 
 
 def test_write_csv_and_markdown(tmp_path: Path):
