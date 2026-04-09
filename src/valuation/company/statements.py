@@ -12,13 +12,27 @@ INCOME_STATEMENT_DEFINITIONS = (
         (
             ("us-gaap", "Revenues"),
             ("us-gaap", "RevenueFromContractWithCustomerExcludingAssessedTax"),
+            ("us-gaap", "RevenuesNetOfInterestExpense"),
+            ("us-gaap", "InterestIncomeOperating"),
+            ("us-gaap", "InterestIncomeExpenseNet"),
+            ("us-gaap", "NoninterestIncome"),
         ),
     ),
     CompanyFactQuery("gross_profit", (("us-gaap", "GrossProfit"),)),
     CompanyFactQuery("operating_income", (("us-gaap", "OperatingIncomeLoss"),)),
     CompanyFactQuery(
         "pretax_income",
-        (("us-gaap", "IncomeBeforeTaxExpenseBenefit"),),
+        (
+            ("us-gaap", "IncomeBeforeTaxExpenseBenefit"),
+            (
+                "us-gaap",
+                "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+            ),
+            (
+                "us-gaap",
+                "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+            ),
+        ),
     ),
     CompanyFactQuery("net_income", (("us-gaap", "NetIncomeLoss"),)),
     CompanyFactQuery(

@@ -126,6 +126,14 @@ As of 2026-04-09, `main` should contain or move toward:
   - current debug behavior allows diluted shares to fall back to the FY average share count for that year-end quarter
   - current debug behavior can then backfill diluted EPS from `quarter net income / diluted shares`
   - this is a pragmatic fallback, not a perfect ground-truth replacement for a missing direct-quarter disclosure
+- Financial-institution note:
+  - banks like JPM often do not populate industrial-style quarterly income concepts in the way industrial issuers do
+  - generic revenue / pretax coverage should include bank-style concepts such as:
+    - `RevenuesNetOfInterestExpense`
+    - `InterestIncomeOperating`
+    - `InterestIncomeExpenseNet`
+    - `NoninterestIncome`
+    - `IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest`
 
 ## Quality Bar
 

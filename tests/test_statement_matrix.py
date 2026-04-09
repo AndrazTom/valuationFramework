@@ -268,6 +268,173 @@ def test_statement_matrix_berkshire_sparse_income_stays_blank_without_guessing()
     assert frame.iloc[3]["2025 Q1"] == 12.0
 
 
+def test_statement_matrix_financial_institution_uses_bank_style_revenue_and_pretax():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "Revenues": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 180.0,
+                                "fy": 2025,
+                                "fp": "FY",
+                                "start": "2025-01-01",
+                                "end": "2025-12-31",
+                                "filed": "2026-02-01",
+                                "form": "10-K",
+                            }
+                        ]
+                    }
+                },
+                "RevenuesNetOfInterestExpense": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 130.0,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2025-01-01",
+                                "end": "2025-09-30",
+                                "filed": "2025-11-01",
+                                "form": "10-Q",
+                            },
+                            {
+                                "val": 45.0,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2025-07-01",
+                                "end": "2025-09-30",
+                                "filed": "2025-11-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q3",
+                            },
+                            {
+                                "val": 85.0,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "start": "2025-01-01",
+                                "end": "2025-06-30",
+                                "filed": "2025-08-01",
+                                "form": "10-Q",
+                            },
+                            {
+                                "val": 40.0,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "start": "2025-04-01",
+                                "end": "2025-06-30",
+                                "filed": "2025-08-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q2",
+                            },
+                            {
+                                "val": 45.0,
+                                "fy": 2025,
+                                "fp": "Q1",
+                                "start": "2025-01-01",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q1",
+                            },
+                        ]
+                    }
+                },
+                "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 60.0,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2025-01-01",
+                                "end": "2025-09-30",
+                                "filed": "2025-11-01",
+                                "form": "10-Q",
+                            },
+                            {
+                                "val": 20.0,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2025-07-01",
+                                "end": "2025-09-30",
+                                "filed": "2025-11-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q3",
+                            },
+                            {
+                                "val": 38.0,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "start": "2025-01-01",
+                                "end": "2025-06-30",
+                                "filed": "2025-08-01",
+                                "form": "10-Q",
+                            },
+                            {
+                                "val": 18.0,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "start": "2025-04-01",
+                                "end": "2025-06-30",
+                                "filed": "2025-08-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q2",
+                            },
+                            {
+                                "val": 20.0,
+                                "fy": 2025,
+                                "fp": "Q1",
+                                "start": "2025-01-01",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q1",
+                            },
+                        ]
+                    }
+                },
+                "NetIncomeLoss": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 15.0,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2025-07-01",
+                                "end": "2025-09-30",
+                                "filed": "2025-11-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q3",
+                            }
+                        ]
+                    }
+                },
+            }
+        }
+    }
+
+    frame = build_statement_table(
+        company_facts,
+        statement="income",
+        period="quarterly",
+        limit=3,
+    )
+
+    revenue_row = frame[frame["metric"] == "revenue"].iloc[0]
+    pretax_row = frame[frame["metric"] == "pretax_income"].iloc[0]
+    net_income_row = frame[frame["metric"] == "net_income"].iloc[0]
+
+    assert revenue_row["2025 Q3"] == 45.0
+    assert revenue_row["2025 Q2"] == 40.0
+    assert revenue_row["2025 Q1"] == 45.0
+    assert pretax_row["2025 Q3"] == 20.0
+    assert pretax_row["2025 Q2"] == 18.0
+    assert pretax_row["2025 Q1"] == 20.0
+    assert net_income_row["2025 Q3"] == 15.0
+
+
 def test_statement_matrix_income_fills_year_end_diluted_share_and_eps_gaps():
     company_facts = {
         "facts": {
