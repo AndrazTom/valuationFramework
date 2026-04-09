@@ -10,6 +10,7 @@ Current branch priority:
 
 - `main` should be useful on its own for generic company inspection
 - `brk` is the Berkshire-specific proving ground
+- `statement-debug` is the temporary correctness-hardening branch for statement extraction
 
 Long-term direction:
 
@@ -106,6 +107,20 @@ As of 2026-04-09, `main` should contain or move toward:
 - prefer cleaner core-company filing views over noisy insider-form streams
 - keep narrowing wide tables where possible
 - add JSON output only after the table backbone is solid
+
+## Statement Debug Notes
+
+- Berkshire currently has real SEC `companyfacts` sparsity for some standard income metrics
+- As of 2026-04-09 inspection:
+  - `EarningsPerShareDiluted` is absent for BRK in SEC companyfacts
+  - `WeightedAverageNumberOfDilutedSharesOutstanding` is absent for BRK in SEC companyfacts
+  - `GrossProfit` is absent for BRK in SEC companyfacts
+  - `OperatingIncomeLoss` exists for BRK but recent-period coverage is sparse/stale
+- Blank cells for those BRK rows are currently expected from the upstream data, not necessarily extraction bugs
+- Quarterly statement logic now distinguishes:
+  - additive flows
+  - instant balance-sheet facts
+  - direct-quarter-only metrics such as diluted EPS / diluted shares
 
 ## Quality Bar
 

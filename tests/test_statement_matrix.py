@@ -1,0 +1,267 @@
+import pandas as pd
+
+from valuation.data.normalize.tables import CompanyFactQuery, company_facts_to_statement_table
+
+
+def test_statement_matrix_flow_ytd_only_derives_quarters_and_q4():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "Revenues": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 400.0,
+                                "fy": 2025,
+                                "fp": "FY",
+                                "start": "2024-10-01",
+                                "end": "2025-09-30",
+                                "filed": "2025-11-01",
+                                "form": "10-K",
+                            },
+                            {
+                                "val": 270.0,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2024-10-01",
+                                "end": "2025-06-30",
+                                "filed": "2025-08-01",
+                                "form": "10-Q",
+                            },
+                            {
+                                "val": 170.0,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "start": "2024-10-01",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                            },
+                            {
+                                "val": 80.0,
+                                "fy": 2025,
+                                "fp": "Q1",
+                                "start": "2024-10-01",
+                                "end": "2024-12-31",
+                                "filed": "2025-02-01",
+                                "form": "10-Q",
+                            },
+                        ]
+                    }
+                }
+            }
+        }
+    }
+
+    frame = company_facts_to_statement_table(
+        company_facts,
+        [CompanyFactQuery("revenue", (("us-gaap", "Revenues"),))],
+        period="quarterly",
+        value_kind="duration",
+        limit=4,
+    )
+
+    assert list(frame.columns) == ["metric", "unit", "2025 Q3", "2025 Q2", "2025 Q1", "2024 Q4"]
+    assert frame.iloc[0]["2025 Q3"] == 130.0
+    assert frame.iloc[0]["2025 Q2"] == 100.0
+    assert frame.iloc[0]["2025 Q1"] == 90.0
+    assert frame.iloc[0]["2024 Q4"] == 80.0
+
+
+def test_statement_matrix_direct_quarter_only_ratio_and_average_preserve_values():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "EarningsPerShareDiluted": {
+                    "units": {
+                        "USD/shares": [
+                            {
+                                "val": 6.2,
+                                "fy": 2025,
+                                "fp": "FY",
+                                "start": "2024-10-01",
+                                "end": "2025-09-30",
+                                "filed": "2025-11-01",
+                                "form": "10-K",
+                            },
+                            {
+                                "val": 1.7,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "start": "2025-01-01",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q1",
+                            },
+                        ]
+                    }
+                },
+                "WeightedAverageNumberOfDilutedSharesOutstanding": {
+                    "units": {
+                        "shares": [
+                            {
+                                "val": 1000.0,
+                                "fy": 2025,
+                                "fp": "FY",
+                                "start": "2024-10-01",
+                                "end": "2025-09-30",
+                                "filed": "2025-11-01",
+                                "form": "10-K",
+                            },
+                            {
+                                "val": 990.0,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "start": "2025-01-01",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q1",
+                            },
+                        ]
+                    }
+                },
+            }
+        }
+    }
+
+    eps_frame = company_facts_to_statement_table(
+        company_facts,
+        [
+            CompanyFactQuery(
+                "diluted_eps",
+                (("us-gaap", "EarningsPerShareDiluted"),),
+                unit="USD/shares",
+                quarterly_value_kind="direct",
+            )
+        ],
+        period="quarterly",
+        value_kind="duration",
+        limit=4,
+    )
+    shares_frame = company_facts_to_statement_table(
+        company_facts,
+        [
+            CompanyFactQuery(
+                "diluted_shares",
+                (("us-gaap", "WeightedAverageNumberOfDilutedSharesOutstanding"),),
+                unit="shares",
+                quarterly_value_kind="direct",
+            )
+        ],
+        period="quarterly",
+        value_kind="duration",
+        limit=4,
+    )
+
+    assert eps_frame.iloc[0]["2025 Q1"] == 1.7
+    assert shares_frame.iloc[0]["2025 Q1"] == 990.0
+    assert "2025 Q4" not in eps_frame.columns
+    assert "2025 Q4" not in shares_frame.columns
+
+
+def test_statement_matrix_instant_balance_sheet_uses_period_end_snapshots():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "Assets": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 310.0,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                            },
+                            {
+                                "val": 300.0,
+                                "fy": 2025,
+                                "fp": "Q1",
+                                "end": "2024-12-31",
+                                "filed": "2025-02-01",
+                                "form": "10-Q",
+                            },
+                        ]
+                    }
+                }
+            }
+        }
+    }
+
+    frame = company_facts_to_statement_table(
+        company_facts,
+        [CompanyFactQuery("total_assets", (("us-gaap", "Assets"),))],
+        period="quarterly",
+        value_kind="instant",
+        limit=2,
+    )
+
+    assert list(frame.columns) == ["metric", "unit", "2025 Q1", "2024 Q4"]
+    assert frame.iloc[0]["2025 Q1"] == 310.0
+    assert frame.iloc[0]["2024 Q4"] == 300.0
+
+
+def test_statement_matrix_berkshire_sparse_income_stays_blank_without_guessing():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "Revenues": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 95.0,
+                                "fy": 2025,
+                                "fp": "Q1",
+                                "start": "2025-01-01",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                            }
+                        ]
+                    }
+                },
+                "NetIncomeLoss": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 12.0,
+                                "fy": 2025,
+                                "fp": "Q1",
+                                "start": "2025-01-01",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                            }
+                        ]
+                    }
+                },
+            }
+        }
+    }
+
+    frame = company_facts_to_statement_table(
+        company_facts,
+        [
+            CompanyFactQuery("revenue", (("us-gaap", "Revenues"),)),
+            CompanyFactQuery("operating_income", (("us-gaap", "OperatingIncomeLoss"),)),
+            CompanyFactQuery(
+                "diluted_shares",
+                (("us-gaap", "WeightedAverageNumberOfDilutedSharesOutstanding"),),
+                unit="shares",
+                quarterly_value_kind="direct",
+            ),
+            CompanyFactQuery("net_income", (("us-gaap", "NetIncomeLoss"),)),
+        ],
+        period="quarterly",
+        value_kind="duration",
+        limit=1,
+    )
+
+    assert list(frame.columns) == ["metric", "unit", "2025 Q1"]
+    assert frame.iloc[0]["2025 Q1"] == 95.0
+    assert pd.isna(frame.iloc[1]["2025 Q1"])
+    assert pd.isna(frame.iloc[2]["2025 Q1"])
+    assert frame.iloc[3]["2025 Q1"] == 12.0
