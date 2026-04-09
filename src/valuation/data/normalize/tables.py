@@ -100,6 +100,35 @@ def company_facts_to_table(
     return pd.DataFrame(rows)
 
 
+def company_facts_to_statement_table(
+    company_facts: Mapping[str, Any],
+    queries: Iterable[CompanyFactQuery],
+    *,
+    period: str,
+    limit: int = 4,
+) -> pd.DataFrame:
+    """Return a statement-like table with one row per metric and one column per period."""
+    definitions = tuple(queries)
+    periods = _statement_periods(company_facts, definitions, period=period)
+    selected_periods = periods[: max(0, limit)]
+
+    rows = []
+    for query in definitions:
+        values_by_period = _statement_values_by_period(
+            company_facts,
+            query,
+            period=period,
+        )
+        row = {
+            "metric": query.metric,
+            "unit": _statement_unit(values_by_period, default=query.unit),
+        }
+        for period_info in selected_periods:
+            row[period_info["label"]] = values_by_period.get(period_info["key"], {}).get("value")
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def _resolve_latest_company_fact(
     company_facts: Mapping[str, Any],
     candidates: Sequence[tuple[str, str]],
@@ -139,6 +168,150 @@ def _resolve_latest_company_fact(
             best_key = candidate_key
             best_fact = candidate_fact
     return best_fact
+
+
+def _statement_periods(
+    company_facts: Mapping[str, Any],
+    queries: Sequence[CompanyFactQuery],
+    *,
+    period: str,
+) -> list[Mapping[str, Any]]:
+    periods_by_key: dict[tuple[str, str], Mapping[str, Any]] = {}
+    for query in queries:
+        values_by_period = _statement_values_by_period(
+            company_facts,
+            query,
+            period=period,
+        )
+        for key, value in values_by_period.items():
+            existing = periods_by_key.get(key)
+            if existing is None or value["sort_key"] > existing["sort_key"]:
+                periods_by_key[key] = value
+    return sorted(
+        periods_by_key.values(),
+        key=lambda item: item["sort_key"],
+        reverse=True,
+    )
+
+
+def _statement_values_by_period(
+    company_facts: Mapping[str, Any],
+    query: CompanyFactQuery,
+    *,
+    period: str,
+) -> dict[tuple[str, str], Mapping[str, Any]]:
+    facts = company_facts.get("facts", {})
+    selected: dict[tuple[str, str], Mapping[str, Any]] = {}
+    for candidate_index, (taxonomy, concept) in enumerate(query.candidates):
+        units = facts.get(taxonomy, {}).get(concept, {}).get("units", {})
+        if not units:
+            continue
+
+        selected_unit = query.unit
+        if selected_unit is None:
+            selected_unit = next(iter(units.keys()), None)
+        if selected_unit is None or selected_unit not in units:
+            continue
+
+        for entry in units.get(selected_unit, []):
+            period_key = _statement_period_key(entry, period=period)
+            if period_key is None:
+                continue
+            period_label = _statement_period_label(entry, period=period)
+            candidate = {
+                "value": entry.get("val"),
+                "unit": selected_unit,
+                "end": entry.get("end"),
+                "filed": entry.get("filed"),
+                "form": entry.get("form"),
+                "frame": entry.get("frame"),
+                "key": period_key,
+                "label": period_label,
+                "sort_key": _statement_sort_key(entry, period=period),
+                "candidate_priority": -candidate_index,
+            }
+            existing = selected.get(period_key)
+            if existing is None or (
+                candidate["sort_key"],
+                candidate["candidate_priority"],
+            ) > (
+                existing["sort_key"],
+                existing["candidate_priority"],
+            ):
+                selected[period_key] = candidate
+    return selected
+
+
+def _statement_period_key(
+    entry: Mapping[str, Any],
+    *,
+    period: str,
+) -> tuple[str, str] | None:
+    fy = str(entry.get("fy") or "")
+    fp = str(entry.get("fp") or "")
+    end = str(entry.get("end") or "")
+    if period == "annual":
+        if fp == "FY":
+            return ("annual", fy or end[:4])
+        if _is_annual_form(entry):
+            return ("annual", fy or end[:4])
+        return None
+
+    if fp.startswith("Q"):
+        return ("quarterly", f"{fy}:{fp}")
+    if _is_quarterly_form(entry) and end:
+        return ("quarterly", end)
+    return None
+
+
+def _statement_period_label(
+    entry: Mapping[str, Any],
+    *,
+    period: str,
+) -> str:
+    fy = str(entry.get("fy") or "").strip()
+    fp = str(entry.get("fp") or "").strip()
+    end = str(entry.get("end") or "").strip()
+    if period == "annual":
+        if fy:
+            return f"FY {fy}"
+        return end
+    if fy and fp.startswith("Q"):
+        return f"{fy} {fp}"
+    return end
+
+
+def _statement_sort_key(
+    entry: Mapping[str, Any],
+    *,
+    period: str,
+) -> tuple[str, str, str]:
+    return (
+        str(entry.get("fy") or ""),
+        str(entry.get("end") or ""),
+        str(entry.get("filed") or ""),
+    )
+
+
+def _statement_unit(
+    values_by_period: Mapping[tuple[str, str], Mapping[str, Any]],
+    *,
+    default: str | None,
+) -> str | None:
+    if values_by_period:
+        first = next(iter(values_by_period.values()))
+        return first.get("unit")
+    return default
+
+
+def _is_annual_form(entry: Mapping[str, Any]) -> bool:
+    form = str(entry.get("form") or "").upper()
+    return form in {"10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"}
+
+
+def _is_quarterly_form(entry: Mapping[str, Any]) -> bool:
+    form = str(entry.get("form") or "").upper()
+    return form in {"10-Q", "10-Q/A"}
 
 
 def _company_fact_sort_key(entry: Mapping[str, Any]) -> tuple[str, str]:

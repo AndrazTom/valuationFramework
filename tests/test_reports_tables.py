@@ -34,3 +34,19 @@ def test_write_csv_and_markdown(tmp_path: Path):
     assert csv_path.exists()
     assert md_path.exists()
     assert "BRK-B" in md_path.read_text(encoding="utf-8")
+
+
+def test_render_terminal_table_formats_statement_period_values():
+    frame = pd.DataFrame(
+        [
+            {
+                "metric": "revenue",
+                "unit": "USD",
+                "FY 2025": 1500000000.0,
+            }
+        ]
+    )
+
+    rendered = render_terminal_table(frame)
+
+    assert "1.5B" in rendered

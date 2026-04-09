@@ -1,0 +1,117 @@
+"""Generic financial statement definitions and table builders."""
+
+from __future__ import annotations
+
+import pandas as pd
+
+from valuation.data.normalize.tables import CompanyFactQuery, company_facts_to_statement_table
+
+INCOME_STATEMENT_DEFINITIONS = (
+    CompanyFactQuery(
+        "revenue",
+        (
+            ("us-gaap", "Revenues"),
+            ("us-gaap", "RevenueFromContractWithCustomerExcludingAssessedTax"),
+        ),
+    ),
+    CompanyFactQuery("gross_profit", (("us-gaap", "GrossProfit"),)),
+    CompanyFactQuery("operating_income", (("us-gaap", "OperatingIncomeLoss"),)),
+    CompanyFactQuery(
+        "pretax_income",
+        (("us-gaap", "IncomeBeforeTaxExpenseBenefit"),),
+    ),
+    CompanyFactQuery("net_income", (("us-gaap", "NetIncomeLoss"),)),
+    CompanyFactQuery(
+        "diluted_eps",
+        (("us-gaap", "EarningsPerShareDiluted"),),
+        unit="USD/shares",
+    ),
+    CompanyFactQuery(
+        "diluted_shares",
+        (("us-gaap", "WeightedAverageNumberOfDilutedSharesOutstanding"),),
+        unit="shares",
+    ),
+)
+
+BALANCE_SHEET_DEFINITIONS = (
+    CompanyFactQuery(
+        "cash_and_equivalents",
+        (
+            ("us-gaap", "CashAndCashEquivalentsAtCarryingValue"),
+            ("us-gaap", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"),
+        ),
+    ),
+    CompanyFactQuery(
+        "short_term_investments",
+        (
+            ("us-gaap", "AvailableForSaleSecuritiesCurrent"),
+            ("us-gaap", "MarketableSecuritiesCurrent"),
+            ("us-gaap", "ShortTermInvestments"),
+        ),
+    ),
+    CompanyFactQuery("current_assets", (("us-gaap", "AssetsCurrent"),)),
+    CompanyFactQuery("total_assets", (("us-gaap", "Assets"),)),
+    CompanyFactQuery("current_liabilities", (("us-gaap", "LiabilitiesCurrent"),)),
+    CompanyFactQuery(
+        "long_term_debt",
+        (
+            ("us-gaap", "LongTermDebtAndFinanceLeaseObligations"),
+            ("us-gaap", "LongTermDebtNoncurrent"),
+            ("us-gaap", "LongTermDebt"),
+        ),
+    ),
+    CompanyFactQuery("total_liabilities", (("us-gaap", "Liabilities"),)),
+    CompanyFactQuery("stockholders_equity", (("us-gaap", "StockholdersEquity"),)),
+)
+
+CASH_FLOW_DEFINITIONS = (
+    CompanyFactQuery(
+        "operating_cash_flow",
+        (("us-gaap", "NetCashProvidedByUsedInOperatingActivities"),),
+    ),
+    CompanyFactQuery(
+        "capex",
+        (("us-gaap", "PaymentsToAcquirePropertyPlantAndEquipment"),),
+    ),
+    CompanyFactQuery(
+        "investing_cash_flow",
+        (("us-gaap", "NetCashProvidedByUsedInInvestingActivities"),),
+    ),
+    CompanyFactQuery(
+        "financing_cash_flow",
+        (("us-gaap", "NetCashProvidedByUsedInFinancingActivities"),),
+    ),
+    CompanyFactQuery(
+        "change_in_cash",
+        (
+            (
+                "us-gaap",
+                "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect",
+            ),
+            ("us-gaap", "CashAndCashEquivalentsPeriodIncreaseDecrease"),
+        ),
+    ),
+)
+
+STATEMENT_DEFINITIONS = {
+    "income": INCOME_STATEMENT_DEFINITIONS,
+    "balance": BALANCE_SHEET_DEFINITIONS,
+    "cashflow": CASH_FLOW_DEFINITIONS,
+}
+
+
+def build_statement_table(
+    company_facts: dict,
+    *,
+    statement: str,
+    period: str,
+    limit: int = 4,
+) -> pd.DataFrame:
+    """Return one generic statement table from SEC companyfacts."""
+    definitions = STATEMENT_DEFINITIONS[statement]
+    return company_facts_to_statement_table(
+        company_facts,
+        definitions,
+        period=period,
+        limit=limit,
+    )

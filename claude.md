@@ -79,6 +79,11 @@ As of 2026-04-09, `main` should contain or move toward:
 - ticker / CIK / CUSIP / ISIN resolution through SEC + Yahoo
 - compact terminal tables with shorter headers
 - selected generic SEC financial facts
+- generic statements command backed by SEC companyfacts:
+  - income
+  - balance
+  - cashflow
+  - annual and quarterly
 
 ## Current Commands
 
@@ -86,6 +91,15 @@ As of 2026-04-09, `main` should contain or move toward:
 - `./vf company BRK-B`
 - `./vf company US0846707026`
 - `./vf snapshot BRK-B`
+- `./vf statements AAPL --statement income --period annual`
+- `./vf statements AAPL --statement balance --period quarterly`
+
+## Next Main Priorities
+
+- improve statement concept coverage and defaults
+- prefer cleaner core-company filing views over noisy insider-form streams
+- keep narrowing wide tables where possible
+- add JSON output only after the table backbone is solid
 
 ## Quality Bar
 

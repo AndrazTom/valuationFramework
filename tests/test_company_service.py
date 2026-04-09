@@ -1,4 +1,8 @@
-from valuation.company.service import fetch_company_snapshot, resolve_company_identifier
+from valuation.company.service import (
+    fetch_company_facts,
+    fetch_company_snapshot,
+    resolve_company_identifier,
+)
 from valuation.data.providers.sec import SecCompany
 from valuation.data.providers.yahoo import YahooSearchQuote
 
@@ -34,6 +38,11 @@ class FakeSecClient:
         if include_company_facts:
             bundle["company_facts"] = {"facts": {}}
         return bundle
+
+    def fetch_company_facts(self, cik):
+        if str(cik).zfill(10) in {"0001067983", "0000320193"}:
+            return {"facts": {}}
+        raise LookupError(cik)
 
 
 class FakeYahooClient:
@@ -99,3 +108,14 @@ def test_fetch_company_snapshot():
 
     assert bundle.resolution.ticker == "BRK-B"
     assert bundle.market_snapshot["last_price"] == 500.0
+
+
+def test_fetch_company_facts():
+    bundle = fetch_company_facts(
+        "BRK-B",
+        sec_client=FakeSecClient(),
+        yahoo_client=FakeYahooClient(),
+    )
+
+    assert bundle.resolution.ticker == "BRK-B"
+    assert bundle.company_facts == {"facts": {}}

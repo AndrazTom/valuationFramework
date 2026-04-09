@@ -50,6 +50,8 @@ Examples:
 ./vf company AAPL
 ./vf company 0000320193 --identifier-kind cik
 ./vf company US0378331005
+./vf statements AAPL --statement income --period annual
+./vf statements AAPL --statement balance --period quarterly
 ```
 
 ## Output Shape

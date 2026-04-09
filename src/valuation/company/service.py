@@ -36,6 +36,14 @@ class CompanySnapshotBundle:
     company_facts: Mapping[str, Any]
 
 
+@dataclass(frozen=True)
+class CompanyFactsBundle:
+    """Resolved company identity plus SEC companyfacts for statement workflows."""
+
+    resolution: CompanyResolution
+    company_facts: Mapping[str, Any]
+
+
 def fetch_company_snapshot(
     identifier: str,
     *,
@@ -70,6 +78,28 @@ def fetch_company_snapshot(
         market_snapshot=market_snapshot,
         submissions=company_bundle["submissions"],
         company_facts=company_bundle["company_facts"],
+    )
+
+
+def fetch_company_facts(
+    identifier: str,
+    *,
+    identifier_kind: str = "auto",
+    sec_client: Optional[SecClient] = None,
+    yahoo_client: Optional[YahooFinanceClient] = None,
+) -> CompanyFactsBundle:
+    """Resolve a company identifier and fetch only SEC companyfacts."""
+    sec = sec_client or SecClient()
+    yahoo = yahoo_client or YahooFinanceClient()
+    resolution = resolve_company_identifier(
+        identifier,
+        identifier_kind=identifier_kind,
+        sec_client=sec,
+        yahoo_client=yahoo,
+    )
+    return CompanyFactsBundle(
+        resolution=resolution,
+        company_facts=sec.fetch_company_facts(resolution.sec_company.cik),
     )
 
 

@@ -3,6 +3,7 @@ import pandas as pd
 from valuation.data.normalize.tables import (
     CompanyFactQuery,
     company_facts_to_table,
+    company_facts_to_statement_table,
     recent_filings_to_table,
     sec_company_to_table,
     snapshot_to_table,
@@ -113,3 +114,103 @@ def test_company_facts_to_table_picks_latest_across_candidate_concepts():
 
     assert frame.iloc[0]["value"] == 84.0
     assert frame.iloc[0]["concept"] == "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
+
+
+def test_company_facts_to_statement_table_builds_annual_period_columns():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "Revenues": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 100.0,
+                                "fy": 2024,
+                                "fp": "FY",
+                                "end": "2024-12-31",
+                                "filed": "2025-02-01",
+                                "form": "10-K",
+                            },
+                            {
+                                "val": 90.0,
+                                "fy": 2023,
+                                "fp": "FY",
+                                "end": "2023-12-31",
+                                "filed": "2024-02-01",
+                                "form": "10-K",
+                            },
+                        ]
+                    }
+                },
+                "NetIncomeLoss": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 25.0,
+                                "fy": 2024,
+                                "fp": "FY",
+                                "end": "2024-12-31",
+                                "filed": "2025-02-01",
+                                "form": "10-K",
+                            }
+                        ]
+                    }
+                },
+            }
+        }
+    }
+
+    frame = company_facts_to_statement_table(
+        company_facts,
+        [
+            CompanyFactQuery("revenue", (("us-gaap", "Revenues"),)),
+            CompanyFactQuery("net_income", (("us-gaap", "NetIncomeLoss"),)),
+        ],
+        period="annual",
+        limit=2,
+    )
+
+    assert list(frame.columns) == ["metric", "unit", "FY 2024", "FY 2023"]
+    assert frame.iloc[0]["FY 2024"] == 100.0
+    assert frame.iloc[1]["FY 2024"] == 25.0
+
+
+def test_company_facts_to_statement_table_builds_quarterly_labels():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "NetIncomeLoss": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 7.0,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "end": "2025-06-30",
+                                "filed": "2025-08-01",
+                                "form": "10-Q",
+                            },
+                            {
+                                "val": 6.0,
+                                "fy": 2025,
+                                "fp": "Q1",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                            },
+                        ]
+                    }
+                }
+            }
+        }
+    }
+
+    frame = company_facts_to_statement_table(
+        company_facts,
+        [CompanyFactQuery("net_income", (("us-gaap", "NetIncomeLoss"),))],
+        period="quarterly",
+        limit=2,
+    )
+
+    assert list(frame.columns) == ["metric", "unit", "2025 Q2", "2025 Q1"]
+    assert frame.iloc[0]["2025 Q2"] == 7.0
