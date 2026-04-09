@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from io import StringIO
 from typing import Any, Dict, List, Mapping, Optional
 
+import pandas as pd
 import requests
+import xml.etree.ElementTree as ET
 
 from valuation.config import get_sec_user_agent, using_default_sec_user_agent
 
@@ -25,6 +28,15 @@ class SecCompany:
     cik: str
     name: str
     exchange: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class SecFilingReport:
+    html_file_name: str
+    short_name: str
+    long_name: str
+    menu_category: Optional[str] = None
+    position: Optional[int] = None
 
 
 class SecClient:
@@ -132,6 +144,44 @@ class SecClient:
         return self._get_text(
             f"https://www.sec.gov/Archives/edgar/data/{cik_number}/{accession}/{filename}"
         )
+
+    def fetch_filing_summary_reports(
+        self,
+        cik: int | str,
+        accession_number: str,
+    ) -> List[SecFilingReport]:
+        """Return report metadata from an SEC filing's FilingSummary.xml."""
+        text = self.fetch_filing_text(cik, accession_number, "FilingSummary.xml")
+        root = ET.fromstring(text)
+        reports: List[SecFilingReport] = []
+        for report in root.findall(".//Report"):
+            html_file_name = (report.findtext("HtmlFileName") or "").strip()
+            if not html_file_name:
+                continue
+            position_text = (report.findtext("Position") or "").strip()
+            reports.append(
+                SecFilingReport(
+                    html_file_name=html_file_name,
+                    short_name=(report.findtext("ShortName") or "").strip(),
+                    long_name=(report.findtext("LongName") or "").strip(),
+                    menu_category=(report.findtext("MenuCategory") or "").strip() or None,
+                    position=int(position_text) if position_text.isdigit() else None,
+                )
+            )
+        return reports
+
+    def fetch_report_table(
+        self,
+        cik: int | str,
+        accession_number: str,
+        filename: str,
+    ) -> pd.DataFrame:
+        """Read the first HTML table from a filing report page."""
+        text = self.fetch_filing_text(cik, accession_number, filename)
+        tables = pd.read_html(StringIO(text))
+        if not tables:
+            return pd.DataFrame()
+        return tables[0]
 
     def fetch_company_bundle(
         self,

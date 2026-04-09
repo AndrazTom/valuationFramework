@@ -26,6 +26,7 @@ export VALUATION_SEC_USER_AGENT="valuationFramework/0.1 your-email@example.com"
 ./vf brk overview
 ./vf brk holdings
 ./vf brk liquidity
+./vf brk segments
 ./vf brk holdings --live-prices --limit 10
 ```
 
@@ -51,6 +52,7 @@ Use the repo-local launcher:
 ./vf brk overview
 ./vf brk holdings --limit 10
 ./vf brk liquidity
+./vf brk segments
 ./vf brk holdings --live-prices --limit 10
 ```
 
@@ -66,6 +68,16 @@ The project should default to structured outputs:
 - later Parquet and API responses
 
 Raw numeric precision stays in the backend tables. Human-readable notation is applied only when rendering terminal or Markdown output.
+
+## Current Berkshire Workflow
+
+Current recommended Berkshire workflow:
+
+1. load latest reported public holdings
+2. optionally revalue resolved holdings at current market prices
+3. load cash and debt-security liquidity tables
+4. load top-level operating segment tables from the latest annual filing
+5. build a Berkshire sum-of-the-parts bridge on top of those inputs
 
 ## Number Notation
 

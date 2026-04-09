@@ -1,7 +1,11 @@
+import pandas as pd
+
 from valuation.brk.service import (
     BRK_B_TICKER,
+    fetch_brk_segments,
     fetch_brk_liquidity,
     fetch_brk_overview,
+    find_recent_filings,
     find_brk_13f_filings,
 )
 from valuation.data.providers.sec import SecCompany
@@ -10,17 +14,66 @@ from valuation.data.providers.sec import SecCompany
 class FakeSecClient:
     def fetch_company_bundle(self, ticker, include_company_facts=False):
         assert ticker == BRK_B_TICKER
-        assert include_company_facts is True
-        return {
+        bundle = {
             "company": SecCompany(
                 ticker="BRK-B",
                 cik="0001067983",
                 name="BERKSHIRE HATHAWAY INC",
                 exchange="NYSE",
             ),
-            "submissions": {"filings": {"recent": {}}},
-            "company_facts": {"facts": {}},
+            "submissions": {
+                "filings": {
+                    "recent": {
+                        "form": ["10-K", "13F-HR"],
+                        "filingDate": ["2026-03-02", "2026-02-14"],
+                        "accessionNumber": ["0001", "0002"],
+                        "primaryDocument": ["brka.htm", "13f.htm"],
+                    }
+                }
+            },
         }
+        if include_company_facts:
+            bundle["company_facts"] = {"facts": {}}
+        return bundle
+
+    def fetch_filing_summary_reports(self, cik, accession_number):
+        assert cik == "0001067983"
+        assert accession_number == "0001"
+        from valuation.data.providers.sec import SecFilingReport
+
+        return [
+            SecFilingReport(
+                html_file_name="R136.htm",
+                short_name="Business segment data - Earnings data (Detail)",
+                long_name="Business segment data - Earnings data (Detail)",
+            ),
+            SecFilingReport(
+                html_file_name="R137.htm",
+                short_name="Business segment data - Reconciliations of Revenues and Earnings before income taxes (Detail)",
+                long_name="Business segment data - Reconciliations of Revenues and Earnings before income taxes (Detail)",
+            ),
+            SecFilingReport(
+                html_file_name="R138.htm",
+                short_name="Business segment data - Additional tabular disclosures (Detail)",
+                long_name="Business segment data - Additional tabular disclosures (Detail)",
+            ),
+        ]
+
+    def fetch_report_table(self, cik, accession_number, filename):
+        assert cik == "0001067983"
+        assert accession_number == "0001"
+        return pd.DataFrame(
+            [
+                ["Operating Businesses [Member] | BNSF [Member]", None, None, None],
+                ["Revenues", "23", "24", "25"],
+            ],
+            columns=[
+                ("stub", "label"),
+                ("12 Months Ended", "Dec. 31, 2023"),
+                ("12 Months Ended", "Dec. 31, 2024"),
+                ("12 Months Ended", "Dec. 31, 2025"),
+            ],
+        )
 
 
 class FakeYahooClient:
@@ -61,3 +114,30 @@ def test_find_brk_13f_filings_finds_first_matching_form():
 
     assert metadata[0]["filing_date"] == "2026-02-14"
     assert metadata[0]["accession_number"] == "0002"
+
+
+def test_find_recent_filings_finds_first_matching_form():
+    submissions = {
+        "filings": {
+            "recent": {
+                "form": ["8-K", "10-K", "10-Q"],
+                "filingDate": ["2026-01-01", "2026-02-14", "2026-02-15"],
+                "accessionNumber": ["0001", "0002", "0003"],
+                "primaryDocument": ["a.htm", "b.htm", "c.htm"],
+            }
+        }
+    }
+
+    metadata = find_recent_filings(submissions, forms=("10-K",), limit=1)
+
+    assert metadata[0]["filing_date"] == "2026-02-14"
+    assert metadata[0]["accession_number"] == "0002"
+
+
+def test_fetch_brk_segments_assembles_bundle():
+    fake = FakeSecClient()
+    bundle = fetch_brk_segments(sec_client=fake)
+
+    assert bundle.company.ticker == "BRK-B"
+    assert bundle.filing_date == "2026-03-02"
+    assert bundle.accession_number == "0001"

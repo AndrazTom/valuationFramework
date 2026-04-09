@@ -7,6 +7,7 @@ from typing import Sequence
 import pandas as pd
 
 from valuation.brk.service import BRK_A_TICKER, BRK_A_TO_B_CONVERSION, BRK_B_TICKER
+from valuation.brk.segments import build_top_level_operating_segments_table
 from valuation.data.normalize.tables import CompanyFactQuery, company_facts_to_table
 from valuation.brk.holdings import aggregate_13f_holdings
 from valuation.securities.pricing import enrich_holdings_with_market_prices
@@ -281,6 +282,21 @@ def build_13f_live_price_summary_table(
             {"field": "latest_price_date", "value": latest_price_date},
         ]
     )
+
+
+def build_segment_report_summary_table(filing_date: str, accession_number: str) -> pd.DataFrame:
+    """Summarize the segment filing used for Berkshire operating tables."""
+    return pd.DataFrame(
+        [
+            {"field": "filing_date", "value": filing_date},
+            {"field": "accession_number", "value": accession_number},
+        ]
+    )
+
+
+def build_top_level_operating_segments_summary_table(report_set) -> pd.DataFrame:
+    """Return Berkshire's top-level operating segments for the latest annual filing."""
+    return build_top_level_operating_segments_table(report_set)
 
 
 def _sum_defined(*values):

@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 from typing import Iterable
 
-from valuation.brk.service import fetch_brk_liquidity, fetch_brk_overview
+from valuation.brk.service import fetch_brk_liquidity, fetch_brk_overview, fetch_brk_segments
 from valuation.brk.service import fetch_latest_brk_13f
 from valuation.brk.reference import build_brk_security_reference
 from valuation.brk.tables import (
@@ -15,7 +15,9 @@ from valuation.brk.tables import (
     build_key_facts_table,
     build_liquidity_bridge_table,
     build_liquidity_summary_table,
+    build_segment_report_summary_table,
     build_share_class_table,
+    build_top_level_operating_segments_summary_table,
     build_top_holdings_live_table,
     build_top_holdings_table,
     filter_core_filings_table,
@@ -71,6 +73,12 @@ def register_brk_parser(subparsers) -> None:
     )
     liquidity_parser.add_argument("--outdir", default="outputs/tables")
 
+    segments_parser = brk_subparsers.add_parser(
+        "segments",
+        help="Fetch Berkshire operating-segment tables from the latest annual filing.",
+    )
+    segments_parser.add_argument("--outdir", default="outputs/tables")
+
 
 def run_brk_command(args: argparse.Namespace) -> int:
     """Dispatch Berkshire subcommands."""
@@ -87,6 +95,8 @@ def run_brk_command(args: argparse.Namespace) -> int:
         )
     if args.brk_command == "liquidity":
         return run_brk_liquidity(outdir=args.outdir)
+    if args.brk_command == "segments":
+        return run_brk_segments(outdir=args.outdir)
     raise ValueError(f"Unknown Berkshire command: {args.brk_command}")
 
 
@@ -158,6 +168,23 @@ def run_brk_liquidity(outdir: str) -> int:
         ("Liquidity Bridge", bridge),
     ]
     _emit_sections(sections, Path(outdir) / "BRK_LIQUIDITY")
+    return 0
+
+
+def run_brk_segments(outdir: str) -> int:
+    """Build Berkshire operating-segment tables from the latest annual filing."""
+    bundle = fetch_brk_segments()
+    sections = [
+        (
+            "Segment Filing",
+            build_segment_report_summary_table(bundle.filing_date, bundle.accession_number),
+        ),
+        (
+            "Top-Level Operating Segments",
+            build_top_level_operating_segments_summary_table(bundle.reports),
+        ),
+    ]
+    _emit_sections(sections, Path(outdir) / "BRK_SEGMENTS")
     return 0
 
 

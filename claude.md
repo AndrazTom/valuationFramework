@@ -53,6 +53,7 @@ Keep it current with:
 - what is intentionally deferred
 - the next likely implementation steps
 - any open steering questions that future chats should know about
+- GitHub publication state and remote repo when one exists
 
 ## Collaboration Style
 
@@ -340,6 +341,7 @@ Bootstrap status as of 2026-04-09:
 - `valuation brk holdings` produces latest Berkshire 13F summary and top-holdings tables
 - `valuation brk holdings --live-prices` can revalue the resolved portion of Berkshire's 13F at current Yahoo prices
 - `valuation brk liquidity` produces a Berkshire liquidity bridge from SEC company facts
+- `valuation brk segments` produces a top-level Berkshire operating-segment table from the latest annual filing package
 - tests cover normalization, CLI behavior, SEC ticker normalization, and Berkshire table/service helpers
 - Berkshire 13F XML parsing lives in `valuation.brk.holdings`
 - generic security identity helpers now live under `valuation.securities`
@@ -368,6 +370,10 @@ Current Berkshire implementation on `brk`:
   - Berkshire cash and debt-security-related company facts
   - a liquidity summary table
   - a raw bridge table with source SEC concepts
+- `valuation brk segments` fetches:
+  - the latest Berkshire `10-K` filing package
+  - filing-report metadata from `FilingSummary.xml`
+  - top-level operating segment revenues, pre-tax earnings, capex, depreciation, goodwill, and assets
 - the current per-share convention is `BRK.B` as the primary valuation unit
 - terminal and Markdown tables now default to human-readable numeric formatting
 - CSV remains raw for machine-friendly downstream use
@@ -381,6 +387,7 @@ Current useful commands:
 - `./vf brk holdings`
 - `./vf brk holdings --live-prices`
 - `./vf brk liquidity`
+- `./vf brk segments`
 - `./setup`
 
 Intentionally deferred for later:
@@ -417,6 +424,7 @@ Important runtime note:
 - editable installs are currently avoided because Python 3.14 skipped the generated `__editable__...pth` file in this environment
 - `./vf` should be preferred for local usage because it executes `python -m valuation.cli` against the current `src/` tree
 - use `valuation.notation` for large financial values in code and tests instead of raw long literals
+- the GitHub remote now exists at `https://github.com/AndrazTom/valuationFramework` and is intended to stay private unless the user explicitly changes that
 
 Current useful commands:
 
@@ -428,9 +436,9 @@ Current useful commands:
 Most likely next implementation steps:
 
 1. improve Berkshire liquidity and Treasury treatment
-2. improve public-equity portfolio outputs
-3. operating-business segment extraction
-4. first Berkshire sum-of-the-parts bridge table
+2. improve public-equity portfolio outputs and live-price resolution coverage
+3. first Berkshire sum-of-the-parts bridge table
+4. selectively extract reusable generic layers back toward `main`
 
 Questions to ask the user next:
 
@@ -462,7 +470,16 @@ Latest verified state:
 - `./vf brk holdings --limit 5` works live and prints human-readable values like `$61.96B` and `400M`
 - `./vf brk holdings --live-prices --limit 10` works live and revalues 24 currently resolved Berkshire positions using Yahoo prices
 - `./vf brk liquidity` works live and prints human-readable Berkshire cash and debt-security tables
-- tests last passed at `44 passed`
+- `./vf brk segments` works live and prints Berkshire's top-level operating-segment table from the latest `10-K`
+- tests last passed at `48 passed`
+
+Chosen workflow now:
+
+1. build reusable backend primitives first
+2. prove them on Berkshire-specific commands in `brk`
+3. keep exact values in backend tables and humanized values at the render layer
+4. use canonical `security_id` for joins and treat ticker as a quote alias
+5. publish organized checkpoints to the private GitHub repo as `main` plus `brk`
 
 ## Agent Guidance
 

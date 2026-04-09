@@ -8,6 +8,8 @@ from typing import Any, Mapping, Optional
 import pandas as pd
 
 from valuation.brk.holdings import parse_13f_infotable
+from valuation.brk.segments import BrkSegmentReportSet, SEGMENT_REPORT_LABELS
+from valuation.brk.segments import normalize_segment_report_table
 from valuation.data.providers.sec import SecClient, SecCompany
 from valuation.data.providers.yahoo import YahooFinanceClient
 
@@ -43,6 +45,16 @@ class BrkLiquidityBundle:
 
     company: SecCompany
     company_facts: Mapping[str, Any]
+
+
+@dataclass
+class BrkSegmentsBundle:
+    """Berkshire segment report bundle from the latest annual filing."""
+
+    company: SecCompany
+    filing_date: str
+    accession_number: str
+    reports: BrkSegmentReportSet
 
 
 def fetch_brk_overview(
@@ -109,28 +121,72 @@ def fetch_latest_brk_13f(sec_client: Optional[SecClient] = None) -> Brk13FBundle
     )
 
 
-def find_brk_13f_filings(
+def fetch_brk_segments(sec_client: Optional[SecClient] = None) -> BrkSegmentsBundle:
+    """Fetch Berkshire's latest segment-report tables from the annual filing package."""
+    sec = sec_client or SecClient()
+    company_bundle = sec.fetch_company_bundle(BRK_B_TICKER)
+    company = company_bundle["company"]
+    submissions = company_bundle["submissions"]
+    filing = find_recent_filings(submissions, forms=("10-K",), limit=1)[0]
+    reports = sec.fetch_filing_summary_reports(company.cik, filing["accession_number"])
+    report_map = {report.short_name: report for report in reports}
+
+    def load_report(short_name: str) -> pd.DataFrame:
+        report = report_map[short_name]
+        frame = sec.fetch_report_table(
+            company.cik,
+            filing["accession_number"],
+            report.html_file_name,
+        )
+        return normalize_segment_report_table(frame, report_name=short_name)
+
+    report_set = BrkSegmentReportSet(
+        filing_date=filing["filing_date"],
+        accession_number=filing["accession_number"],
+        earnings_detail=load_report(SEGMENT_REPORT_LABELS["earnings"]),
+        reconciliation_detail=load_report(SEGMENT_REPORT_LABELS["reconciliations"]),
+        additional_detail=load_report(SEGMENT_REPORT_LABELS["additional"]),
+    )
+    return BrkSegmentsBundle(
+        company=company,
+        filing_date=filing["filing_date"],
+        accession_number=filing["accession_number"],
+        reports=report_set,
+    )
+
+
+def find_recent_filings(
     submissions: Mapping[str, Any],
+    forms: tuple[str, ...],
     limit: int = 1,
 ) -> list[dict[str, str]]:
-    """Return recent Berkshire 13F filing rows from SEC submissions."""
+    """Return recent SEC filing rows filtered by form type."""
     recent = submissions.get("filings", {}).get("recent", {})
-    forms = recent.get("form", [])
+    form_rows = recent.get("form", [])
     matches = []
-    for index, form in enumerate(forms):
-        if form in ("13F-HR", "13F-HR/A"):
+    for index, form in enumerate(form_rows):
+        if form in forms:
             matches.append(
                 {
                     "filing_date": recent["filingDate"][index],
                     "accession_number": recent["accessionNumber"][index],
                     "form": form,
+                    "primary_document": recent.get("primaryDocument", [None] * len(form_rows))[index],
                 }
             )
             if len(matches) >= limit:
                 break
     if not matches:
-        raise LookupError("No 13F filing found in recent submissions.")
+        raise LookupError(f"No filing found for forms: {forms}")
     return matches
+
+
+def find_brk_13f_filings(
+    submissions: Mapping[str, Any],
+    limit: int = 1,
+) -> list[dict[str, str]]:
+    """Return recent Berkshire 13F filing rows from SEC submissions."""
+    return find_recent_filings(submissions, forms=("13F-HR", "13F-HR/A"), limit=limit)
 
 
 def _find_information_table_filename(
