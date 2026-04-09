@@ -134,6 +134,14 @@ As of 2026-04-09, `main` should contain or move toward:
     - `InterestIncomeExpenseNet`
     - `NoninterestIncome`
     - `IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest`
+- Cross-sector sweep note:
+  - AAPL now looks broadly healthy on income, balance, and cashflow
+  - JPM income improved after bank-style revenue / pretax concept coverage
+  - CAT net income required alternate concepts such as `NetIncomeLossAvailableToCommonStockholdersBasic` / `ProfitLoss`
+  - BRK still has real upstream sparsity for diluted-share / diluted-EPS fields
+  - some rows like `gross_profit` remain sector-dependent and should not always be forced into existence
+  - user-facing statement tables should prefer dropping rows that are entirely empty across the selected periods rather than showing sector-inappropriate blanks
+  - generic balance sheet fallbacks now need to include broader equity and debt concepts where they are semantically close enough
 
 ## Quality Bar
 

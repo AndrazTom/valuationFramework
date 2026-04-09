@@ -435,6 +435,270 @@ def test_statement_matrix_financial_institution_uses_bank_style_revenue_and_pret
     assert net_income_row["2025 Q3"] == 15.0
 
 
+def test_statement_matrix_build_statement_table_drops_all_missing_rows():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "RevenuesNetOfInterestExpense": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 45.0,
+                                "fy": 2025,
+                                "fp": "Q1",
+                                "start": "2025-01-01",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q1",
+                            }
+                        ]
+                    }
+                },
+                "NetIncomeLoss": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 15.0,
+                                "fy": 2025,
+                                "fp": "Q1",
+                                "start": "2025-01-01",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q1",
+                            }
+                        ]
+                    }
+                },
+            }
+        }
+    }
+
+    frame = build_statement_table(
+        company_facts,
+        statement="income",
+        period="quarterly",
+        limit=1,
+    )
+
+    assert "gross_profit" not in set(frame["metric"])
+    assert "operating_income" not in set(frame["metric"])
+    assert "revenue" in set(frame["metric"])
+    assert "net_income" in set(frame["metric"])
+
+
+def test_statement_matrix_industrial_uses_alternate_net_income_concepts():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "ProfitLoss": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 60.0,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2025-01-01",
+                                "end": "2025-09-30",
+                                "filed": "2025-11-01",
+                                "form": "10-Q",
+                            },
+                            {
+                                "val": 22.0,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2025-07-01",
+                                "end": "2025-09-30",
+                                "filed": "2025-11-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q3",
+                            },
+                            {
+                                "val": 38.0,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "start": "2025-01-01",
+                                "end": "2025-06-30",
+                                "filed": "2025-08-01",
+                                "form": "10-Q",
+                            },
+                            {
+                                "val": 18.0,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "start": "2025-04-01",
+                                "end": "2025-06-30",
+                                "filed": "2025-08-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q2",
+                            },
+                            {
+                                "val": 20.0,
+                                "fy": 2025,
+                                "fp": "Q1",
+                                "start": "2025-01-01",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q1",
+                            },
+                        ]
+                    }
+                },
+                "Revenues": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 100.0,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2025-01-01",
+                                "end": "2025-09-30",
+                                "filed": "2025-11-01",
+                                "form": "10-Q",
+                            },
+                            {
+                                "val": 35.0,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2025-07-01",
+                                "end": "2025-09-30",
+                                "filed": "2025-11-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q3",
+                            },
+                            {
+                                "val": 65.0,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "start": "2025-01-01",
+                                "end": "2025-06-30",
+                                "filed": "2025-08-01",
+                                "form": "10-Q",
+                            },
+                            {
+                                "val": 30.0,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "start": "2025-04-01",
+                                "end": "2025-06-30",
+                                "filed": "2025-08-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q2",
+                            },
+                            {
+                                "val": 35.0,
+                                "fy": 2025,
+                                "fp": "Q1",
+                                "start": "2025-01-01",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q1",
+                            },
+                        ]
+                    }
+                },
+            }
+        }
+    }
+
+    frame = build_statement_table(
+        company_facts,
+        statement="income",
+        period="quarterly",
+        limit=3,
+    )
+
+    net_income_row = frame[frame["metric"] == "net_income"].iloc[0]
+    assert net_income_row["2025 Q3"] == 22.0
+    assert net_income_row["2025 Q2"] == 18.0
+    assert net_income_row["2025 Q1"] == 20.0
+
+
+def test_statement_matrix_balance_uses_alternate_equity_and_debt_concepts():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "Assets": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 500.0,
+                                "fy": 2025,
+                                "fp": "Q1",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q1I",
+                            }
+                        ]
+                    }
+                },
+                "Liabilities": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 300.0,
+                                "fy": 2025,
+                                "fp": "Q1",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q1I",
+                            }
+                        ]
+                    }
+                },
+                "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 200.0,
+                                "fy": 2025,
+                                "fp": "Q1",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q1I",
+                            }
+                        ]
+                    }
+                },
+                "LongTermDebtAndCapitalLeaseObligations": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 120.0,
+                                "fy": 2025,
+                                "fp": "Q1",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q1I",
+                            }
+                        ]
+                    }
+                },
+            }
+        }
+    }
+
+    frame = build_statement_table(
+        company_facts,
+        statement="balance",
+        period="quarterly",
+        limit=1,
+    )
+
+    stockholders_equity_row = frame[frame["metric"] == "stockholders_equity"].iloc[0]
+    long_term_debt_row = frame[frame["metric"] == "long_term_debt"].iloc[0]
+
+    assert stockholders_equity_row["2025 Q1"] == 200.0
+    assert long_term_debt_row["2025 Q1"] == 120.0
+
+
 def test_statement_matrix_income_fills_year_end_diluted_share_and_eps_gaps():
     company_facts = {
         "facts": {
