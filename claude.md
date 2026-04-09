@@ -97,6 +97,7 @@ Review expectations at this stage:
 - The repo must remain free to run.
 - Favor simple scripts, clear modules, and reproducible outputs over notebook-only workflows.
 - Default outputs should be tables: terminal tables, Markdown tables, CSV, and optionally Parquet.
+- keep exact raw numeric values in backend tables; apply human-readable notation only in report/render layers
 - Prefer official or primary-source fundamentals data when possible.
 - Treat market quotes and fundamentals as separate concerns.
 - Do not build a trading bot. This is a valuation repo.
@@ -218,10 +219,24 @@ Preferred flow:
 
 The important design rule is that table generation should be easy and consistent. Models should return structured tabular outputs, not only free-form text.
 
+Frontend readiness rule:
+
+- keep backend outputs structured and JSON-serializable so a thin frontend or API can be added later without rewriting model logic
+- do not move business logic into a future UI layer
+- prefer CLI first, but shape the backend as if a minimal local web UI may be added later
+
 Notation rule:
 
 - for valuation code and tests, prefer `valuation.notation` helpers such as `B`, `M`, `T`, and `parse_scaled_number("100B")`
 - avoid raw large numeric literals unless the value is truly an identifier, accession number, CUSIP, CIK, or other exact code
+
+Security identity rule:
+
+- do not assume ticker is the only identifier
+- use a canonical `security_id` for backend joins across providers
+- prefer `cusip:<CUSIP>` when holdings data includes a CUSIP
+- use ticker-based ids like `ticker:NYSE:BRK-B` when the workflow begins from a quoted market symbol
+- treat ticker/exchange as market-data aliases that can change or require manual mapping
 
 Interface expectations:
 
@@ -323,9 +338,11 @@ Bootstrap status as of 2026-04-09:
 - Berkshire logic now lives under `valuation.brk`
 - `valuation brk overview` produces live Berkshire overview tables
 - `valuation brk holdings` produces latest Berkshire 13F summary and top-holdings tables
+- `valuation brk holdings --live-prices` can revalue the resolved portion of Berkshire's 13F at current Yahoo prices
 - `valuation brk liquidity` produces a Berkshire liquidity bridge from SEC company facts
 - tests cover normalization, CLI behavior, SEC ticker normalization, and Berkshire table/service helpers
 - Berkshire 13F XML parsing lives in `valuation.brk.holdings`
+- generic security identity helpers now live under `valuation.securities`
 - Python 3.14 editable installs are currently avoided; normal installs are the default path
 
 Current Berkshire implementation on `brk`:
@@ -343,6 +360,10 @@ Current Berkshire implementation on `brk`:
   - parsed holdings rows
   - aggregated top-holdings table by issuer/CUSIP
   - 13F summary and top-holdings tables
+- `valuation brk holdings --live-prices` additionally:
+  - resolves a curated subset of Berkshire CUSIPs to ticker symbols
+  - pulls current Yahoo prices for resolved positions
+  - builds a resolved live-price summary and a live top-holdings table
 - `valuation brk liquidity` fetches:
   - Berkshire cash and debt-security-related company facts
   - a liquidity summary table
@@ -350,6 +371,7 @@ Current Berkshire implementation on `brk`:
 - the current per-share convention is `BRK.B` as the primary valuation unit
 - terminal and Markdown tables now default to human-readable numeric formatting
 - CSV remains raw for machine-friendly downstream use
+- backend tables retain precise numeric values; formatting is a presentation concern
 - `valuation.notation` now provides reusable `K`, `M`, `B`, `T`, and `parse_scaled_number(...)` helpers for valuation code and tests
 
 Current useful commands:
@@ -357,6 +379,7 @@ Current useful commands:
 - `./vf snapshot BRK-B`
 - `./vf brk overview`
 - `./vf brk holdings`
+- `./vf brk holdings --live-prices`
 - `./vf brk liquidity`
 - `./setup`
 
@@ -437,8 +460,9 @@ Current default execution order:
 Latest verified state:
 
 - `./vf brk holdings --limit 5` works live and prints human-readable values like `$61.96B` and `400M`
+- `./vf brk holdings --live-prices --limit 10` works live and revalues 24 currently resolved Berkshire positions using Yahoo prices
 - `./vf brk liquidity` works live and prints human-readable Berkshire cash and debt-security tables
-- tests last passed at `36 passed`
+- tests last passed at `44 passed`
 
 ## Agent Guidance
 

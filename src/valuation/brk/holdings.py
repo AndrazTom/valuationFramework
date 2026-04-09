@@ -7,6 +7,8 @@ import xml.etree.ElementTree as ET
 
 import pandas as pd
 
+from valuation.securities.identifiers import build_security_id
+
 INFO_TABLE_NAMESPACE = {
     "n": "http://www.sec.gov/edgar/document/thirteenf/informationtable"
 }
@@ -32,6 +34,9 @@ def parse_13f_infotable(xml_text: str) -> pd.DataFrame:
         none = _find_text(info_table, "n:votingAuthority/n:None", INFO_TABLE_NAMESPACE)
         rows.append(
             {
+                "security_id": build_security_id(
+                    cusip=_find_text(info_table, "n:cusip", INFO_TABLE_NAMESPACE)
+                ),
                 "issuer": _find_text(
                     info_table,
                     "n:nameOfIssuer",
@@ -72,6 +77,7 @@ def parse_13f_infotable(xml_text: str) -> pd.DataFrame:
 def normalize_13f_holdings(frame: pd.DataFrame) -> pd.DataFrame:
     """Enforce stable 13F columns and sort by reported value descending."""
     expected_columns = [
+        "security_id",
         "issuer",
         "class_title",
         "cusip",
@@ -118,6 +124,7 @@ def aggregate_13f_holdings(frame: pd.DataFrame) -> pd.DataFrame:
         return normalized
 
     group_columns = [
+        "security_id",
         "issuer",
         "class_title",
         "cusip",

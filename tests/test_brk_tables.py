@@ -3,14 +3,26 @@ import pandas as pd
 from valuation.notation import B, M
 from valuation.brk.tables import (
     build_13f_summary_table,
+    build_13f_live_price_summary_table,
     build_key_facts_table,
     build_liquidity_bridge_table,
     build_liquidity_summary_table,
     build_share_class_table,
+    build_top_holdings_live_table,
     build_top_holdings_table,
     filter_core_filings_table,
 )
 from valuation.data.normalize.tables import CompanyFactQuery, company_facts_to_table
+
+
+class FakeYahooClient:
+    def fetch_price_snapshot(self, ticker):
+        return {
+            "ticker": ticker,
+            "last_price": {"AAPL": 200.0, "AXP": 300.0}[ticker],
+            "latest_price_date": "2026-04-09",
+            "source": "yfinance",
+        }
 
 
 def test_build_share_class_table_derives_implied_brk_a_price():
@@ -128,6 +140,67 @@ def test_build_top_holdings_table():
     frame = build_top_holdings_table(holdings, limit=2)
 
     assert list(frame["issuer"]) == ["A", "B"]
+
+
+def test_build_top_holdings_live_table():
+    holdings = pd.DataFrame(
+        [
+            {
+                "security_id": "cusip:037833100",
+                "issuer": "APPLE INC",
+                "class_title": "COM",
+                "cusip": "037833100",
+                "value_usd": 1000,
+                "shares_or_principal": 10,
+            },
+            {
+                "security_id": "cusip:025816109",
+                "issuer": "AMERICAN EXPRESS CO",
+                "class_title": "COM",
+                "cusip": "025816109",
+                "value_usd": 900,
+                "shares_or_principal": 20,
+            },
+        ]
+    )
+    reference = pd.DataFrame(
+        [
+            {"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"},
+            {"security_id": "cusip:025816109", "ticker": "AXP", "exchange": "NYSE"},
+        ]
+    )
+
+    frame = build_top_holdings_live_table(
+        holdings,
+        reference,
+        limit=2,
+        yahoo_client=FakeYahooClient(),
+    )
+
+    assert list(frame["ticker"]) == ["AAPL", "AXP"]
+    assert list(frame["reported_value_usd"]) == [1000, 900]
+
+
+def test_build_13f_live_price_summary_table():
+    holdings = pd.DataFrame(
+        [
+            {"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 1000, "shares_or_principal": 10},
+            {"security_id": "cusip:025816109", "issuer": "AMERICAN EXPRESS CO", "class_title": "COM", "cusip": "025816109", "value_usd": 900, "shares_or_principal": 20},
+        ]
+    )
+    reference = pd.DataFrame(
+        [{"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"}]
+    )
+
+    summary = build_13f_live_price_summary_table(
+        holdings,
+        reference,
+        yahoo_client=FakeYahooClient(),
+    )
+
+    assert summary[summary["field"] == "positions_total"].iloc[0]["value"] == 2
+    assert summary[summary["field"] == "positions_with_live_price"].iloc[0]["value"] == 1
+    assert summary[summary["field"] == "market_value_live_resolved_usd"].iloc[0]["value"] == 2000.0
 
 
 def test_build_liquidity_bridge_table():

@@ -9,6 +9,7 @@ import pandas as pd
 from valuation.brk.service import BRK_A_TICKER, BRK_A_TO_B_CONVERSION, BRK_B_TICKER
 from valuation.data.normalize.tables import CompanyFactQuery, company_facts_to_table
 from valuation.brk.holdings import aggregate_13f_holdings
+from valuation.securities.pricing import enrich_holdings_with_market_prices
 
 BRK_FACT_DEFINITIONS: Sequence[CompanyFactQuery] = (
     CompanyFactQuery(
@@ -204,6 +205,82 @@ def build_top_holdings_table(holdings: pd.DataFrame, limit: int = 20) -> pd.Data
         lambda value: (value / total_value) if total_value else None
     )
     return trimmed.head(limit).reset_index(drop=True)
+
+
+def build_top_holdings_live_table(
+    holdings: pd.DataFrame,
+    reference: pd.DataFrame,
+    limit: int = 20,
+    yahoo_client=None,
+) -> pd.DataFrame:
+    """Return Berkshire top holdings with current market-price enrichment."""
+    if holdings.empty:
+        return holdings
+    limit = max(0, limit)
+    aggregated = aggregate_13f_holdings(holdings)
+    enriched = enrich_holdings_with_market_prices(
+        aggregated,
+        reference,
+        yahoo_client=yahoo_client,
+    )
+    total_live_value = enriched["market_value_live_usd"].dropna().sum()
+    trimmed = enriched[
+        [
+            "issuer",
+            "ticker",
+            "cusip",
+            "value_usd",
+            "last_price",
+            "market_value_live_usd",
+            "shares_or_principal",
+            "latest_price_date",
+        ]
+    ].copy()
+    trimmed["portfolio_weight_live"] = trimmed["market_value_live_usd"].apply(
+        lambda value: (value / total_live_value) if total_live_value else None
+    )
+    trimmed = trimmed.rename(columns={"value_usd": "reported_value_usd"})
+    return trimmed.head(limit).reset_index(drop=True)
+
+
+def build_13f_live_price_summary_table(
+    holdings: pd.DataFrame,
+    reference: pd.DataFrame,
+    yahoo_client=None,
+) -> pd.DataFrame:
+    """Summarize live-price coverage for Berkshire's latest 13F positions."""
+    if holdings.empty:
+        return pd.DataFrame(columns=["field", "value"])
+
+    aggregated = aggregate_13f_holdings(holdings)
+    enriched = enrich_holdings_with_market_prices(
+        aggregated,
+        reference,
+        yahoo_client=yahoo_client,
+    )
+    resolved = enriched["market_value_live_usd"].notna()
+    resolved_count = int(resolved.sum())
+    unresolved_count = int((~resolved).sum())
+    reported_value = enriched["value_usd"].dropna().sum()
+    reported_value_resolved = enriched.loc[resolved, "value_usd"].dropna().sum()
+    live_value = enriched["market_value_live_usd"].dropna().sum()
+    latest_price_date = None
+    if "latest_price_date" in enriched.columns:
+        dates = [value for value in enriched["latest_price_date"].dropna().tolist() if value]
+        if dates:
+            latest_price_date = max(dates)
+
+    return pd.DataFrame(
+        [
+            {"field": "positions_total", "value": len(enriched)},
+            {"field": "positions_with_live_price", "value": resolved_count},
+            {"field": "positions_without_live_price", "value": unresolved_count},
+            {"field": "reported_value_usd", "value": reported_value},
+            {"field": "reported_value_resolved_usd", "value": reported_value_resolved},
+            {"field": "market_value_live_resolved_usd", "value": live_value},
+            {"field": "latest_price_date", "value": latest_price_date},
+        ]
+    )
 
 
 def _sum_defined(*values):

@@ -90,6 +90,8 @@ def _infer_format_kind(column: str, row: pd.Series) -> Optional[str]:
 
 
 def _infer_kind_from_field(field_name: str) -> Optional[str]:
+    if any(token in field_name for token in ("share", "count", "position")):
+        return "quantity"
     if "weight" in field_name:
         return "percent"
     if any(
@@ -114,8 +116,6 @@ def _infer_kind_from_field(field_name: str) -> Optional[str]:
         )
     ):
         return "currency"
-    if any(token in field_name for token in ("share", "count")):
-        return "quantity"
     return None
 
 

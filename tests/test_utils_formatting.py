@@ -58,3 +58,17 @@ def test_humanize_frame_formats_pandas_integer_scalars():
     display = humanize_frame(frame)
 
     assert display.iloc[0]["value"] == "$274.16B"
+
+
+def test_humanize_frame_keeps_position_counts_as_quantities():
+    frame = pd.DataFrame(
+        [
+            {"field": "positions_with_live_price", "value": 24},
+            {"field": "market_value_live_resolved_usd", "value": 269.77 * B},
+        ]
+    )
+
+    display = humanize_frame(frame)
+
+    assert display.iloc[0]["value"] == "24"
+    assert display.iloc[1]["value"] == "$269.77B"

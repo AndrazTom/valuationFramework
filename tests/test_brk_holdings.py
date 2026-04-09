@@ -36,6 +36,7 @@ def test_parse_13f_infotable_returns_sorted_holdings():
     assert list(frame["issuer"]) == ["AMERICAN EXPRESS CO", "APPLE INC"]
     assert frame.iloc[0]["value_usd"] == 250
     assert frame.iloc[0]["value_thousands"] == 0
+    assert frame.iloc[0]["security_id"] == "cusip:025816109"
 
 
 def test_normalize_13f_holdings_adds_value_usd():
@@ -56,6 +57,7 @@ def test_aggregate_13f_holdings_combines_duplicate_issuers():
     frame = pd.DataFrame(
         [
             {
+                "security_id": "cusip:037833100",
                 "issuer": "APPLE INC",
                 "class_title": "COM",
                 "cusip": "037833100",
@@ -70,6 +72,7 @@ def test_aggregate_13f_holdings_combines_duplicate_issuers():
                 "voting_none": 0,
             },
             {
+                "security_id": "cusip:037833100",
                 "issuer": "APPLE INC",
                 "class_title": "COM",
                 "cusip": "037833100",

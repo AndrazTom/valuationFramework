@@ -26,6 +26,7 @@ export VALUATION_SEC_USER_AGENT="valuationFramework/0.1 your-email@example.com"
 ./vf brk overview
 ./vf brk holdings
 ./vf brk liquidity
+./vf brk holdings --live-prices --limit 10
 ```
 
 Use a modern interpreter for local work. The current repo baseline is Python 3.12+, and local development is standardized on Python 3.14.
@@ -50,6 +51,7 @@ Use the repo-local launcher:
 ./vf brk overview
 ./vf brk holdings --limit 10
 ./vf brk liquidity
+./vf brk holdings --live-prices --limit 10
 ```
 
 If you keep `VALUATION_SEC_USER_AGENT` in a local `.env` file, `./vf` will load it automatically.
@@ -62,6 +64,8 @@ The project should default to structured outputs:
 - Markdown tables with human-readable values
 - CSV with raw machine-friendly values
 - later Parquet and API responses
+
+Raw numeric precision stays in the backend tables. Human-readable notation is applied only when rendering terminal or Markdown output.
 
 ## Number Notation
 
@@ -76,6 +80,15 @@ cash = 52.6 * B
 shares = 400 * M
 target_value = parse_scaled_number("100B")
 ```
+
+## Security Identity
+
+Treat ticker symbols as market-data aliases, not the only identity key.
+
+- use a canonical `security_id` in backend tables
+- prefer `CUSIP` when holdings data has it
+- use `ticker + exchange` when the workflow starts from a market symbol
+- resolve current prices through a separate alias layer
 
 ## Documentation Policy
 

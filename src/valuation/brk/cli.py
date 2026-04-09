@@ -8,12 +8,15 @@ from typing import Iterable
 
 from valuation.brk.service import fetch_brk_liquidity, fetch_brk_overview
 from valuation.brk.service import fetch_latest_brk_13f
+from valuation.brk.reference import build_brk_security_reference
 from valuation.brk.tables import (
     build_13f_summary_table,
+    build_13f_live_price_summary_table,
     build_key_facts_table,
     build_liquidity_bridge_table,
     build_liquidity_summary_table,
     build_share_class_table,
+    build_top_holdings_live_table,
     build_top_holdings_table,
     filter_core_filings_table,
 )
@@ -56,6 +59,11 @@ def register_brk_parser(subparsers) -> None:
         default=20,
         help="Number of top holdings rows to show.",
     )
+    holdings_parser.add_argument(
+        "--live-prices",
+        action="store_true",
+        help="Attempt to revalue holdings using current market prices where a ticker is known.",
+    )
 
     liquidity_parser = brk_subparsers.add_parser(
         "liquidity",
@@ -75,6 +83,7 @@ def run_brk_command(args: argparse.Namespace) -> int:
         return run_brk_holdings(
             outdir=args.outdir,
             limit=args.limit,
+            live_prices=args.live_prices,
         )
     if args.brk_command == "liquidity":
         return run_brk_liquidity(outdir=args.outdir)
@@ -103,7 +112,7 @@ def run_brk_overview(outdir: str, filings_limit: int) -> int:
     return 0
 
 
-def run_brk_holdings(outdir: str, limit: int) -> int:
+def run_brk_holdings(outdir: str, limit: int, live_prices: bool) -> int:
     """Build table outputs for Berkshire's latest 13F holdings."""
     bundle = fetch_latest_brk_13f()
     sections = [
@@ -118,6 +127,24 @@ def run_brk_holdings(outdir: str, limit: int) -> int:
         ),
         ("Top Holdings", build_top_holdings_table(bundle.holdings, limit=limit)),
     ]
+    if live_prices:
+        reference = build_brk_security_reference()
+        sections.extend(
+            [
+                (
+                    "Live Price Summary",
+                    build_13f_live_price_summary_table(bundle.holdings, reference),
+                ),
+                (
+                    "Top Holdings Live",
+                    build_top_holdings_live_table(
+                        bundle.holdings,
+                        reference,
+                        limit=limit,
+                    ),
+                ),
+            ]
+        )
     _emit_sections(sections, Path(outdir) / "BRK_13F")
     return 0
 
