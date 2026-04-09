@@ -121,6 +121,11 @@ As of 2026-04-09, `main` should contain or move toward:
   - additive flows
   - instant balance-sheet facts
   - direct-quarter-only metrics such as diluted EPS / diluted shares
+- Debug branch note:
+  - for some issuers like AAPL, fiscal year-end quarter diluted shares may be absent as direct quarter facts
+  - current debug behavior allows diluted shares to fall back to the FY average share count for that year-end quarter
+  - current debug behavior can then backfill diluted EPS from `quarter net income / diluted shares`
+  - this is a pragmatic fallback, not a perfect ground-truth replacement for a missing direct-quarter disclosure
 
 ## Quality Bar
 

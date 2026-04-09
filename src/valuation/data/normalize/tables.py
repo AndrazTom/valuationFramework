@@ -252,6 +252,13 @@ def _statement_values_by_period(
             candidates = _quarterly_direct_statement_candidates(
                 units.get(selected_unit, []),
                 unit=selected_unit,
+                include_annual_fallback=False,
+            )
+        elif value_kind == "direct_or_annual":
+            candidates = _quarterly_direct_statement_candidates(
+                units.get(selected_unit, []),
+                unit=selected_unit,
+                include_annual_fallback=True,
             )
         else:
             candidates = _quarterly_instant_statement_candidates(
@@ -336,30 +343,64 @@ def _quarterly_direct_statement_candidates(
     entries: Sequence[Mapping[str, Any]],
     *,
     unit: str,
+    include_annual_fallback: bool,
 ) -> list[Mapping[str, Any]]:
     candidates = []
     for entry in entries:
-        if not _is_single_quarter_duration_entry(entry):
+        if _is_single_quarter_duration_entry(entry):
+            quarter_key = _calendar_quarter_key(entry)
+            if quarter_key is None:
+                continue
+            year, quarter = quarter_key
+            candidates.append(
+                {
+                    "value": entry.get("val"),
+                    "unit": unit,
+                    "end": entry.get("end"),
+                    "filed": entry.get("filed"),
+                    "form": entry.get("form"),
+                    "frame": entry.get("frame"),
+                    "key": ("quarterly", year, quarter),
+                    "label": f"{year} Q{quarter}",
+                    "sort_key": (
+                        year,
+                        quarter,
+                        str(entry.get("end") or ""),
+                        str(entry.get("filed") or ""),
+                        1,
+                    ),
+                    "year": year,
+                    "quarter": quarter,
+                }
+            )
             continue
-        quarter_key = _calendar_quarter_key(entry)
-        if quarter_key is None:
-            continue
-        year, quarter = quarter_key
-        candidates.append(
-            {
-                "value": entry.get("val"),
-                "unit": unit,
-                "end": entry.get("end"),
-                "filed": entry.get("filed"),
-                "form": entry.get("form"),
-                "frame": entry.get("frame"),
-                "key": ("quarterly", year, quarter),
-                "label": f"{year} Q{quarter}",
-                "sort_key": (year, quarter, str(entry.get("end") or ""), str(entry.get("filed") or "")),
-                "year": year,
-                "quarter": quarter,
-            }
-        )
+
+        if include_annual_fallback and _is_annual_form(entry):
+            quarter_key = _calendar_quarter_key(entry)
+            if quarter_key is None:
+                continue
+            year, quarter = quarter_key
+            candidates.append(
+                {
+                    "value": entry.get("val"),
+                    "unit": unit,
+                    "end": entry.get("end"),
+                    "filed": entry.get("filed"),
+                    "form": entry.get("form"),
+                    "frame": entry.get("frame"),
+                    "key": ("quarterly", year, quarter),
+                    "label": f"{year} Q{quarter}",
+                    "sort_key": (
+                        year,
+                        quarter,
+                        str(entry.get("end") or ""),
+                        str(entry.get("filed") or ""),
+                        0,
+                    ),
+                    "year": year,
+                    "quarter": quarter,
+                }
+            )
     return candidates
 
 

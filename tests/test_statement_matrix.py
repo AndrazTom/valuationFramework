@@ -1,6 +1,7 @@
 import pandas as pd
 
 from valuation.data.normalize.tables import CompanyFactQuery, company_facts_to_statement_table
+from valuation.company.statements import build_statement_table
 
 
 def test_statement_matrix_flow_ytd_only_derives_quarters_and_q4():
@@ -265,3 +266,80 @@ def test_statement_matrix_berkshire_sparse_income_stays_blank_without_guessing()
     assert pd.isna(frame.iloc[1]["2025 Q1"])
     assert pd.isna(frame.iloc[2]["2025 Q1"])
     assert frame.iloc[3]["2025 Q1"] == 12.0
+
+
+def test_statement_matrix_income_fills_year_end_diluted_share_and_eps_gaps():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "NetIncomeLoss": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 120.0,
+                                "fy": 2025,
+                                "fp": "FY",
+                                "start": "2024-10-01",
+                                "end": "2025-09-30",
+                                "filed": "2025-11-01",
+                                "form": "10-K",
+                            },
+                            {
+                                "val": 75.0,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2024-10-01",
+                                "end": "2025-06-30",
+                                "filed": "2025-08-01",
+                                "form": "10-Q",
+                            },
+                        ]
+                    }
+                },
+                "EarningsPerShareDiluted": {
+                    "units": {
+                        "USD/shares": [
+                            {
+                                "val": 1.5,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "start": "2025-01-01",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q1",
+                            }
+                        ]
+                    }
+                },
+                "WeightedAverageNumberOfDilutedSharesOutstanding": {
+                    "units": {
+                        "shares": [
+                            {
+                                "val": 25.0,
+                                "fy": 2025,
+                                "fp": "FY",
+                                "start": "2024-10-01",
+                                "end": "2025-09-30",
+                                "filed": "2025-11-01",
+                                "form": "10-K",
+                            }
+                        ]
+                    }
+                },
+            }
+        }
+    }
+
+    frame = build_statement_table(
+        company_facts,
+        statement="income",
+        period="quarterly",
+        limit=4,
+    )
+
+    diluted_eps_row = frame[frame["metric"] == "diluted_eps"].iloc[0]
+    diluted_shares_row = frame[frame["metric"] == "diluted_shares"].iloc[0]
+
+    assert diluted_shares_row["2025 Q3"] == 25.0
+    assert diluted_eps_row["2025 Q3"] == 1.8
