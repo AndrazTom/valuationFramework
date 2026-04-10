@@ -205,12 +205,13 @@ As of 2026-04-09, `main` should contain or move toward:
     - `source`
     - `status`
     - `period_count`
+    - `metric_count`
     - `latest_period`
     - `reason`
-  - preferred reason codes currently include:
-    - `no_companyfacts_rows`
-    - `provider_returned_no_data`
-    - `no_supported_rows`
+  - preferred unavailable reasons currently include:
+    - `No matching concepts found in SEC companyfacts`
+    - `Yahoo returned no statement frame`
+    - `Statement frame present but no mapped metrics`
   - for SEC issuers, recent filings in `company` should prefer analysis-relevant forms like:
     - `10-K`
     - `10-Q`
@@ -218,6 +219,16 @@ As of 2026-04-09, `main` should contain or move toward:
     - `20-F`
     - `6-K`
     - `40-F`
+    - `DEF 14A`
+  - filing rows should preserve backend-useful metadata where available:
+    - `filing_date`
+    - `report_date`
+    - `accepted_at`
+    - `form_group`
+    - `accession_number`
+    - `description`
+    - `primary_document`
+    - `filing_url`
     - `DEF 14A`
 
 ## Branch State

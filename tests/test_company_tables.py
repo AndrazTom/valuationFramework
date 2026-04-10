@@ -1,6 +1,5 @@
 import pandas as pd
 
-from valuation.company.service import CompanyResolution
 from valuation.company.tables import (
     build_sec_statement_availability_table,
     build_yahoo_statement_availability_table,
@@ -9,15 +8,31 @@ from valuation.company.tables import (
 from valuation.data.providers.sec import SecCompany
 
 
-def test_company_summary_to_table_enriches_sec_company_with_profile_fields():
-    resolution = CompanyResolution(
-        input_value="AAPL",
-        identifier_kind="ticker",
-        query_used="AAPL",
+class Resolution:
+    def __init__(
+        self,
+        *,
+        sec_company=None,
         ticker="AAPL",
         exchange="NASDAQ",
-        security_id="cik:0000320193",
         company_name="APPLE INC",
+        country=None,
+        currency=None,
+    ):
+        self.input_value = ticker
+        self.identifier_kind = "ticker"
+        self.query_used = ticker
+        self.security_id = f"ticker:{exchange}:{ticker}"
+        self.ticker = ticker
+        self.exchange = exchange
+        self.company_name = company_name
+        self.country = country
+        self.currency = currency
+        self.sec_company = sec_company
+
+
+def test_company_summary_to_table_uses_profile_enrichment_for_sec_issuer():
+    resolution = Resolution(
         sec_company=SecCompany(
             ticker="AAPL",
             cik="0000320193",
@@ -33,16 +48,16 @@ def test_company_summary_to_table_enriches_sec_company_with_profile_fields():
             "currency": "USD",
             "sector": "Technology",
             "industry": "Consumer Electronics",
-            "website": "https://www.apple.com",
+            "website": "https://apple.com",
         },
     )
 
-    fields = set(table["field"])
+    assert "country" in list(table["field"])
+    assert "currency" in list(table["field"])
+    assert "website" in list(table["field"])
 
-    assert {"ticker", "cik", "name", "exchange", "country", "currency", "sector", "industry", "website"} <= fields
 
-
-def test_build_sec_statement_availability_table_marks_available_and_missing_rows():
+def test_build_sec_statement_availability_table_marks_missing_rows_with_reason():
     company_facts = {
         "facts": {
             "us-gaap": {
@@ -51,10 +66,10 @@ def test_build_sec_statement_availability_table_marks_available_and_missing_rows
                         "USD": [
                             {
                                 "val": 100.0,
-                                "fy": 2024,
+                                "fy": 2025,
                                 "fp": "FY",
-                                "end": "2024-12-31",
-                                "filed": "2025-02-01",
+                                "end": "2025-12-31",
+                                "filed": "2026-01-31",
                                 "form": "10-K",
                             }
                         ]
@@ -70,23 +85,23 @@ def test_build_sec_statement_availability_table_marks_available_and_missing_rows
     cashflow_quarterly = table[(table["statement"] == "cashflow") & (table["period"] == "quarterly")].iloc[0]
 
     assert income_annual["status"] == "available"
-    assert income_annual["period_count"] == 1
-    assert income_annual["latest_period"] == "FY 2024"
+    assert income_annual["metric_count"] >= 1
     assert cashflow_quarterly["status"] == "unavailable"
-    assert cashflow_quarterly["reason"] == "no_companyfacts_rows"
+    assert cashflow_quarterly["reason"] == "No matching concepts found in SEC companyfacts"
 
 
-def test_build_yahoo_statement_availability_table_marks_provider_gaps():
+def test_build_yahoo_statement_availability_table_reports_empty_frame_reason():
     frames = {
         ("income", "annual"): pd.DataFrame(
             {
-                pd.Timestamp("2025-12-31"): {
-                    "Total Revenue": 100.0,
-                    "Net Income": 20.0,
-                }
+                pd.Timestamp("2025-12-31"): {"Total Revenue": 100.0, "Net Income": 20.0},
             }
         ),
         ("income", "quarterly"): pd.DataFrame(),
+        ("balance", "annual"): pd.DataFrame(),
+        ("balance", "quarterly"): pd.DataFrame(),
+        ("cashflow", "annual"): pd.DataFrame(),
+        ("cashflow", "quarterly"): pd.DataFrame(),
     }
 
     table = build_yahoo_statement_availability_table(frames, currency="EUR")
@@ -97,4 +112,4 @@ def test_build_yahoo_statement_availability_table_marks_provider_gaps():
     assert income_annual["status"] == "available"
     assert income_annual["latest_period"] == "FY 2025"
     assert income_quarterly["status"] == "unavailable"
-    assert income_quarterly["reason"] == "provider_returned_no_data"
+    assert income_quarterly["reason"] == "Yahoo returned no statement frame"

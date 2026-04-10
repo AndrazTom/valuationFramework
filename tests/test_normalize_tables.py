@@ -48,6 +48,8 @@ def test_recent_filings_to_table_handles_missing_columns():
     assert isinstance(frame, pd.DataFrame)
     assert frame.shape == (2, 10)
     assert frame.iloc[0]["report_date"] is None
+    assert frame.iloc[0]["accepted_at"] is None
+    assert frame.iloc[0]["form_group"] == "annual"
     assert frame.iloc[0]["description"] is None
     assert frame.iloc[0]["filing_url"] is None
     assert frame.iloc[0]["primary_document"] is None
@@ -77,12 +79,14 @@ def test_recent_filings_to_table_filters_to_preferred_forms():
                 "accessionNumber": ["0001", "0002", "0003"],
                 "filingDate": ["2026-01-03", "2026-01-02", "2026-01-01"],
                 "reportDate": ["2025-12-31", "2025-12-15", "2025-09-30"],
+                "acceptanceDateTime": ["20260103100000", "20260102100000", "20260101100000"],
                 "form": ["4", "8-K", "10-Q"],
                 "primaryDocDescription": [
                     "Statement of changes in beneficial ownership",
                     "Current report",
                     "Quarterly report",
                 ],
+                "primaryDocument": ["form4.xml", "current.htm", "quarterly.htm"],
             }
         }
     }
@@ -96,6 +100,24 @@ def test_recent_filings_to_table_filters_to_preferred_forms():
     assert list(frame["form"]) == ["10-Q", "8-K"]
     assert frame.iloc[0]["form_group"] == "quarterly"
     assert frame.iloc[1]["report_date"] == "2025-12-15"
+
+
+def test_recent_filings_to_table_builds_filing_urls_when_cik_present():
+    submissions = {
+        "cik": "0000320193",
+        "filings": {
+            "recent": {
+                "accessionNumber": ["0000320193-26-000001"],
+                "filingDate": ["2026-01-30"],
+                "form": ["10-Q"],
+                "primaryDocument": ["q1.htm"],
+            }
+        }
+    }
+
+    frame = recent_filings_to_table(submissions, limit=1)
+
+    assert frame.iloc[0]["filing_url"] == "https://www.sec.gov/Archives/edgar/data/320193/000032019326000001/q1.htm"
 
 
 def test_company_facts_to_table_picks_latest_across_candidate_concepts():

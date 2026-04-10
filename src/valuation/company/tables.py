@@ -136,7 +136,7 @@ def build_sec_statement_availability_table(company_facts: dict) -> pd.DataFrame:
                 period=period,
                 source="sec",
                 table=table,
-                empty_reason="no_companyfacts_rows",
+                empty_reason="No matching concepts found in SEC companyfacts",
             )
         )
     return pd.DataFrame(rows)
@@ -159,9 +159,9 @@ def build_yahoo_statement_availability_table(
             limit=99,
         )
         empty_reason = (
-            "provider_returned_no_data"
+            "Yahoo returned no statement frame"
             if frame is None or frame.empty
-            else "no_supported_rows"
+            else "Statement frame present but no mapped metrics"
         )
         rows.append(
             _statement_availability_row(
