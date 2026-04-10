@@ -2,15 +2,14 @@
 
 Backend-first stock financials and valuation tooling.
 
-`main` is for reusable company-level infrastructure. `brk` is the Berkshire Hathaway proving ground.
-
 Longer term, the project is meant to become a small personal alternative to the financial-data side of TradingView, with more emphasis on statements, balance sheets, and cash flows.
 
 ## Current Scope
 
 - free-first data stack
 - Python package, not machine-specific scripts
-- table-oriented outputs
+- generic single-security workflows
+- table-oriented outputs with JSON export support
 - CLI first, API later
 
 ## Current Data Sources
@@ -23,7 +22,7 @@ Longer term, the project is meant to become a small personal alternative to the 
 ```bash
 ./setup
 export VALUATION_SEC_USER_AGENT="valuationFramework/0.1 your-email@example.com"
-./vf company BRK-B
+./vf company AAPL
 ./vf company BNP.PA
 ./vf company US0846707026
 ```
@@ -50,7 +49,7 @@ Current backend behavior:
 - US issuers use SEC first for filings and statements
 - non-US issuers fall back to Yahoo profile + statement data when available
 - smaller markets may require explicit identifiers or cross-listings until market-specific filing adapters exist
-- `company` is the main single-security view and now aims to show:
+- `company` is the main single-security view and currently shows:
   - resolution
   - company/profile metadata
   - market snapshot
@@ -88,6 +87,22 @@ The project supports two output modes:
 
 Raw numeric precision stays in backend tables. Human-readable notation is applied in the render layer.
 
+## Current Commands
+
+The repo currently revolves around three generic commands:
+
+- `./vf company <identifier>`
+  - the main single-security backend view
+  - works with ticker, CIK, CUSIP, and ISIN where the free data path supports them
+- `./vf snapshot <ticker>`
+  - a lighter market snapshot plus recent SEC filing view
+- `./vf statements <identifier>`
+  - generic income, balance sheet, and cash flow tables
+  - annual and quarterly
+  - optional year and quarter range filters
+
+If you pass statement range filters such as `--start-year` / `--end-year`, the command widens the default internal period limit so the range filter controls the output instead of a small default cut-off.
+
 ## Current Company View
 
 `./vf company <identifier>` currently tries to behave like the backend equivalent of a TradingView company page:
@@ -100,7 +115,52 @@ Raw numeric precision stays in backend tables. Human-readable notation is applie
 - statement availability by statement and period
 - recent analysis-relevant filings
 
+The compact `overview` section is intentionally small. It combines:
+
+- market metrics such as `last_price`, `market_cap`, and `shares`
+- latest core financial metrics such as `revenue`, `net_income`, `operating_cash_flow`, `cash_and_equivalents`, `total_assets`, `total_liabilities`, and `stockholders_equity`
+
+The goal is to keep one stable, backend-friendly summary layer before the deeper tables.
+
 For SEC-backed issuers, recent filings are filtered toward core company forms such as `10-K`, `10-Q`, `8-K`, `20-F`, `6-K`, `40-F`, and `DEF 14A` so the view is less noisy.
+
+## Current Statement Behavior
+
+`./vf statements <identifier>` is generic across:
+
+- `--statement income`
+- `--statement balance`
+- `--statement cashflow`
+- `--period annual`
+- `--period quarterly`
+
+Current statement behavior includes:
+
+- SEC-first statements for US issuers
+- Yahoo-backed statement fallback for non-US issuers when Yahoo has usable data
+- clearer failures when a provider returns no usable rows
+- explicit separation between:
+  - additive flow metrics
+  - instant balance-sheet metrics
+  - direct-quarter metrics such as diluted EPS and diluted shares
+- statement tables prefer dropping rows that are empty across the selected periods instead of keeping noisy all-blank rows
+
+For Yahoo-backed names, empty quarterly frames are treated as upstream provider gaps rather than silent success.
+
+## Current JSON Path
+
+`--format json` is supported on:
+
+- `./vf company`
+- `./vf snapshot`
+- `./vf statements`
+
+The JSON path is intentionally minimal and backend-oriented:
+
+- one JSON bundle is printed to stdout
+- one JSON file is written per section in the output directory
+- raw numeric values are preserved
+- the table/markdown path remains available for human inspection
 
 ## Documentation
 
