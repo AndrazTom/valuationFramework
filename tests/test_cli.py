@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 import pandas as pd
 import pytest
@@ -489,3 +490,114 @@ def test_statements_cli_errors_when_no_statement_rows_are_available(monkeypatch,
 
     assert result == 1
     assert not (tmp_path / "MC-PA" / "income_statement_quarterly.csv").exists()
+
+
+def test_company_cli_json_format_writes_bundle_and_section_files(monkeypatch, tmp_path: Path, capsys):
+    monkeypatch.setattr(cli, "fetch_company_snapshot", lambda identifier, identifier_kind="auto": type(
+        "Bundle",
+        (),
+        {
+            "resolution": type(
+                "Resolution",
+                (),
+                {
+                    "input_value": identifier,
+                    "identifier_kind": identifier_kind,
+                    "query_used": identifier,
+                    "security_id": "ticker:NYSE:BRK-B",
+                    "ticker": "BRK-B",
+                    "exchange": "NYSE",
+                    "company_name": "BERKSHIRE HATHAWAY INC",
+                    "country": "United States",
+                    "sec_company": SecCompany(
+                        ticker="BRK-B",
+                        cik="0001067983",
+                        name="BERKSHIRE HATHAWAY INC",
+                        exchange="NYSE",
+                    ),
+                },
+            )(),
+            "market_snapshot": {"ticker": "BRK-B", "last_price": 500.0},
+            "submissions": {"filings": {"recent": {}}},
+            "company_facts": {"facts": {}},
+            "company_profile": {
+                "country": "United States",
+                "currency": "USD",
+                "sector": "Financials",
+            },
+        },
+    )())
+
+    result = cli.main(["company", "BRK-B", "--format", "json", "--outdir", str(tmp_path)])
+
+    assert result == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["command"] == "company"
+    assert "company" in output["sections"]
+    assert (tmp_path / "BRK-B" / "bundle.json").exists()
+    assert (tmp_path / "BRK-B" / "company.json").exists()
+    assert not (tmp_path / "BRK-B" / "company.md").exists()
+
+
+def test_statements_cli_json_format_prints_machine_readable_bundle(monkeypatch, tmp_path: Path, capsys):
+    monkeypatch.setattr(
+        cli,
+        "fetch_company_facts",
+        lambda identifier, identifier_kind="auto": type(
+            "Bundle",
+            (),
+            {
+                "resolution": type(
+                    "Resolution",
+                    (),
+                    {
+                        "input_value": identifier,
+                        "identifier_kind": identifier_kind,
+                        "query_used": identifier,
+                        "security_id": "ticker:NASDAQ:AAPL",
+                        "ticker": "AAPL",
+                        "exchange": "NASDAQ",
+                        "company_name": "APPLE INC",
+                        "country": "United States",
+                        "sec_company": SecCompany(
+                            ticker="AAPL",
+                            cik="0000320193",
+                            name="APPLE INC",
+                            exchange="NASDAQ",
+                        ),
+                    },
+                )(),
+                "company_facts": {"facts": {}},
+                "statement_source": "sec",
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_statement_table",
+        lambda company_facts, statement, period, limit=4, **kwargs: pd.DataFrame(
+            [{"metric": "revenue", "unit": "USD", "FY 2025": 100.0}]
+        ),
+    )
+
+    result = cli.main(
+        [
+            "statements",
+            "AAPL",
+            "--statement",
+            "income",
+            "--period",
+            "annual",
+            "--format",
+            "json",
+            "--outdir",
+            str(tmp_path),
+        ]
+    )
+
+    assert result == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["command"] == "statements"
+    assert "income_statement_annual" in output["sections"]
+    assert output["sections"]["income_statement_annual"][0]["metric"] == "revenue"
+    assert (tmp_path / "AAPL" / "income_statement_annual.json").exists()

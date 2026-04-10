@@ -89,6 +89,7 @@ As of 2026-04-09, `main` should contain or move toward:
   - statement availability
   - recent analysis-relevant filings
 - compact terminal tables with shorter headers
+- minimal CLI JSON output path for machine-readable backend bundles
 - selected generic SEC financial facts
 - generic statements command backed by SEC companyfacts:
   - income
@@ -121,7 +122,7 @@ As of 2026-04-09, `main` should contain or move toward:
 - keep strengthening `company` as the main reusable backend object before adding API/UI surface
 - prefer cleaner core-company filing views over noisy insider-form streams
 - keep narrowing wide tables where possible
-- add JSON output only after the table backbone is solid
+- keep the new JSON path minimal and backend-oriented rather than turning it into an API surface too early
 - decide where Yahoo fallback is sufficient versus where market-specific filing adapters are worth building
 - for Europe, prefer:
   - Yahoo fallback for broad coverage
@@ -229,7 +230,20 @@ As of 2026-04-09, `main` should contain or move toward:
     - `description`
     - `primary_document`
     - `filing_url`
-    - `DEF 14A`
+
+## Output Notes
+
+- As of 2026-04-10 hardening:
+  - CLI commands support `--format json`
+  - JSON mode should:
+    - print one pure JSON bundle to stdout
+    - preserve raw numeric values instead of display-formatted strings
+    - write per-section `.json` files plus `bundle.json`
+  - current intended use is backend contract hardening, not public API design yet
+
+## Repo Hygiene Notes
+
+- local `.codex` workspace artifacts are tooling noise and should stay ignored in Git
 
 ## Branch State
 

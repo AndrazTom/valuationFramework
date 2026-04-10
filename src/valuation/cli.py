@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
@@ -28,8 +29,10 @@ from concurrent.futures import ThreadPoolExecutor
 from valuation.data.providers.sec import SecClient
 from valuation.data.providers.yahoo import YahooFinanceClient
 from valuation.reports.tables import (
+    frame_to_records,
     render_terminal_table,
     write_csv,
+    write_json,
     write_markdown,
 )
 
@@ -44,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     snapshot_parser.add_argument("ticker")
     snapshot_parser.add_argument("--outdir", default="outputs/tables")
+    snapshot_parser.add_argument("--format", choices=("table", "json"), default="table")
     snapshot_parser.add_argument(
         "--filings-limit",
         type=_non_negative_int,
@@ -62,6 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
     )
     company_parser.add_argument("--outdir", default="outputs/tables")
+    company_parser.add_argument("--format", choices=("table", "json"), default="table")
     company_parser.add_argument(
         "--filings-limit",
         type=_non_negative_int,
@@ -100,10 +105,11 @@ def build_parser() -> argparse.ArgumentParser:
     statements_parser.add_argument("--start-quarter", type=_quarter_int)
     statements_parser.add_argument("--end-quarter", type=_quarter_int)
     statements_parser.add_argument("--outdir", default="outputs/tables")
+    statements_parser.add_argument("--format", choices=("table", "json"), default="table")
     return parser
 
 
-def run_snapshot(ticker: str, outdir: str, filings_limit: int) -> int:
+def run_snapshot(ticker: str, outdir: str, filings_limit: int, output_format: str) -> int:
     """Fetch one ticker, print quick tables, and persist the same tables to disk."""
     yahoo = YahooFinanceClient()
     sec = SecClient()
@@ -125,11 +131,13 @@ def run_snapshot(ticker: str, outdir: str, filings_limit: int) -> int:
             ("Recent Filings", filings_table),
         ],
         Path(outdir) / ticker.upper().replace(".", "-"),
+        output_format=output_format,
+        command="snapshot",
     )
     return 0
 
 
-def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limit: int) -> int:
+def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limit: int, output_format: str) -> int:
     """Fetch a generic company view from a flexible identifier input."""
     bundle = fetch_company_snapshot(
         identifier,
@@ -198,6 +206,8 @@ def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limi
     _emit_sections(
         sections,
         Path(outdir) / bundle.resolution.ticker.upper().replace(".", "-"),
+        output_format=output_format,
+        command="company",
     )
     return 0
 
@@ -213,6 +223,7 @@ def run_statements(
     start_quarter: int | None,
     end_quarter: int | None,
     outdir: str,
+    output_format: str,
 ) -> int:
     """Fetch one generic statement table from SEC companyfacts."""
     _validate_statement_range(
@@ -271,6 +282,8 @@ def run_statements(
             (title, statement_table),
         ],
         Path(outdir) / bundle.resolution.ticker.upper().replace(".", "-"),
+        output_format=output_format,
+        command="statements",
     )
     return 0
 
@@ -282,12 +295,33 @@ def _named_tables(sections: Iterable[tuple[str, object]]):
         yield slug, frame
 
 
-def _emit_sections(sections: Iterable[tuple[str, object]], output_dir: Path) -> None:
-    for title, frame in sections:
+def _emit_sections(
+    sections: Iterable[tuple[str, object]],
+    output_dir: Path,
+    *,
+    output_format: str,
+    command: str,
+) -> None:
+    section_list = list(sections)
+    if output_format == "json":
+        bundle = {
+            "command": command,
+            "output_dir": str(output_dir),
+            "sections": {
+                name: frame_to_records(frame)
+                for name, frame in _named_tables(section_list)
+            },
+        }
+        print(json.dumps(bundle, indent=2))
+        for name, frame in _named_tables(section_list):
+            write_json(frame_to_records(frame), output_dir / f"{name}.json")
+        write_json(bundle, output_dir / "bundle.json")
+        return
+    for title, frame in section_list:
         print(f"\n## {title}\n")
         print(render_terminal_table(frame))
 
-    for name, frame in _named_tables(sections):
+    for name, frame in _named_tables(section_list):
         write_csv(frame, output_dir / f"{name}.csv")
         write_markdown(frame, output_dir / f"{name}.md")
 
@@ -304,6 +338,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 ticker=args.ticker,
                 outdir=args.outdir,
                 filings_limit=args.filings_limit,
+                output_format=args.format,
             )
         if args.command == "company":
             return run_company(
@@ -311,6 +346,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 identifier_kind=args.identifier_kind,
                 outdir=args.outdir,
                 filings_limit=args.filings_limit,
+                output_format=args.format,
             )
         if args.command == "statements":
             return run_statements(
@@ -324,6 +360,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 start_quarter=args.start_quarter,
                 end_quarter=args.end_quarter,
                 outdir=args.outdir,
+                output_format=args.format,
             )
     except (LookupError, RuntimeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

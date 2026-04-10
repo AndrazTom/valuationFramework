@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import textwrap
 
@@ -54,6 +55,20 @@ def write_markdown(frame: pd.DataFrame, path: str | Path) -> None:
     Path(path).write_text(render_markdown_table(frame), encoding="utf-8")
 
 
+def frame_to_records(frame: pd.DataFrame) -> list[dict]:
+    if frame.empty:
+        return []
+    records = []
+    for row in frame.to_dict(orient="records"):
+        records.append({str(key): _json_safe_value(value) for key, value in row.items()})
+    return records
+
+
+def write_json(data: object, path: str | Path) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
 def _prepare_display_frame(frame: pd.DataFrame, *, target: str) -> pd.DataFrame:
     display = humanize_frame(frame)
     display = display.rename(columns={column: _display_column_name(str(column), target=target) for column in display.columns})
@@ -99,3 +114,18 @@ def _humanize_label(value):
         return value
     text = str(value).replace("_", " ").strip()
     return text
+
+
+def _json_safe_value(value):
+    if value is None:
+        return None
+    if isinstance(value, float) and pd.isna(value):
+        return None
+    if pd.isna(value):
+        return None
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except TypeError:
+            return value
+    return value

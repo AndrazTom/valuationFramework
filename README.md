@@ -50,6 +50,13 @@ Current backend behavior:
 - US issuers use SEC first for filings and statements
 - non-US issuers fall back to Yahoo profile + statement data when available
 - smaller markets may require explicit identifiers or cross-listings until market-specific filing adapters exist
+- `company` is the main single-security view and now aims to show:
+  - resolution
+  - company/profile metadata
+  - market snapshot
+  - key financials
+  - statement availability
+  - recent core filings
 
 Examples:
 
@@ -59,6 +66,7 @@ Examples:
 ./vf company SI0031102120
 ./vf company 0000320193 --identifier-kind cik
 ./vf company US0378331005
+./vf company AAPL --format json
 ./vf statements AAPL --statement income --period annual
 ./vf statements BNP.PA --statement income --period annual
 ./vf statements AAPL --statement balance --period quarterly
@@ -67,14 +75,30 @@ Examples:
 
 ## Output Shape
 
-The project defaults to structured outputs:
+The project supports two output modes:
 
-- terminal tables with compact human-readable values
-- Markdown tables
-- CSV
-- later Parquet and API responses
+- `--format table` (default)
+  - terminal tables with compact human-readable values
+  - Markdown files
+  - CSV files
+- `--format json`
+  - a machine-readable JSON bundle on stdout
+  - per-section `.json` files plus `bundle.json` in the output directory
 
 Raw numeric precision stays in backend tables. Human-readable notation is applied in the render layer.
+
+## Current Company View
+
+`./vf company <identifier>` currently tries to behave like the backend equivalent of a TradingView company page:
+
+- flexible identifier resolution
+- enriched company metadata even for SEC-backed issuers when Yahoo profile data is available
+- market snapshot
+- key financials
+- statement availability by statement and period
+- recent analysis-relevant filings
+
+For SEC-backed issuers, recent filings are filtered toward core company forms such as `10-K`, `10-Q`, `8-K`, `20-F`, `6-K`, `40-F`, and `DEF 14A` so the view is less noisy.
 
 ## Documentation
 

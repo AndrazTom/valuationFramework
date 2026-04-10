@@ -3,6 +3,7 @@ from pathlib import Path
 import pandas as pd
 
 from valuation.reports.tables import (
+    frame_to_records,
     render_markdown_table,
     render_terminal_table,
     write_csv,
@@ -79,6 +80,16 @@ def test_render_terminal_table_uses_snapshot_currency_hint():
     rendered = render_terminal_table(frame)
 
     assert "EUR 89.49" in rendered
+
+
+def test_frame_to_records_converts_missing_values_to_none():
+    frame = pd.DataFrame([{"field": "ticker", "value": "BRK-B", "note": None, "missing_number": float("nan")}])
+
+    records = frame_to_records(frame)
+
+    assert records == [
+        {"field": "ticker", "value": "BRK-B", "note": None, "missing_number": None}
+    ]
 
 
 def test_render_terminal_table_uses_new_filing_and_availability_aliases():
