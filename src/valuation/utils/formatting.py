@@ -16,12 +16,14 @@ def humanize_frame(frame: pd.DataFrame) -> pd.DataFrame:
         return frame.copy()
 
     display = frame.copy()
+    table_currency = _frame_currency_hint(display)
     for column in display.columns:
         display[column] = [
             _format_value_for_display(
                 value=row[column],
                 column=column,
                 row=row,
+                table_currency=table_currency,
             )
             for _, row in display.iterrows()
         ]
@@ -45,14 +47,14 @@ def format_percent(value: Any) -> Any:
     return f"{float(value) * 100:.1f}%"
 
 
-def _format_value_for_display(value: Any, column: str, row: pd.Series) -> Any:
+def _format_value_for_display(value: Any, column: str, row: pd.Series, table_currency: str | None) -> Any:
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return ""
     if column.lower() in {"field", "metric"} and isinstance(value, str):
         return value.replace("_", " ")
     kind = _infer_format_kind(column=column, row=row)
     if kind == "currency":
-        return format_currency(value, currency=_row_currency(row))
+        return format_currency(value, currency=_row_currency(row, table_currency=table_currency))
     if kind == "percent":
         return format_percent(value)
     if kind == "quantity":
@@ -126,13 +128,27 @@ def _infer_kind_from_field(field_name: str) -> Optional[str]:
     return None
 
 
-def _row_currency(row: pd.Series) -> str:
+def _row_currency(row: pd.Series, *, table_currency: str | None) -> str:
     unit = str(row.get("unit") or "").upper()
     if unit.endswith("/SHARES"):
         unit = unit.removesuffix("/SHARES")
     if unit and unit != "SHARES":
         return unit
+    if table_currency:
+        return table_currency
     return "USD"
+
+
+def _frame_currency_hint(frame: pd.DataFrame) -> str | None:
+    if "field" not in frame.columns or "value" not in frame.columns:
+        return None
+    currency_rows = frame[frame["field"] == "currency"]
+    if currency_rows.empty:
+        return None
+    value = currency_rows.iloc[0]["value"]
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    return str(value).upper()
 
 
 def _is_number(value: Any) -> bool:

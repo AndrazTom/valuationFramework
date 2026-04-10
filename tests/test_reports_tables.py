@@ -66,3 +66,16 @@ def test_render_terminal_table_uses_statement_unit_for_non_us_currency():
     rendered = render_terminal_table(frame)
 
     assert "EUR 1.5B" in rendered
+
+
+def test_render_terminal_table_uses_snapshot_currency_hint():
+    frame = pd.DataFrame(
+        [
+            {"field": "currency", "value": "EUR"},
+            {"field": "last_price", "value": 89.49},
+        ]
+    )
+
+    rendered = render_terminal_table(frame)
+
+    assert "EUR 89.49" in rendered

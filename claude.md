@@ -172,6 +172,20 @@ As of 2026-04-09, `main` should contain or move toward:
   - keep Yahoo as the broad global baseline
   - add country / market specific adapters only for markets where Yahoo fails and where official filings are realistically parseable
   - Europe is unlikely to be one simple unified free API; expect exchange / OAM / issuer-specific work for deeper coverage
+- display note:
+  - non-USD company views should render market snapshot prices with the table currency hint instead of defaulting to USD
+  - example target behavior: `EUR 236.5`, not `$236.5`
+
+## Branch State
+
+- `main`
+  - contains merged statement hardening from the old `statement-debug` branch
+- `statement-debug`
+  - should stay deleted after merge; do not continue work there
+- `us-data-qa`
+  - holds the external QA-driven diluted-share fallback hardening work
+- `intl-markets`
+  - holds the first non-US fallback architecture and formatting polish
 
 ## Quality Bar
 
