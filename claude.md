@@ -24,6 +24,7 @@ Long-term direction:
 - `README.md` is for humans
 - `claude.md` and subtree `CLAUDE.md` files are AI-only readmes
 - keep `claude.md` current so a new chat can resume work quickly
+- coding agents should update `claude.md` whenever meaningful backend behavior, priorities, branch state, or workflow assumptions change
 - add subtree `CLAUDE.md` files only when module-specific context is genuinely useful
 
 ## Current Architecture
@@ -248,9 +249,20 @@ As of 2026-04-09, `main` should contain or move toward:
 ## Branch State
 
 - `main`
-  - should hold the reusable generic backbone, including the merged statement QA work and the first non-US Yahoo fallback path
+  - should hold the reusable generic backbone, including:
+    - statement QA hardening
+    - first non-US Yahoo fallback path
+    - stronger `company` backbone
+    - filing-quality improvements
+    - minimal CLI JSON bundle support
 - `brk`
   - remains the Berkshire-specific proving ground
+- current hardening branch work now proven and ready to merge:
+  - stronger `company` backbone with statement availability
+  - richer prioritized filing rows
+  - human-facing README refresh
+  - `.codex` ignored in Git
+  - minimal `--format json` backend bundle path
 
 ## Quality Bar
 
