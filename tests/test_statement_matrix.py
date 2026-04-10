@@ -774,3 +774,220 @@ def test_statement_matrix_income_fills_year_end_diluted_share_and_eps_gaps():
 
     assert diluted_shares_row["2025 Q3"] == 25.0
     assert diluted_eps_row["2025 Q3"] == 1.8
+
+
+def test_statement_matrix_income_uses_basic_share_fallback_when_basic_and_diluted_eps_match():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "NetIncomeLoss": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 32.0,
+                                "fy": 2025,
+                                "fp": "FY",
+                                "start": "2025-01-01",
+                                "end": "2025-12-31",
+                                "filed": "2026-02-01",
+                                "form": "10-K",
+                            },
+                            {
+                                "val": 24.0,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2025-01-01",
+                                "end": "2025-09-30",
+                                "filed": "2025-11-01",
+                                "form": "10-Q",
+                            },
+                            {
+                                "val": 8.0,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2025-10-01",
+                                "end": "2025-12-31",
+                                "filed": "2026-02-01",
+                                "form": "10-K",
+                                "frame": "CY2025Q4",
+                            },
+                        ]
+                    }
+                },
+                "EarningsPerShareDiluted": {
+                    "units": {
+                        "USD/shares": [
+                            {
+                                "val": 1.5,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2025-07-01",
+                                "end": "2025-09-30",
+                                "filed": "2025-11-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q3",
+                            },
+                            {
+                                "val": 1.5,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "start": "2025-04-01",
+                                "end": "2025-06-30",
+                                "filed": "2025-08-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q2",
+                            },
+                        ]
+                    }
+                },
+                "EarningsPerShareBasic": {
+                    "units": {
+                        "USD/shares": [
+                            {
+                                "val": 1.5,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2025-07-01",
+                                "end": "2025-09-30",
+                                "filed": "2025-11-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q3",
+                            },
+                            {
+                                "val": 1.5,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "start": "2025-04-01",
+                                "end": "2025-06-30",
+                                "filed": "2025-08-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q2",
+                            },
+                        ]
+                    }
+                },
+                "WeightedAverageNumberOfSharesOutstandingBasic": {
+                    "units": {
+                        "shares": [
+                            {
+                                "val": 5.0,
+                                "fy": 2025,
+                                "fp": "FY",
+                                "start": "2025-01-01",
+                                "end": "2025-12-31",
+                                "filed": "2026-02-01",
+                                "form": "10-K",
+                            },
+                            {
+                                "val": 5.0,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2025-10-01",
+                                "end": "2025-12-31",
+                                "filed": "2026-02-01",
+                                "form": "10-K",
+                                "frame": "CY2025Q4",
+                            },
+                        ]
+                    }
+                },
+            }
+        }
+    }
+
+    frame = build_statement_table(
+        company_facts,
+        statement="income",
+        period="quarterly",
+        limit=3,
+    )
+
+    diluted_eps_row = frame[frame["metric"] == "diluted_eps"].iloc[0]
+    diluted_shares_row = frame[frame["metric"] == "diluted_shares"].iloc[0]
+
+    assert diluted_shares_row["2025 Q4"] == 5.0
+    assert diluted_eps_row["2025 Q4"] == 1.6
+
+
+def test_statement_matrix_income_does_not_use_basic_share_fallback_when_eps_differs():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "NetIncomeLoss": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 8.0,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2025-10-01",
+                                "end": "2025-12-31",
+                                "filed": "2026-02-01",
+                                "form": "10-K",
+                                "frame": "CY2025Q4",
+                            },
+                        ]
+                    }
+                },
+                "EarningsPerShareDiluted": {
+                    "units": {
+                        "USD/shares": [
+                            {
+                                "val": 1.5,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "start": "2025-04-01",
+                                "end": "2025-06-30",
+                                "filed": "2025-08-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q2",
+                            },
+                        ]
+                    }
+                },
+                "EarningsPerShareBasic": {
+                    "units": {
+                        "USD/shares": [
+                            {
+                                "val": 1.6,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "start": "2025-04-01",
+                                "end": "2025-06-30",
+                                "filed": "2025-08-01",
+                                "form": "10-Q",
+                                "frame": "CY2025Q2",
+                            },
+                        ]
+                    }
+                },
+                "WeightedAverageNumberOfSharesOutstandingBasic": {
+                    "units": {
+                        "shares": [
+                            {
+                                "val": 5.0,
+                                "fy": 2025,
+                                "fp": "Q3",
+                                "start": "2025-10-01",
+                                "end": "2025-12-31",
+                                "filed": "2026-02-01",
+                                "form": "10-K",
+                                "frame": "CY2025Q4",
+                            },
+                        ]
+                    }
+                },
+            }
+        }
+    }
+
+    frame = build_statement_table(
+        company_facts,
+        statement="income",
+        period="quarterly",
+        limit=2,
+    )
+
+    diluted_eps_row = frame[frame["metric"] == "diluted_eps"].iloc[0]
+    assert "diluted_shares" not in set(frame["metric"])
+    assert pd.isna(diluted_eps_row["2025 Q4"])
