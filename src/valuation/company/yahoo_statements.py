@@ -36,7 +36,7 @@ YAHOO_STATEMENT_LABELS = {
         "capex": ("Capital Expenditure",),
         "investing_cash_flow": ("Investing Cash Flow", "Cash Flow From Continuing Investing Activities"),
         "financing_cash_flow": ("Financing Cash Flow", "Cash Flow From Continuing Financing Activities"),
-        "change_in_cash": ("Changes In Cash", "End Cash Position"),
+        "change_in_cash": ("Changes In Cash",),
     },
 }
 

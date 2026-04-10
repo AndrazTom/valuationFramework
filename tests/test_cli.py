@@ -118,6 +118,12 @@ def test_company_cli_writes_files(monkeypatch, tmp_path: Path):
 
 
 def test_statements_cli_writes_files(monkeypatch, tmp_path: Path):
+    captured = {}
+    
+    def fake_build_statement_table(company_facts, statement, period, limit=4, **kwargs):
+        captured["limit"] = limit
+        return pd.DataFrame([{"metric": "revenue", "unit": "USD", "FY 2025": 100.0}])
+
     monkeypatch.setattr(
         cli,
         "fetch_company_facts",
@@ -153,9 +159,7 @@ def test_statements_cli_writes_files(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(
         cli,
         "build_statement_table",
-        lambda company_facts, statement, period, limit=4, **kwargs: __import__("pandas").DataFrame(
-            [{"metric": "revenue", "unit": "USD", "FY 2025": 100.0}]
-        ),
+        fake_build_statement_table,
     )
 
     result = cli.main(
@@ -172,6 +176,7 @@ def test_statements_cli_writes_files(monkeypatch, tmp_path: Path):
     )
 
     assert result == 0
+    assert captured["limit"] == 4
     assert (tmp_path / "AAPL" / "income_statement_annual.csv").exists()
     assert (tmp_path / "AAPL" / "company.md").exists()
 
@@ -252,3 +257,190 @@ def test_statements_cli_writes_files_for_yahoo_fallback(monkeypatch, tmp_path: P
 
     assert result == 0
     assert (tmp_path / "BNP-PA" / "income_statement_annual.csv").exists()
+
+
+def test_statements_cli_uses_wide_default_limit_for_filtered_ranges(monkeypatch, tmp_path: Path):
+    captured = {}
+    
+    def fake_build_statement_table(company_facts, statement, period, limit=4, **kwargs):
+        captured["limit"] = limit
+        return pd.DataFrame([{"metric": "revenue", "unit": "USD", "2025 Q4": 100.0}])
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_company_facts",
+        lambda identifier, identifier_kind="auto": type(
+            "Bundle",
+            (),
+            {
+                "resolution": type(
+                    "Resolution",
+                    (),
+                    {
+                        "input_value": identifier,
+                        "identifier_kind": identifier_kind,
+                        "query_used": identifier,
+                        "security_id": "ticker:NASDAQ:AAPL",
+                        "ticker": "AAPL",
+                        "exchange": "NASDAQ",
+                        "company_name": "APPLE INC",
+                        "country": "United States",
+                        "sec_company": SecCompany(
+                            ticker="AAPL",
+                            cik="0000320193",
+                            name="APPLE INC",
+                            exchange="NASDAQ",
+                        ),
+                    },
+                )(),
+                "company_facts": {"facts": {}},
+                "statement_source": "sec",
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_statement_table",
+        fake_build_statement_table,
+    )
+
+    result = cli.main(
+        [
+            "statements",
+            "AAPL",
+            "--statement",
+            "cashflow",
+            "--period",
+            "quarterly",
+            "--start-year",
+            "2019",
+            "--end-year",
+            "2025",
+            "--outdir",
+            str(tmp_path),
+        ]
+    )
+
+    assert result == 0
+    assert captured["limit"] == 99
+
+
+def test_statements_cli_honors_explicit_limit_for_filtered_ranges(monkeypatch, tmp_path: Path):
+    captured = {}
+    
+    def fake_build_statement_table(company_facts, statement, period, limit=4, **kwargs):
+        captured["limit"] = limit
+        return pd.DataFrame([{"metric": "revenue", "unit": "USD", "2025 Q4": 100.0}])
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_company_facts",
+        lambda identifier, identifier_kind="auto": type(
+            "Bundle",
+            (),
+            {
+                "resolution": type(
+                    "Resolution",
+                    (),
+                    {
+                        "input_value": identifier,
+                        "identifier_kind": identifier_kind,
+                        "query_used": identifier,
+                        "security_id": "ticker:NASDAQ:AAPL",
+                        "ticker": "AAPL",
+                        "exchange": "NASDAQ",
+                        "company_name": "APPLE INC",
+                        "country": "United States",
+                        "sec_company": SecCompany(
+                            ticker="AAPL",
+                            cik="0000320193",
+                            name="APPLE INC",
+                            exchange="NASDAQ",
+                        ),
+                    },
+                )(),
+                "company_facts": {"facts": {}},
+                "statement_source": "sec",
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_statement_table",
+        fake_build_statement_table,
+    )
+
+    result = cli.main(
+        [
+            "statements",
+            "AAPL",
+            "--statement",
+            "cashflow",
+            "--period",
+            "quarterly",
+            "--start-year",
+            "2019",
+            "--end-year",
+            "2025",
+            "--limit",
+            "12",
+            "--outdir",
+            str(tmp_path),
+        ]
+    )
+
+    assert result == 0
+    assert captured["limit"] == 12
+
+
+def test_statements_cli_errors_when_no_statement_rows_are_available(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(cli, "YahooFinanceClient", lambda: FakeYahooClient())
+    monkeypatch.setattr(
+        cli,
+        "fetch_company_facts",
+        lambda identifier, identifier_kind="auto": type(
+            "Bundle",
+            (),
+            {
+                "resolution": type(
+                    "Resolution",
+                    (),
+                    {
+                        "input_value": identifier,
+                        "identifier_kind": identifier_kind,
+                        "query_used": identifier,
+                        "security_id": "ticker:PAR:MC.PA",
+                        "ticker": "MC.PA",
+                        "exchange": "PAR",
+                        "company_name": "LVMH",
+                        "country": "France",
+                        "currency": "EUR",
+                        "sec_company": None,
+                    },
+                )(),
+                "company_facts": None,
+                "statement_source": "yahoo",
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        FakeYahooClient,
+        "fetch_statement_frame",
+        lambda self, ticker, *, statement, period: pd.DataFrame(),
+    )
+
+    result = cli.main(
+        [
+            "statements",
+            "MC.PA",
+            "--statement",
+            "income",
+            "--period",
+            "quarterly",
+            "--outdir",
+            str(tmp_path),
+        ]
+    )
+
+    assert result == 1
+    assert not (tmp_path / "MC-PA" / "income_statement_quarterly.csv").exists()

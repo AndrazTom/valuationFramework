@@ -78,3 +78,23 @@ def test_build_yahoo_key_financials_table_uses_latest_annual_values():
     )
 
     assert set(table["metric"]) == {"revenue", "net_income", "total_assets", "operating_cash_flow"}
+
+
+def test_build_yahoo_statement_table_does_not_treat_end_cash_position_as_change_in_cash():
+    frame = pd.DataFrame(
+        {
+            pd.Timestamp("2025-12-31"): {
+                "Operating Cash Flow": 30.0,
+                "End Cash Position": 500.0,
+            },
+        }
+    )
+
+    table = build_yahoo_statement_table(
+        frame,
+        statement="cashflow",
+        period="annual",
+        limit=1,
+    )
+
+    assert set(table["metric"]) == {"operating_cash_flow"}

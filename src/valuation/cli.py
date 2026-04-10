@@ -88,7 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
     statements_parser.add_argument(
         "--limit",
         type=_non_negative_int,
-        default=4,
+        default=None,
         help="Number of periods to show.",
     )
     statements_parser.add_argument("--start-year", type=int)
@@ -165,7 +165,7 @@ def run_statements(
     identifier_kind: str,
     statement: str,
     period: str,
-    limit: int,
+    limit: int | None,
     start_year: int | None,
     end_year: int | None,
     start_quarter: int | None,
@@ -175,6 +175,13 @@ def run_statements(
     """Fetch one generic statement table from SEC companyfacts."""
     _validate_statement_range(
         period=period,
+        start_year=start_year,
+        end_year=end_year,
+        start_quarter=start_quarter,
+        end_quarter=end_quarter,
+    )
+    limit = _resolve_statement_limit(
+        limit=limit,
         start_year=start_year,
         end_year=end_year,
         start_quarter=start_quarter,
@@ -208,6 +215,12 @@ def run_statements(
             start_quarter=start_quarter,
             end_quarter=end_quarter,
         )
+    _require_statement_rows(
+        statement_table,
+        identifier=bundle.resolution.ticker,
+        statement=statement,
+        period=period,
+    )
     title = f"{statement.title()} Statement {period.title()}"
     _emit_sections(
         [
@@ -315,6 +328,34 @@ def _validate_statement_range(
             and start_quarter > end_quarter
         ):
             raise ValueError("start quarter must be less than or equal to end quarter")
+
+
+def _resolve_statement_limit(
+    *,
+    limit: int | None,
+    start_year: int | None,
+    end_year: int | None,
+    start_quarter: int | None,
+    end_quarter: int | None,
+) -> int:
+    if limit is not None:
+        return limit
+    if any(value is not None for value in (start_year, end_year, start_quarter, end_quarter)):
+        return 99
+    return 4
+
+
+def _require_statement_rows(
+    frame,
+    *,
+    identifier: str,
+    statement: str,
+    period: str,
+) -> None:
+    period_columns = [column for column in frame.columns if column not in {"metric", "unit"}]
+    if period_columns and not frame.empty:
+        return
+    raise ValueError(f"No {period} {statement} statement data available for {identifier}")
 
 
 if __name__ == "__main__":

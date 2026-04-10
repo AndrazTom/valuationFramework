@@ -90,6 +90,7 @@ As of 2026-04-09, `main` should contain or move toward:
   - annual and quarterly
   - optional start/end year filters
   - optional start/end quarter filters for quarterly views
+  - when any statement range filter is provided, the CLI default limit should widen enough that the range filter, not the default `--limit`, controls the output
   - quarterly handling is metric-aware:
     - additive flows may derive from YTD/FY
     - balance-sheet items stay instant
@@ -157,6 +158,9 @@ As of 2026-04-09, `main` should contain or move toward:
     - XOM had a real year-end diluted-share gap; current fallback now uses basic-share data when observed basic and diluted EPS match
     - PGR operating income exists in vendor-standardized views but is not safely reconstructible from SEC companyfacts alone right now
     - UNH has small vendor-vs-companyfacts differences on net income; treat current `NetIncomeLoss` selection as shareholder-oriented SEC output unless a better generic rule is proven
+  - CLI behavior note:
+    - if a statement fetch normalizes to no rows, fail cleanly instead of writing a successful `(no rows)` table
+    - `change_in_cash` should never fall back to `End Cash Position`; that is semantically a balance, not a flow
 
 ## International Notes
 
@@ -175,6 +179,10 @@ As of 2026-04-09, `main` should contain or move toward:
 - display note:
   - non-USD company views should render market snapshot prices with the table currency hint instead of defaulting to USD
   - example target behavior: `EUR 236.5`, not `$236.5`
+- European Yahoo QA note from 20-company sweep on 2026-04-10:
+  - broad annual statement coverage looks workable across major EU/UK large caps
+  - some issuers such as `MC.PA`, `OR.PA`, `NESN.SW`, and `SU.PA` have no Yahoo quarterly income/cashflow frames
+  - those empty quarterly cases should error clearly rather than pretending the command succeeded
 
 ## Branch State
 
