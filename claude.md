@@ -11,7 +11,7 @@ Current branch priority:
 - `main` should be useful on its own for generic company inspection
 - `brk` is the Berkshire-specific proving ground
 - temporary hardening branches should be merged back quickly, then deleted
-- current hardening branch `feature/overview-quality-layer` is focused on strengthening the compact overview contract before adding more backend surface
+- current backend focus is strengthening the compact overview contract before adding more backend surface
 
 Long-term direction:
 
@@ -177,6 +177,34 @@ As of 2026-04-09, `main` should contain or move toward:
 - for Europe, prefer:
   - Yahoo fallback for broad coverage
   - then exchange / OAM / issuer-report adapters only where Yahoo coverage is missing or misleading
+
+## Resume Plan
+
+When resuming work after the current overview hardening, keep the next steps in this order:
+
+1. strengthen overview quality and provenance
+   - keep `company` backend-first
+   - add clearer provenance and completeness signals for overview metrics
+   - prefer compact trustworthy metadata over adding many new metrics
+2. improve the compact security overview model
+   - make `overview` the stable summary backbone for one security
+   - keep `key financials` as the deeper supporting table
+   - avoid overcomplicating the schema too early
+3. keep improving statement metadata and availability reasons
+   - surface why a metric or statement is unavailable
+   - keep provider gaps explicit, especially for Yahoo-backed non-US names
+4. keep filing quality high
+   - continue prioritizing analysis-relevant forms over noisy filing streams
+   - preserve useful filing metadata for backend consumers
+5. postpone broader expansion until the core backend is stronger
+   - no urgent need to add more countries right now
+   - no urgent need to add ETF or real index support right now
+   - only expand market coverage after the core single-security workflow is more trustworthy
+
+Immediate next implementation target:
+
+- add provenance/completeness fields to the compact overview layer in a minimal way
+- keep the table output, but move toward a more canonical machine-friendly overview contract underneath if needed
 
 ## Statement Debug Notes
 
