@@ -1,3 +1,4 @@
+import pytest
 import pandas as pd
 
 from valuation.company.tables import (
@@ -86,9 +87,14 @@ def test_build_sec_statement_availability_table_marks_missing_rows_with_reason()
     income_annual = table[(table["statement"] == "income") & (table["period"] == "annual")].iloc[0]
     cashflow_quarterly = table[(table["statement"] == "cashflow") & (table["period"] == "quarterly")].iloc[0]
 
-    assert income_annual["status"] == "available"
-    assert income_annual["metric_count"] >= 1
+    assert income_annual["status"] == "partial"
+    assert income_annual["metric_count"] == 1
+    assert income_annual["expected_metric_count"] == 7
+    assert income_annual["coverage_ratio"] == pytest.approx(1 / 7)
+    assert income_annual["reason"] == "Statement available with partial metric coverage"
     assert cashflow_quarterly["status"] == "unavailable"
+    assert cashflow_quarterly["expected_metric_count"] == 5
+    assert cashflow_quarterly["coverage_ratio"] == 0.0
     assert cashflow_quarterly["reason"] == "No matching concepts found in SEC companyfacts"
 
 
@@ -111,9 +117,15 @@ def test_build_yahoo_statement_availability_table_reports_empty_frame_reason():
     income_annual = table[(table["statement"] == "income") & (table["period"] == "annual")].iloc[0]
     income_quarterly = table[(table["statement"] == "income") & (table["period"] == "quarterly")].iloc[0]
 
-    assert income_annual["status"] == "available"
+    assert income_annual["status"] == "partial"
     assert income_annual["latest_period"] == "FY 2025"
+    assert income_annual["metric_count"] == 2
+    assert income_annual["expected_metric_count"] == 7
+    assert income_annual["coverage_ratio"] == pytest.approx(2 / 7)
+    assert income_annual["reason"] == "Statement available with partial metric coverage"
     assert income_quarterly["status"] == "unavailable"
+    assert income_quarterly["expected_metric_count"] == 7
+    assert income_quarterly["coverage_ratio"] == 0.0
     assert income_quarterly["reason"] == "Yahoo returned no statement frame"
 
 

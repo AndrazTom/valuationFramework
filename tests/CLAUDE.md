@@ -18,4 +18,5 @@ Coverage map:
 - `test_statement_matrix.py` covers the tricky quarterly statement semantics
 - `test_company_tables.py` covers company-view tables such as overview and statement availability
 - `test_company_tables.py` is also where overview provenance/completeness behavior is currently locked down
+- `test_company_tables.py` also locks down statement-availability partial-coverage behavior
 - `test_cli.py` covers section wiring and output artifacts

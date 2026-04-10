@@ -42,6 +42,11 @@ Rules:
   - `missing`
 - SEC overview rows should carry real `companyfacts` provenance when available
 - Yahoo overview rows should carry statement + matched-label provenance when available
+- statement availability rows should distinguish:
+  - `available`
+  - `partial`
+  - `unavailable`
+- statement availability should expose expected metric counts and coverage, not just raw present counts
 
 Module ownership:
 

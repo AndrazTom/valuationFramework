@@ -7,6 +7,7 @@ from typing import Mapping
 import pandas as pd
 
 from valuation.company.statements import build_statement_table
+from valuation.company.statements import STATEMENT_DEFINITIONS
 from valuation.company.yahoo_statements import build_yahoo_key_financials_table
 from valuation.company.yahoo_statements import build_yahoo_statement_table
 from valuation.company.yahoo_statements import YAHOO_STATEMENT_LABELS
@@ -75,6 +76,22 @@ OVERVIEW_STATEMENT_BY_METRIC = {
     "total_assets": "balance",
     "total_liabilities": "balance",
     "stockholders_equity": "balance",
+}
+
+EXPECTED_VISIBLE_SEC_METRIC_COUNTS = {
+    statement: len(
+        [
+            query.metric
+            for query in definitions
+            if not str(query.metric).startswith("_")
+        ]
+    )
+    for statement, definitions in STATEMENT_DEFINITIONS.items()
+}
+
+EXPECTED_YAHOO_METRIC_COUNTS = {
+    statement: len(metrics)
+    for statement, metrics in YAHOO_STATEMENT_LABELS.items()
 }
 
 
@@ -285,6 +302,7 @@ def build_sec_statement_availability_table(company_facts: dict) -> pd.DataFrame:
                 period=period,
                 source="sec",
                 table=table,
+                expected_metric_count=EXPECTED_VISIBLE_SEC_METRIC_COUNTS[statement],
                 empty_reason="No matching concepts found in SEC companyfacts",
             )
         )
@@ -318,6 +336,7 @@ def build_yahoo_statement_availability_table(
                 period=period,
                 source="yahoo",
                 table=table,
+                expected_metric_count=EXPECTED_YAHOO_METRIC_COUNTS[statement],
                 empty_reason=empty_reason,
             )
         )
@@ -330,19 +349,29 @@ def _statement_availability_row(
     period: str,
     source: str,
     table: pd.DataFrame,
+    expected_metric_count: int,
     empty_reason: str,
 ) -> dict[str, object]:
     period_columns = [column for column in table.columns if column not in {"metric", "unit"}]
     if period_columns and not table.empty:
+        metric_count = int(len(table))
+        coverage_ratio = (
+            float(metric_count) / float(expected_metric_count)
+            if expected_metric_count > 0
+            else None
+        )
+        is_partial = expected_metric_count > 0 and metric_count < expected_metric_count
         return {
             "statement": statement,
             "period": period,
             "source": source,
-            "status": "available",
+            "status": "partial" if is_partial else "available",
             "period_count": len(period_columns),
-            "metric_count": int(len(table)),
+            "metric_count": metric_count,
+            "expected_metric_count": expected_metric_count,
+            "coverage_ratio": coverage_ratio,
             "latest_period": period_columns[0],
-            "reason": None,
+            "reason": "Statement available with partial metric coverage" if is_partial else None,
         }
     return {
         "statement": statement,
@@ -351,6 +380,8 @@ def _statement_availability_row(
         "status": "unavailable",
         "period_count": 0,
         "metric_count": 0,
+        "expected_metric_count": expected_metric_count,
+        "coverage_ratio": 0.0 if expected_metric_count > 0 else None,
         "latest_period": None,
         "reason": empty_reason,
     }

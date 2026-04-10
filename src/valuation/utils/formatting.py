@@ -66,6 +66,8 @@ def _infer_format_kind(column: str, row: pd.Series) -> Optional[str]:
     column_name = column.lower()
     if "metric" in row and column_name not in {"metric", "unit"}:
         return _infer_kind_from_field(str(row["metric"]).lower())
+    if column_name in {"coverage_ratio"}:
+        return "percent"
     if column_name in {"portfolio_weight"} or "weight" in column_name:
         return "percent"
     if column_name.endswith("_usd") or column_name in {

@@ -171,6 +171,7 @@ As of 2026-04-09, `main` should contain or move toward:
 - improve statement concept coverage and defaults
 - keep strengthening `company` as the main reusable backend object before adding API/UI surface
 - keep the compact `overview` layer stable and increase trust/provenance before expanding metric count
+- keep statement availability metadata honest about partial coverage, not just all-or-nothing availability
 - prefer cleaner core-company filing views over noisy insider-form streams
 - keep narrowing wide tables where possible
 - keep the new JSON path minimal and backend-oriented rather than turning it into an API surface too early
@@ -257,6 +258,10 @@ Immediate next implementation target:
     - `tests/test_yahoo_statement_tables.py` protects Yahoo label mapping and period filtering
   - company-view note:
     - `company` should expose statement availability with explicit source + availability reason codes
+    - statement availability should distinguish:
+      - `available`
+      - `partial`
+      - `unavailable`
     - for Yahoo-backed names, empty quarterly frames should surface as provider gaps, not silent blanks
 
 ## International Notes
@@ -335,8 +340,14 @@ Immediate next implementation target:
     - `status`
     - `period_count`
     - `metric_count`
+    - `expected_metric_count`
+    - `coverage_ratio`
     - `latest_period`
     - `reason`
+  - statement availability status should mean:
+    - `available`: mapped all expected visible metrics for that statement
+    - `partial`: statement exists but metric coverage is incomplete
+    - `unavailable`: no usable rows after normalization
   - preferred unavailable reasons currently include:
     - `No matching concepts found in SEC companyfacts`
     - `Yahoo returned no statement frame`
