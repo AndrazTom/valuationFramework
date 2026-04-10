@@ -142,6 +142,11 @@ As of 2026-04-09, `main` should contain or move toward:
   - some rows like `gross_profit` remain sector-dependent and should not always be forced into existence
   - user-facing statement tables should prefer dropping rows that are entirely empty across the selected periods rather than showing sector-inappropriate blanks
   - generic balance sheet fallbacks now need to include broader equity and debt concepts where they are semantically close enough
+  - external QA against StockAnalysis quarterly pages on 2026-04-10:
+    - AAPL and JPM currently line up well on the main displayed income rows
+    - XOM had a real year-end diluted-share gap; current fallback now uses basic-share data when observed basic and diluted EPS match
+    - PGR operating income exists in vendor-standardized views but is not safely reconstructible from SEC companyfacts alone right now
+    - UNH has small vendor-vs-companyfacts differences on net income; treat current `NetIncomeLoss` selection as shareholder-oriented SEC output unless a better generic rule is proven
 
 ## Quality Bar
 

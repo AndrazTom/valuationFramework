@@ -55,6 +55,18 @@ INCOME_STATEMENT_DEFINITIONS = (
         unit="shares",
         quarterly_value_kind="direct_or_annual",
     ),
+    CompanyFactQuery(
+        "_basic_eps",
+        (("us-gaap", "EarningsPerShareBasic"),),
+        unit="USD/shares",
+        quarterly_value_kind="direct",
+    ),
+    CompanyFactQuery(
+        "_basic_shares",
+        (("us-gaap", "WeightedAverageNumberOfSharesOutstandingBasic"),),
+        unit="shares",
+        quarterly_value_kind="direct_or_annual",
+    ),
 )
 
 BALANCE_SHEET_DEFINITIONS = (
@@ -163,6 +175,7 @@ def build_statement_table(
     )
     if statement == "income" and period == "quarterly":
         frame = _fill_income_quarterly_gaps(frame)
+    frame = _drop_helper_rows(frame)
     return _drop_all_missing_rows(frame)
 
 
@@ -179,13 +192,32 @@ def _fill_income_quarterly_gaps(frame: pd.DataFrame) -> pd.DataFrame:
     net_income_index = metric_index.get("net_income")
     diluted_eps_index = metric_index.get("diluted_eps")
     diluted_shares_index = metric_index.get("diluted_shares")
+    basic_eps_index = metric_index.get("_basic_eps")
+    basic_shares_index = metric_index.get("_basic_shares")
     if net_income_index is None or diluted_eps_index is None or diluted_shares_index is None:
         return filled
+
+    use_basic_share_fallback = _can_use_basic_share_fallback(
+        filled,
+        period_columns,
+        diluted_eps_index=diluted_eps_index,
+        basic_eps_index=basic_eps_index,
+    )
 
     for column in period_columns:
         net_income = filled.at[net_income_index, column]
         diluted_eps = filled.at[diluted_eps_index, column]
         diluted_shares = filled.at[diluted_shares_index, column]
+
+        if (
+            pd.isna(diluted_shares)
+            and use_basic_share_fallback
+            and basic_shares_index is not None
+        ):
+            basic_shares = filled.at[basic_shares_index, column]
+            if _is_positive_number(basic_shares):
+                filled.at[diluted_shares_index, column] = float(basic_shares)
+                diluted_shares = filled.at[diluted_shares_index, column]
 
         if pd.isna(diluted_eps) and _is_positive_number(net_income) and _is_positive_number(diluted_shares):
             filled.at[diluted_eps_index, column] = float(net_income) / float(diluted_shares)
@@ -218,3 +250,32 @@ def _drop_all_missing_rows(frame: pd.DataFrame) -> pd.DataFrame:
         return frame.iloc[0:0].copy()
 
     return pd.DataFrame(kept_rows, columns=frame.columns)
+
+
+def _drop_helper_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty or "metric" not in frame.columns:
+        return frame
+    return frame[~frame["metric"].astype(str).str.startswith("_")].reset_index(drop=True)
+
+
+def _can_use_basic_share_fallback(
+    frame: pd.DataFrame,
+    period_columns: list[str],
+    *,
+    diluted_eps_index: int | None,
+    basic_eps_index: int | None,
+) -> bool:
+    if diluted_eps_index is None or basic_eps_index is None:
+        return False
+
+    observed_matches = 0
+    for column in period_columns:
+        diluted_eps = frame.at[diluted_eps_index, column]
+        basic_eps = frame.at[basic_eps_index, column]
+        if pd.isna(diluted_eps) or pd.isna(basic_eps):
+            continue
+        if abs(float(diluted_eps) - float(basic_eps)) > 1e-9:
+            return False
+        observed_matches += 1
+
+    return observed_matches > 0
