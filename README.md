@@ -122,6 +122,8 @@ The compact `overview` section is intentionally small. It combines:
 
 The goal is to keep one stable, backend-friendly summary layer before the deeper tables.
 
+Overview rows also carry lightweight backend metadata such as source, statement group, period type, `as_of`, and a simple completeness signal (`current`, `stale`, or `missing`) so downstream consumers can reason about data quality without parsing the full raw provider payloads.
+
 For SEC-backed issuers, recent filings are filtered toward core company forms such as `10-K`, `10-Q`, `8-K`, `20-F`, `6-K`, `40-F`, and `DEF 14A` so the view is less noisy.
 
 ## Current Statement Behavior

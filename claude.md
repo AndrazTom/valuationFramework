@@ -11,7 +11,7 @@ Current branch priority:
 - `main` should be useful on its own for generic company inspection
 - `brk` is the Berkshire-specific proving ground
 - temporary hardening branches should be merged back quickly, then deleted
-- current backend focus is strengthening the compact overview contract before adding more backend surface
+- current hardening branch `feature/overview-provenance` is focused on strengthening overview provenance and completeness before adding more backend surface
 
 Long-term direction:
 
@@ -139,6 +139,7 @@ As of 2026-04-09, `main` should contain or move toward:
 - compact terminal tables with shorter headers
 - minimal CLI JSON output path for machine-readable backend bundles
 - compact `overview` rows that combine market data with latest core financial metrics
+- overview rows now carry lightweight provenance/completeness metadata for backend use
 - selected generic SEC financial facts
 - generic statements command backed by SEC companyfacts:
   - income
@@ -290,8 +291,17 @@ Immediate next implementation target:
     - `value`
     - `unit`
     - `source`
+    - `source_table`
+    - `statement`
+    - `period_type`
     - `as_of`
     - `status`
+    - `completeness`
+    - `taxonomy`
+    - `concept`
+    - `matched_label`
+    - `form`
+    - `filed`
     - `reason`
   - overview should combine:
     - market snapshot metrics from `yfinance`
@@ -299,6 +309,14 @@ Immediate next implementation target:
   - current implementation note:
     - overview is still built as a table in `company/tables.py`
     - later work can promote it to a more canonical machine object if the backend needs that
+  - completeness should stay simple:
+    - `current`
+    - `stale`
+    - `missing`
+  - current completeness behavior:
+    - market rows are `current` when the market snapshot has a value
+    - SEC rows compare each metric to the latest available `as_of` within its statement group
+    - Yahoo rows compare each metric to the latest available annual period within its statement frame
   - current overview metric set should stay compact:
     - `last_price`
     - `market_cap`
@@ -358,7 +376,7 @@ Immediate next implementation target:
 - `tests/test_statement_matrix.py`
   - quarterly duration/direct/instant semantics and sparse-data behavior
 - `tests/test_company_tables.py`
-  - company summary, overview, and statement-availability contracts
+  - company summary, overview provenance/completeness, and statement-availability contracts
 - `tests/test_cli.py`
   - section wiring, file outputs, and JSON bundle coverage
 

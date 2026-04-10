@@ -9,6 +9,7 @@ import pandas as pd
 from valuation.company.statements import build_statement_table
 from valuation.company.yahoo_statements import build_yahoo_key_financials_table
 from valuation.company.yahoo_statements import build_yahoo_statement_table
+from valuation.company.yahoo_statements import YAHOO_STATEMENT_LABELS
 from valuation.company.service import CompanyResolution
 from valuation.data.normalize.tables import CompanyFactQuery, company_facts_to_table
 
@@ -65,6 +66,16 @@ STATEMENT_AVAILABILITY_REQUESTS = (
     ("cashflow", "annual"),
     ("cashflow", "quarterly"),
 )
+
+OVERVIEW_STATEMENT_BY_METRIC = {
+    "revenue": "income",
+    "net_income": "income",
+    "operating_cash_flow": "cashflow",
+    "cash_and_equivalents": "balance",
+    "total_assets": "balance",
+    "total_liabilities": "balance",
+    "stockholders_equity": "balance",
+}
 
 
 def resolution_to_table(resolution: CompanyResolution) -> pd.DataFrame:
@@ -135,17 +146,32 @@ def build_sec_overview_table(
         str(row["metric"]): row
         for row in facts_table.to_dict(orient="records")
     }
+    latest_as_of_by_statement = _latest_as_of_by_statement(fact_rows)
     for metric in OVERVIEW_FINANCIAL_METRICS:
         fact_row = fact_rows.get(metric)
         if fact_row and _has_value(fact_row.get("value")):
+            statement = OVERVIEW_STATEMENT_BY_METRIC.get(metric)
+            as_of = fact_row.get("end")
             rows.append(
                 {
                     "metric": metric,
                     "value": fact_row.get("value"),
                     "unit": fact_row.get("unit"),
                     "source": "sec",
-                    "as_of": fact_row.get("end"),
+                    "source_table": "companyfacts",
+                    "statement": statement,
+                    "period_type": _sec_period_type(fact_row.get("form")),
+                    "as_of": as_of,
                     "status": "available",
+                    "completeness": _completeness_for_as_of(
+                        as_of=as_of,
+                        latest_as_of=latest_as_of_by_statement.get(statement),
+                    ),
+                    "taxonomy": fact_row.get("taxonomy"),
+                    "concept": fact_row.get("concept"),
+                    "matched_label": None,
+                    "form": fact_row.get("form"),
+                    "filed": fact_row.get("filed"),
                     "reason": None,
                 }
             )
@@ -156,8 +182,17 @@ def build_sec_overview_table(
                 "value": None,
                 "unit": _overview_default_unit(metric, currency=currency),
                 "source": "sec",
+                "source_table": "companyfacts",
+                "statement": OVERVIEW_STATEMENT_BY_METRIC.get(metric),
+                "period_type": None,
                 "as_of": None,
                 "status": "unavailable",
+                "completeness": "missing",
+                "taxonomy": None,
+                "concept": None,
+                "matched_label": None,
+                "form": None,
+                "filed": None,
                 "reason": "No matching concepts found in SEC companyfacts",
             }
         )
@@ -190,40 +225,45 @@ def build_yahoo_overview_table(
 ) -> pd.DataFrame:
     """Return a compact machine-friendly overview from market snapshot + Yahoo annual statements."""
     rows = _market_overview_rows(market_snapshot, currency=currency, source="yfinance")
-    financials_table = build_yahoo_key_financials_table(
+    yahoo_rows = _build_yahoo_overview_financial_rows(
         income_frame=income_frame,
         balance_frame=balance_frame,
         cashflow_frame=cashflow_frame,
         currency=currency,
     )
-    financial_rows = {
-        str(row["metric"]): row
-        for row in financials_table.to_dict(orient="records")
-    }
     for metric in OVERVIEW_FINANCIAL_METRICS:
-        financial_row = financial_rows.get(metric)
+        financial_row = yahoo_rows.get(metric)
         if financial_row and _has_value(financial_row.get("value")):
-            rows.append(
-                {
-                    "metric": metric,
-                    "value": financial_row.get("value"),
-                    "unit": financial_row.get("unit"),
-                    "source": "yahoo",
-                    "as_of": financial_row.get("end"),
-                    "status": "available",
-                    "reason": None,
-                }
-            )
+            rows.append(financial_row)
             continue
+        statement = OVERVIEW_STATEMENT_BY_METRIC.get(metric)
+        frame = {
+            "income": income_frame,
+            "balance": balance_frame,
+            "cashflow": cashflow_frame,
+        }.get(statement, pd.DataFrame())
+        if frame is None or frame.empty:
+            reason = f"Yahoo returned no annual {statement} statement frame"
+        else:
+            reason = "Metric unavailable in Yahoo annual statements"
         rows.append(
             {
                 "metric": metric,
                 "value": None,
                 "unit": _overview_default_unit(metric, currency=currency),
                 "source": "yahoo",
+                "source_table": f"{statement}_statement" if statement else "yahoo_statement_frame",
+                "statement": statement,
+                "period_type": "annual",
                 "as_of": None,
                 "status": "unavailable",
-                "reason": "Metric unavailable in Yahoo annual statements",
+                "completeness": "missing",
+                "taxonomy": "yahoo",
+                "concept": metric,
+                "matched_label": None,
+                "form": None,
+                "filed": None,
+                "reason": reason,
             }
         )
     return pd.DataFrame(rows)
@@ -332,8 +372,17 @@ def _market_overview_rows(
                 "value": value,
                 "unit": currency if unit_kind == "currency" else "shares",
                 "source": source,
+                "source_table": "market_snapshot",
+                "statement": None,
+                "period_type": "market",
                 "as_of": as_of,
                 "status": "available" if _has_value(value) else "unavailable",
+                "completeness": "current" if _has_value(value) else "missing",
+                "taxonomy": None,
+                "concept": None,
+                "matched_label": None,
+                "form": None,
+                "filed": None,
                 "reason": None if _has_value(value) else "Unavailable in market snapshot",
             }
         )
@@ -348,3 +397,145 @@ def _overview_default_unit(metric: str, *, currency: str) -> str:
 
 def _has_value(value: object) -> bool:
     return value is not None and not pd.isna(value)
+
+
+def _latest_as_of_by_statement(
+    fact_rows: Mapping[str, Mapping[str, object]],
+) -> dict[str, str]:
+    latest: dict[str, str] = {}
+    for metric, row in fact_rows.items():
+        statement = OVERVIEW_STATEMENT_BY_METRIC.get(metric)
+        as_of = row.get("end")
+        if statement is None or not _has_value(row.get("value")) or not as_of:
+            continue
+        as_of_text = str(as_of)
+        current = latest.get(statement)
+        if current is None or as_of_text > current:
+            latest[statement] = as_of_text
+    return latest
+
+
+def _completeness_for_as_of(*, as_of: object, latest_as_of: str | None) -> str:
+    if not as_of:
+        return "missing"
+    if latest_as_of is None:
+        return "current"
+    return "current" if str(as_of) == str(latest_as_of) else "stale"
+
+
+def _sec_period_type(form: object) -> str | None:
+    normalized = str(form or "").upper()
+    if normalized in {"10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"}:
+        return "annual"
+    if normalized in {"10-Q", "10-Q/A", "6-K"}:
+        return "quarterly"
+    if normalized:
+        return "reported"
+    return None
+
+
+def _build_yahoo_overview_financial_rows(
+    *,
+    income_frame: pd.DataFrame,
+    balance_frame: pd.DataFrame,
+    cashflow_frame: pd.DataFrame,
+    currency: str,
+) -> dict[str, dict[str, object]]:
+    frames = {
+        "income": income_frame,
+        "balance": balance_frame,
+        "cashflow": cashflow_frame,
+    }
+    latest_period_by_statement = {
+        statement: _latest_yahoo_period_label(frame)
+        for statement, frame in frames.items()
+    }
+    rows: dict[str, dict[str, object]] = {}
+    for statement, frame in frames.items():
+        if frame is None or frame.empty:
+            continue
+        transposed = frame.transpose().copy()
+        transposed.index = pd.to_datetime(transposed.index)
+        transposed = transposed.sort_index(ascending=False)
+        for metric, candidates in YAHOO_STATEMENT_LABELS[statement].items():
+            if metric not in OVERVIEW_FINANCIAL_METRICS:
+                continue
+            resolved = _resolve_yahoo_overview_metric(
+                transposed=transposed,
+                statement=statement,
+                metric=metric,
+                candidates=candidates,
+                currency=currency,
+                latest_period_label=latest_period_by_statement.get(statement),
+            )
+            if resolved is not None:
+                rows[metric] = resolved
+    return rows
+
+
+def _latest_yahoo_period_label(frame: pd.DataFrame) -> str | None:
+    if frame is None or frame.empty:
+        return None
+    timestamps = sorted(pd.to_datetime(frame.columns), reverse=True)
+    if not timestamps:
+        return None
+    return f"FY {timestamps[0].year}"
+
+
+def _resolve_yahoo_overview_metric(
+    *,
+    transposed: pd.DataFrame,
+    statement: str,
+    metric: str,
+    candidates: tuple[str, ...],
+    currency: str,
+    latest_period_label: str | None,
+) -> dict[str, object] | None:
+    for timestamp, row in transposed.iterrows():
+        matched_label, value = _resolve_yahoo_value_with_label(
+            row,
+            candidates=candidates,
+        )
+        if not _has_value(value):
+            continue
+        as_of = f"FY {timestamp.year}"
+        return {
+            "metric": metric,
+            "value": value,
+            "unit": _overview_default_unit(metric, currency=currency),
+            "source": "yahoo",
+            "source_table": f"{statement}_statement",
+            "statement": statement,
+            "period_type": "annual",
+            "as_of": as_of,
+            "status": "available",
+            "completeness": _completeness_for_as_of(
+                as_of=as_of,
+                latest_as_of=latest_period_label,
+            ),
+            "taxonomy": "yahoo",
+            "concept": metric,
+            "matched_label": matched_label,
+            "form": None,
+            "filed": None,
+            "reason": None,
+        }
+    return None
+
+
+def _resolve_yahoo_value_with_label(
+    row: pd.Series,
+    *,
+    candidates: tuple[str, ...],
+) -> tuple[str | None, float | None]:
+    for candidate in candidates:
+        if candidate not in row.index:
+            continue
+        value = row[candidate]
+        if pd.isna(value):
+            continue
+        try:
+            return candidate, float(value)
+        except (TypeError, ValueError):
+            return candidate, None
+    return None, None

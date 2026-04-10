@@ -17,4 +17,5 @@ Coverage map:
 - `test_normalize_tables.py` covers latest-fact resolution and filing normalization
 - `test_statement_matrix.py` covers the tricky quarterly statement semantics
 - `test_company_tables.py` covers company-view tables such as overview and statement availability
+- `test_company_tables.py` is also where overview provenance/completeness behavior is currently locked down
 - `test_cli.py` covers section wiring and output artifacts

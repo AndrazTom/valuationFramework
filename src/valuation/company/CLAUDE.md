@@ -23,10 +23,25 @@ Rules:
   - `value`
   - `unit`
   - `source`
+  - `source_table`
+  - `statement`
+  - `period_type`
   - `as_of`
   - `status`
+  - `completeness`
+  - `taxonomy`
+  - `concept`
+  - `matched_label`
+  - `form`
+  - `filed`
   - `reason`
 - `company` should present overview before key financials and statement availability
+- overview completeness should stay simple:
+  - `current`
+  - `stale`
+  - `missing`
+- SEC overview rows should carry real `companyfacts` provenance when available
+- Yahoo overview rows should carry statement + matched-label provenance when available
 
 Module ownership:
 
