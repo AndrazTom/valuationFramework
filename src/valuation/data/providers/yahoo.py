@@ -116,6 +116,39 @@ class YahooFinanceClient:
             )
         return results
 
+    def fetch_company_profile(self, ticker: str) -> Dict[str, Any]:
+        """Return a small normalized company profile for global fallback workflows."""
+        yf = _load_yfinance()
+        instrument = yf.Ticker(ticker)
+        info = instrument.info or {}
+        fast_info = instrument.fast_info or {}
+
+        profile = {
+            "ticker": str(info.get("symbol") or ticker).upper(),
+            "name": info.get("shortName") or info.get("longName") or info.get("longname"),
+            "exchange": info.get("exchange") or fast_info.get("exchange"),
+            "exchange_display": info.get("fullExchangeName") or info.get("exchange"),
+            "currency": info.get("currency") or fast_info.get("currency"),
+            "quote_type": info.get("quoteType"),
+            "country": info.get("country"),
+            "sector": info.get("sectorDisp") or info.get("sector"),
+            "industry": info.get("industryDisp") or info.get("industry"),
+            "website": info.get("website"),
+        }
+        return profile
+
+    def fetch_statement_frame(self, ticker: str, *, statement: str, period: str) -> "pd.DataFrame":
+        """Return one raw yfinance statement frame for annual or quarterly views."""
+        import pandas as pd
+
+        attribute = _statement_attribute(statement=statement, period=period)
+        yf = _load_yfinance()
+        instrument = yf.Ticker(ticker)
+        frame = getattr(instrument, attribute)
+        if frame is None:
+            return pd.DataFrame()
+        return frame.copy()
+
 
 def _coerce_float(primary: Any, fallback: Any = None) -> Any:
     value = primary if primary is not None else fallback
@@ -131,3 +164,15 @@ def _load_yfinance():
     import yfinance as yf
 
     return yf
+
+
+def _statement_attribute(*, statement: str, period: str) -> str:
+    mapping = {
+        ("income", "annual"): "income_stmt",
+        ("income", "quarterly"): "quarterly_income_stmt",
+        ("balance", "annual"): "balance_sheet",
+        ("balance", "quarterly"): "quarterly_balance_sheet",
+        ("cashflow", "annual"): "cashflow",
+        ("cashflow", "quarterly"): "quarterly_cashflow",
+    }
+    return mapping[(statement, period)]

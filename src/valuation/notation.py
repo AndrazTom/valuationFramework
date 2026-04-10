@@ -68,11 +68,11 @@ def format_scaled_number(value: Any) -> Any:
     return _format_scaled(value)
 
 
-def format_scaled_currency(value: Any) -> Any:
+def format_scaled_currency(value: Any, currency: str = "USD") -> Any:
     """Render a number using valuation-friendly currency notation."""
     if not _is_number(value):
         return value
-    return _format_scaled(value, prefix="$")
+    return _format_scaled(value, prefix=_currency_prefix(currency))
 
 
 def _format_scaled(value: Any, prefix: str = "") -> str:
@@ -104,3 +104,10 @@ def _with_sign(prefix: str, rendered: str, negative: bool) -> str:
 
 def _is_number(value: Any) -> bool:
     return isinstance(value, Real) and not isinstance(value, bool)
+
+
+def _currency_prefix(currency: str) -> str:
+    normalized = str(currency or "USD").upper()
+    if normalized == "USD":
+        return "$"
+    return f"{normalized} "

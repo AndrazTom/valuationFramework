@@ -10,7 +10,7 @@ Current branch priority:
 
 - `main` should be useful on its own for generic company inspection
 - `brk` is the Berkshire-specific proving ground
-- `statement-debug` is the temporary correctness-hardening branch for statement extraction
+- temporary hardening branches should be merged back quickly, then deleted
 
 Long-term direction:
 
@@ -43,6 +43,8 @@ Rules:
 - treat ticker as a market-data alias, not the only identity
 - prefer official SEC facts for financial statements
 - use Yahoo mainly for market snapshot convenience and identifier search
+- for non-US coverage, use Yahoo as the first broad fallback for profile + statements when it actually has data
+- do not pretend Yahoo is universal; small markets may need explicit market-specific adapters later
 
 ## Main Branch Goal
 
@@ -78,6 +80,7 @@ As of 2026-04-09, `main` should contain or move toward:
 - repo-local launcher via `./vf`
 - generic `valuation company <identifier>` CLI
 - ticker / CIK / CUSIP / ISIN resolution through SEC + Yahoo
+- initial non-US fallback path through Yahoo-backed company/profile/statement workflows
 - compact terminal tables with shorter headers
 - selected generic SEC financial facts
 - generic statements command backed by SEC companyfacts:
@@ -96,9 +99,12 @@ As of 2026-04-09, `main` should contain or move toward:
 
 - `./setup`
 - `./vf company BRK-B`
+- `./vf company BNP.PA`
+- `./vf company SI0031102120`
 - `./vf company US0846707026`
 - `./vf snapshot BRK-B`
 - `./vf statements AAPL --statement income --period annual`
+- `./vf statements BNP.PA --statement income --period annual`
 - `./vf statements AAPL --statement balance --period quarterly`
 
 ## Next Main Priorities
@@ -107,6 +113,10 @@ As of 2026-04-09, `main` should contain or move toward:
 - prefer cleaner core-company filing views over noisy insider-form streams
 - keep narrowing wide tables where possible
 - add JSON output only after the table backbone is solid
+- decide where Yahoo fallback is sufficient versus where market-specific filing adapters are worth building
+- for Europe, prefer:
+  - Yahoo fallback for broad coverage
+  - then exchange / OAM / issuer-report adapters only where Yahoo coverage is missing or misleading
 
 ## Statement Debug Notes
 
@@ -147,6 +157,31 @@ As of 2026-04-09, `main` should contain or move toward:
     - XOM had a real year-end diluted-share gap; current fallback now uses basic-share data when observed basic and diluted EPS match
     - PGR operating income exists in vendor-standardized views but is not safely reconstructible from SEC companyfacts alone right now
     - UNH has small vendor-vs-companyfacts differences on net income; treat current `NetIncomeLoss` selection as shareholder-oriented SEC output unless a better generic rule is proven
+
+## International Notes
+
+- As of 2026-04-10, non-US support does not require a total rewrite
+- current workable split:
+  - SEC-backed path for US issuers
+  - Yahoo-backed fallback for non-US issuers when Yahoo has usable profile + statement coverage
+- live proof points:
+  - `BNP.PA` works directly as a non-US large-cap fallback case
+  - `KRKG` and ISIN `SI0031102120` can resolve through non-US fallback paths, but exchange/ticker quality should be treated carefully
+  - direct `KRKG.LJ` is not usable through Yahoo and should fail cleanly rather than inventing a fake company
+- likely medium-term structure:
+  - keep Yahoo as the broad global baseline
+  - add country / market specific adapters only for markets where Yahoo fails and where official filings are realistically parseable
+  - Europe is unlikely to be one simple unified free API; expect exchange / OAM / issuer-specific work for deeper coverage
+- display note:
+  - non-USD company views should render market snapshot prices with the table currency hint instead of defaulting to USD
+  - example target behavior: `EUR 236.5`, not `$236.5`
+
+## Branch State
+
+- `main`
+  - should hold the reusable generic backbone, including the merged statement QA work and the first non-US Yahoo fallback path
+- `brk`
+  - remains the Berkshire-specific proving ground
 
 ## Quality Bar
 
