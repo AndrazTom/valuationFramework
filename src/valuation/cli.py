@@ -270,12 +270,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 end_quarter=args.end_quarter,
                 outdir=args.outdir,
             )
-    except Exception as exc:
+    except (LookupError, RuntimeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
-
-    parser.error("Unknown command")
-    return 2
+    return 1
 
 
 def _non_negative_int(value: str) -> int:
@@ -287,8 +285,8 @@ def _non_negative_int(value: str) -> int:
 
 def _quarter_int(value: str) -> int:
     parsed = int(value)
-    if parsed < 1 or parsed > 4:
-        raise argparse.ArgumentTypeError("quarter must be between 1 and 4")
+    if parsed not in {1, 2, 3, 4}:
+        raise argparse.ArgumentTypeError("quarter must be one of 1, 2, 3, 4")
     return parsed
 
 
@@ -301,16 +299,22 @@ def _validate_statement_range(
     end_quarter: int | None,
 ) -> None:
     if period != "quarterly" and (start_quarter is not None or end_quarter is not None):
-        raise ValueError("quarter bounds are only valid with --period quarterly")
-    if start_quarter is not None and start_year is None:
-        raise ValueError("--start-quarter requires --start-year")
-    if end_quarter is not None and end_year is None:
-        raise ValueError("--end-quarter requires --end-year")
+        raise ValueError("quarter bounds are only valid when --period quarterly is used")
+    if (start_quarter is not None and start_year is None) or (
+        end_quarter is not None and end_year is None
+    ):
+        raise ValueError("quarter bounds require matching year bounds")
     if start_year is not None and end_year is not None:
-        start_boundary = (start_year, start_quarter or 1)
-        end_boundary = (end_year, end_quarter or 4)
-        if start_boundary > end_boundary:
-            raise ValueError("statement range start must be before or equal to range end")
+        if start_year > end_year:
+            raise ValueError("start year must be less than or equal to end year")
+        if (
+            period == "quarterly"
+            and start_year == end_year
+            and start_quarter is not None
+            and end_quarter is not None
+            and start_quarter > end_quarter
+        ):
+            raise ValueError("start quarter must be less than or equal to end quarter")
 
 
 if __name__ == "__main__":

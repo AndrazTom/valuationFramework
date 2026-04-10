@@ -69,6 +69,17 @@ class FakeYahooClient:
                     quote_type="EQUITY",
                 )
             ]
+        if query == "FR0000121014":
+            return [
+                YahooSearchQuote(
+                    symbol="MC.PA",
+                    exchange="PAR",
+                    exchange_display="Paris",
+                    short_name="LVMH",
+                    long_name="LVMH Moet Hennessy Louis Vuitton SE",
+                    quote_type="EQUITY",
+                )
+            ]
         return []
 
     def fetch_price_snapshot(self, ticker):
@@ -87,6 +98,18 @@ class FakeYahooClient:
                 "country": "France",
                 "sector": "Financial Services",
                 "industry": "Banks",
+            }
+        if normalized == "MC.PA":
+            return {
+                "ticker": "MC.PA",
+                "name": "LVMH",
+                "exchange": "PAR",
+                "exchange_display": "Paris",
+                "currency": "EUR",
+                "quote_type": "EQUITY",
+                "country": "France",
+                "sector": "Consumer Cyclical",
+                "industry": "Luxury Goods",
             }
         if normalized in {"BRK-B", "AAPL"}:
             return {
@@ -170,3 +193,15 @@ def test_fetch_company_facts_non_us_uses_yahoo_source():
 
     assert bundle.statement_source == "yahoo"
     assert bundle.company_facts is None
+
+
+def test_resolve_non_us_isin_does_not_require_sec_lookup():
+    resolution = resolve_company_identifier(
+        "FR0000121014",
+        identifier_kind="auto",
+        sec_client=FakeSecClient(),
+        yahoo_client=FakeYahooClient(),
+    )
+
+    assert resolution.ticker == "MC.PA"
+    assert resolution.sec_company is None

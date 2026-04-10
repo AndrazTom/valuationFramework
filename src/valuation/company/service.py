@@ -145,6 +145,32 @@ def resolve_company_identifier(
     kind = _normalize_identifier_kind(query, identifier_kind)
 
     if kind == "ticker":
+        if _looks_like_exchange_ticker(query):
+            yahoo_quote = _select_matching_equity_quote(
+                yahoo.search_quotes(query, max_results=10),
+                query=query,
+            )
+            if yahoo_quote is not None:
+                company_profile = yahoo.fetch_company_profile(yahoo_quote.symbol)
+                return _build_resolution(
+                    input_value=identifier,
+                    identifier_kind=kind,
+                    query_used=query,
+                    sec_company=None,
+                    yahoo_quote=yahoo_quote.as_dict(),
+                    company_profile=company_profile,
+                )
+            company_profile = yahoo.fetch_company_profile(query)
+            if not _is_viable_yahoo_profile(company_profile):
+                raise LookupError(f"Could not resolve identifier: {identifier}")
+            return _build_resolution(
+                input_value=identifier,
+                identifier_kind=kind,
+                query_used=query,
+                sec_company=None,
+                yahoo_quote=None,
+                company_profile=company_profile,
+            )
         try:
             sec_company = sec.lookup_company(query)
             return _build_resolution(
@@ -198,10 +224,13 @@ def resolve_company_identifier(
         if yahoo_quote is None:
             raise LookupError(f"No equity match found for {kind}: {identifier}")
         company_profile = yahoo.fetch_company_profile(yahoo_quote.symbol)
-        try:
-            sec_company = sec.lookup_company(yahoo_quote.symbol)
-        except LookupError:
-            sec_company = None
+        sec_company = None
+        normalized_symbol = yahoo_quote.symbol.upper()
+        if "." not in normalized_symbol:
+            try:
+                sec_company = sec.lookup_company(normalized_symbol)
+            except LookupError:
+                sec_company = None
         return _build_resolution(
             input_value=identifier,
             identifier_kind=kind,
@@ -337,6 +366,10 @@ def _looks_like_isin(value: str) -> bool:
 
 def _looks_like_cusip(value: str) -> bool:
     return bool(re.fullmatch(r"[A-Z0-9]{9}", value))
+
+
+def _looks_like_exchange_ticker(value: str) -> bool:
+    return "." in value.strip().upper()
 
 
 def _is_viable_yahoo_profile(profile: Mapping[str, Any] | None) -> bool:

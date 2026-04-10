@@ -166,7 +166,7 @@ As of 2026-04-09, `main` should contain or move toward:
   - Yahoo-backed fallback for non-US issuers when Yahoo has usable profile + statement coverage
 - live proof points:
   - `BNP.PA` works directly as a non-US large-cap fallback case
-  - `KRKG` and ISIN `SI0031102120` resolve to the Vienna cross-listing `KRKG.VI`, which currently has usable Yahoo statements
+  - `KRKG` and ISIN `SI0031102120` can resolve through non-US fallback paths, but exchange/ticker quality should be treated carefully
   - direct `KRKG.LJ` is not usable through Yahoo and should fail cleanly rather than inventing a fake company
 - likely medium-term structure:
   - keep Yahoo as the broad global baseline
@@ -186,6 +186,9 @@ As of 2026-04-09, `main` should contain or move toward:
   - holds the external QA-driven diluted-share fallback hardening work
 - `intl-markets`
   - holds the first non-US fallback architecture and formatting polish
+- `official-europe`
+  - experimental branch only
+  - hardcoded issuer-specific official-Europe support was removed because it was too specific and not viable as a general repo direction
 
 ## Quality Bar
 
