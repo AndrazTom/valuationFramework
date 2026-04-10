@@ -10,6 +10,7 @@ Current branch priority:
 
 - `main` should be useful on its own for generic company inspection
 - `brk` is the Berkshire-specific proving ground
+- `statement-debug` is the temporary correctness-hardening branch for statement extraction
 
 Long-term direction:
 
@@ -106,6 +107,41 @@ As of 2026-04-09, `main` should contain or move toward:
 - prefer cleaner core-company filing views over noisy insider-form streams
 - keep narrowing wide tables where possible
 - add JSON output only after the table backbone is solid
+
+## Statement Debug Notes
+
+- Berkshire currently has real SEC `companyfacts` sparsity for some standard income metrics
+- As of 2026-04-09 inspection:
+  - `EarningsPerShareDiluted` is absent for BRK in SEC companyfacts
+  - `WeightedAverageNumberOfDilutedSharesOutstanding` is absent for BRK in SEC companyfacts
+  - `GrossProfit` is absent for BRK in SEC companyfacts
+  - `OperatingIncomeLoss` exists for BRK but recent-period coverage is sparse/stale
+- Blank cells for those BRK rows are currently expected from the upstream data, not necessarily extraction bugs
+- Quarterly statement logic now distinguishes:
+  - additive flows
+  - instant balance-sheet facts
+  - direct-quarter-only metrics such as diluted EPS / diluted shares
+- Debug branch note:
+  - for some issuers like AAPL, fiscal year-end quarter diluted shares may be absent as direct quarter facts
+  - current debug behavior allows diluted shares to fall back to the FY average share count for that year-end quarter
+  - current debug behavior can then backfill diluted EPS from `quarter net income / diluted shares`
+  - this is a pragmatic fallback, not a perfect ground-truth replacement for a missing direct-quarter disclosure
+- Financial-institution note:
+  - banks like JPM often do not populate industrial-style quarterly income concepts in the way industrial issuers do
+  - generic revenue / pretax coverage should include bank-style concepts such as:
+    - `RevenuesNetOfInterestExpense`
+    - `InterestIncomeOperating`
+    - `InterestIncomeExpenseNet`
+    - `NoninterestIncome`
+    - `IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest`
+- Cross-sector sweep note:
+  - AAPL now looks broadly healthy on income, balance, and cashflow
+  - JPM income improved after bank-style revenue / pretax concept coverage
+  - CAT net income required alternate concepts such as `NetIncomeLossAvailableToCommonStockholdersBasic` / `ProfitLoss`
+  - BRK still has real upstream sparsity for diluted-share / diluted-EPS fields
+  - some rows like `gross_profit` remain sector-dependent and should not always be forced into existence
+  - user-facing statement tables should prefer dropping rows that are entirely empty across the selected periods rather than showing sector-inappropriate blanks
+  - generic balance sheet fallbacks now need to include broader equity and debt concepts where they are semantically close enough
 
 ## Quality Bar
 

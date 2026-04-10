@@ -12,15 +12,37 @@ INCOME_STATEMENT_DEFINITIONS = (
         (
             ("us-gaap", "Revenues"),
             ("us-gaap", "RevenueFromContractWithCustomerExcludingAssessedTax"),
+            ("us-gaap", "RevenuesNetOfInterestExpense"),
+            ("us-gaap", "InterestIncomeOperating"),
+            ("us-gaap", "InterestIncomeExpenseNet"),
+            ("us-gaap", "NoninterestIncome"),
         ),
     ),
     CompanyFactQuery("gross_profit", (("us-gaap", "GrossProfit"),)),
     CompanyFactQuery("operating_income", (("us-gaap", "OperatingIncomeLoss"),)),
     CompanyFactQuery(
         "pretax_income",
-        (("us-gaap", "IncomeBeforeTaxExpenseBenefit"),),
+        (
+            ("us-gaap", "IncomeBeforeTaxExpenseBenefit"),
+            (
+                "us-gaap",
+                "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+            ),
+            (
+                "us-gaap",
+                "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+            ),
+        ),
     ),
-    CompanyFactQuery("net_income", (("us-gaap", "NetIncomeLoss"),)),
+    CompanyFactQuery(
+        "net_income",
+        (
+            ("us-gaap", "NetIncomeLoss"),
+            ("us-gaap", "NetIncomeLossAvailableToCommonStockholdersDiluted"),
+            ("us-gaap", "NetIncomeLossAvailableToCommonStockholdersBasic"),
+            ("us-gaap", "ProfitLoss"),
+        ),
+    ),
     CompanyFactQuery(
         "diluted_eps",
         (("us-gaap", "EarningsPerShareDiluted"),),
@@ -31,7 +53,7 @@ INCOME_STATEMENT_DEFINITIONS = (
         "diluted_shares",
         (("us-gaap", "WeightedAverageNumberOfDilutedSharesOutstanding"),),
         unit="shares",
-        quarterly_value_kind="direct",
+        quarterly_value_kind="direct_or_annual",
     ),
 )
 
@@ -57,13 +79,20 @@ BALANCE_SHEET_DEFINITIONS = (
     CompanyFactQuery(
         "long_term_debt",
         (
+            ("us-gaap", "LongTermDebtAndCapitalLeaseObligations"),
             ("us-gaap", "LongTermDebtAndFinanceLeaseObligations"),
             ("us-gaap", "LongTermDebtNoncurrent"),
             ("us-gaap", "LongTermDebt"),
         ),
     ),
     CompanyFactQuery("total_liabilities", (("us-gaap", "Liabilities"),)),
-    CompanyFactQuery("stockholders_equity", (("us-gaap", "StockholdersEquity"),)),
+    CompanyFactQuery(
+        "stockholders_equity",
+        (
+            ("us-gaap", "StockholdersEquity"),
+            ("us-gaap", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"),
+        ),
+    ),
 )
 
 CASH_FLOW_DEFINITIONS = (
@@ -121,7 +150,7 @@ def build_statement_table(
 ) -> pd.DataFrame:
     """Return one generic statement table from SEC companyfacts."""
     definitions = STATEMENT_DEFINITIONS[statement]
-    return company_facts_to_statement_table(
+    frame = company_facts_to_statement_table(
         company_facts,
         definitions,
         period=period,
@@ -132,3 +161,60 @@ def build_statement_table(
         start_quarter=start_quarter,
         end_quarter=end_quarter,
     )
+    if statement == "income" and period == "quarterly":
+        frame = _fill_income_quarterly_gaps(frame)
+    return _drop_all_missing_rows(frame)
+
+
+def _fill_income_quarterly_gaps(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+
+    period_columns = [column for column in frame.columns if column not in {"metric", "unit"}]
+    if not period_columns:
+        return frame
+
+    filled = frame.copy()
+    metric_index = {row["metric"]: index for index, row in filled.iterrows()}
+    net_income_index = metric_index.get("net_income")
+    diluted_eps_index = metric_index.get("diluted_eps")
+    diluted_shares_index = metric_index.get("diluted_shares")
+    if net_income_index is None or diluted_eps_index is None or diluted_shares_index is None:
+        return filled
+
+    for column in period_columns:
+        net_income = filled.at[net_income_index, column]
+        diluted_eps = filled.at[diluted_eps_index, column]
+        diluted_shares = filled.at[diluted_shares_index, column]
+
+        if pd.isna(diluted_eps) and _is_positive_number(net_income) and _is_positive_number(diluted_shares):
+            filled.at[diluted_eps_index, column] = float(net_income) / float(diluted_shares)
+            diluted_eps = filled.at[diluted_eps_index, column]
+
+        if pd.isna(diluted_shares) and _is_positive_number(net_income) and _is_positive_number(diluted_eps):
+            filled.at[diluted_shares_index, column] = float(net_income) / float(diluted_eps)
+
+    return filled
+
+
+def _is_positive_number(value) -> bool:
+    return value is not None and not pd.isna(value) and float(value) > 0
+
+
+def _drop_all_missing_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+
+    period_columns = [column for column in frame.columns if column not in {"metric", "unit"}]
+    if not period_columns:
+        return frame
+
+    kept_rows = []
+    for _, row in frame.iterrows():
+        if any(not pd.isna(row[column]) for column in period_columns):
+            kept_rows.append(row.to_dict())
+
+    if not kept_rows:
+        return frame.iloc[0:0].copy()
+
+    return pd.DataFrame(kept_rows, columns=frame.columns)
