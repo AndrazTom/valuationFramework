@@ -24,7 +24,9 @@ Long-term direction:
 - `README.md` is for humans
 - `claude.md` and subtree `CLAUDE.md` files are AI-only readmes
 - keep `claude.md` current so a new chat can resume work quickly
-- coding agents should update `claude.md` whenever meaningful backend behavior, priorities, branch state, or workflow assumptions change
+- coding agents should update root `claude.md` whenever meaningful backend behavior, priorities, branch state, or workflow assumptions change
+- coding agents should also update relevant subtree `CLAUDE.md` files regularly when module-local contracts or workflow expectations change
+- create a new subtree `CLAUDE.md` when a module has enough local context that future chats would otherwise have to rediscover it
 - add subtree `CLAUDE.md` files only when module-specific context is genuinely useful
 
 ## Current Architecture
@@ -86,6 +88,7 @@ As of 2026-04-09, `main` should contain or move toward:
   - resolution
   - company/profile metadata
   - market snapshot
+  - overview
   - key financials
   - statement availability
   - recent analysis-relevant filings
@@ -201,6 +204,29 @@ As of 2026-04-09, `main` should contain or move toward:
 
 - As of 2026-04-10 hardening:
   - SEC-backed `company` views should enrich identity rows with Yahoo profile metadata when available
+  - `company` should expose a compact `overview` layer before the deeper financial tables
+  - overview rows should stay stable and backend-friendly:
+    - `metric`
+    - `value`
+    - `unit`
+    - `source`
+    - `as_of`
+    - `status`
+    - `reason`
+  - overview should combine:
+    - market snapshot metrics from `yfinance`
+    - latest core financial metrics from SEC or Yahoo
+  - current overview metric set should stay compact:
+    - `last_price`
+    - `market_cap`
+    - `shares`
+    - `revenue`
+    - `net_income`
+    - `operating_cash_flow`
+    - `cash_and_equivalents`
+    - `total_assets`
+    - `total_liabilities`
+    - `stockholders_equity`
   - `company` should show a statement-availability table with:
     - `statement`
     - `period`

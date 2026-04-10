@@ -9,6 +9,7 @@ Rules:
 - prefer reusable primitives here
 - keep raw values precise in backend tables
 - keep human-readable formatting in `reports/`
+- keep subtree `CLAUDE.md` files current when module-local behavior changes
 - treat `security_id` as the canonical backend join key
 - treat ticker as a market-data alias, not the only identity
 - generic CLI workflows should accept flexible identifiers when the free data path supports them

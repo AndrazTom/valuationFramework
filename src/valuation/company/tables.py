@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Mapping
+
 import pandas as pd
 
 from valuation.company.statements import build_statement_table
@@ -9,6 +11,22 @@ from valuation.company.yahoo_statements import build_yahoo_key_financials_table
 from valuation.company.yahoo_statements import build_yahoo_statement_table
 from valuation.company.service import CompanyResolution
 from valuation.data.normalize.tables import CompanyFactQuery, company_facts_to_table
+
+OVERVIEW_MARKET_METRICS = (
+    ("last_price", "currency"),
+    ("market_cap", "currency"),
+    ("shares", "shares"),
+)
+
+OVERVIEW_FINANCIAL_METRICS = (
+    "revenue",
+    "net_income",
+    "operating_cash_flow",
+    "cash_and_equivalents",
+    "total_assets",
+    "total_liabilities",
+    "stockholders_equity",
+)
 
 COMMON_FACT_DEFINITIONS = (
     CompanyFactQuery(
@@ -104,6 +122,48 @@ def build_key_financials_table(company_facts: dict) -> pd.DataFrame:
     return company_facts_to_table(company_facts, COMMON_FACT_DEFINITIONS)
 
 
+def build_sec_overview_table(
+    *,
+    market_snapshot: Mapping[str, object],
+    company_facts: Mapping[str, object],
+    currency: str = "USD",
+) -> pd.DataFrame:
+    """Return a compact machine-friendly overview from market snapshot + SEC facts."""
+    rows = _market_overview_rows(market_snapshot, currency=currency, source="yfinance")
+    facts_table = company_facts_to_table(company_facts, COMMON_FACT_DEFINITIONS)
+    fact_rows = {
+        str(row["metric"]): row
+        for row in facts_table.to_dict(orient="records")
+    }
+    for metric in OVERVIEW_FINANCIAL_METRICS:
+        fact_row = fact_rows.get(metric)
+        if fact_row and _has_value(fact_row.get("value")):
+            rows.append(
+                {
+                    "metric": metric,
+                    "value": fact_row.get("value"),
+                    "unit": fact_row.get("unit"),
+                    "source": "sec",
+                    "as_of": fact_row.get("end"),
+                    "status": "available",
+                    "reason": None,
+                }
+            )
+            continue
+        rows.append(
+            {
+                "metric": metric,
+                "value": None,
+                "unit": _overview_default_unit(metric, currency=currency),
+                "source": "sec",
+                "as_of": None,
+                "status": "unavailable",
+                "reason": "No matching concepts found in SEC companyfacts",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def build_yahoo_snapshot_key_financials_table(
     *,
     income_frame: pd.DataFrame,
@@ -118,6 +178,55 @@ def build_yahoo_snapshot_key_financials_table(
         cashflow_frame=cashflow_frame,
         currency=currency,
     )
+
+
+def build_yahoo_overview_table(
+    *,
+    market_snapshot: Mapping[str, object],
+    income_frame: pd.DataFrame,
+    balance_frame: pd.DataFrame,
+    cashflow_frame: pd.DataFrame,
+    currency: str = "USD",
+) -> pd.DataFrame:
+    """Return a compact machine-friendly overview from market snapshot + Yahoo annual statements."""
+    rows = _market_overview_rows(market_snapshot, currency=currency, source="yfinance")
+    financials_table = build_yahoo_key_financials_table(
+        income_frame=income_frame,
+        balance_frame=balance_frame,
+        cashflow_frame=cashflow_frame,
+        currency=currency,
+    )
+    financial_rows = {
+        str(row["metric"]): row
+        for row in financials_table.to_dict(orient="records")
+    }
+    for metric in OVERVIEW_FINANCIAL_METRICS:
+        financial_row = financial_rows.get(metric)
+        if financial_row and _has_value(financial_row.get("value")):
+            rows.append(
+                {
+                    "metric": metric,
+                    "value": financial_row.get("value"),
+                    "unit": financial_row.get("unit"),
+                    "source": "yahoo",
+                    "as_of": financial_row.get("end"),
+                    "status": "available",
+                    "reason": None,
+                }
+            )
+            continue
+        rows.append(
+            {
+                "metric": metric,
+                "value": None,
+                "unit": _overview_default_unit(metric, currency=currency),
+                "source": "yahoo",
+                "as_of": None,
+                "status": "unavailable",
+                "reason": "Metric unavailable in Yahoo annual statements",
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def build_sec_statement_availability_table(company_facts: dict) -> pd.DataFrame:
@@ -205,3 +314,37 @@ def _statement_availability_row(
         "latest_period": None,
         "reason": empty_reason,
     }
+
+
+def _market_overview_rows(
+    market_snapshot: Mapping[str, object],
+    *,
+    currency: str,
+    source: str,
+) -> list[dict[str, object]]:
+    rows = []
+    as_of = market_snapshot.get("latest_price_date")
+    for metric, unit_kind in OVERVIEW_MARKET_METRICS:
+        value = market_snapshot.get(metric)
+        rows.append(
+            {
+                "metric": metric,
+                "value": value,
+                "unit": currency if unit_kind == "currency" else "shares",
+                "source": source,
+                "as_of": as_of,
+                "status": "available" if _has_value(value) else "unavailable",
+                "reason": None if _has_value(value) else "Unavailable in market snapshot",
+            }
+        )
+    return rows
+
+
+def _overview_default_unit(metric: str, *, currency: str) -> str:
+    if metric == "shares":
+        return "shares"
+    return currency
+
+
+def _has_value(value: object) -> bool:
+    return value is not None and not pd.isna(value)

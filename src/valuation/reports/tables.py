@@ -14,6 +14,7 @@ from valuation.utils.formatting import humanize_frame
 DISPLAY_COLUMN_ALIASES = {
     "accession_number": "accession",
     "accepted_at": "accepted at",
+    "as_of": "as of",
     "earnings_before_income_taxes_usd": "pre-tax earnings",
     "filing_url": "filing url",
     "form_group": "category",

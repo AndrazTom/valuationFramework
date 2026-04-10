@@ -12,7 +12,9 @@ from valuation.company.service import fetch_company_facts, fetch_company_snapsho
 from valuation.company.statements import build_statement_table
 from valuation.company.tables import (
     build_key_financials_table,
+    build_sec_overview_table,
     build_sec_statement_availability_table,
+    build_yahoo_overview_table,
     build_yahoo_snapshot_key_financials_table,
     build_yahoo_statement_availability_table,
     company_summary_to_table,
@@ -143,12 +145,27 @@ def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limi
         identifier,
         identifier_kind=identifier_kind,
     )
+    company_currency = str(
+        getattr(bundle.resolution, "currency", None)
+        or (bundle.company_profile or {}).get("currency")
+        or "USD"
+    )
     sections = [
         ("Resolution", resolution_to_table(bundle.resolution)),
         ("Company", company_summary_to_table(bundle.resolution, company_profile=bundle.company_profile)),
         ("Market Snapshot", snapshot_to_table(bundle.market_snapshot)),
     ]
     if bundle.company_facts:
+        sections.append(
+            (
+                "Overview",
+                build_sec_overview_table(
+                    market_snapshot=bundle.market_snapshot,
+                    company_facts=bundle.company_facts,
+                    currency=company_currency,
+                ),
+            )
+        )
         sections.append(("Key Financials", build_key_financials_table(bundle.company_facts)))
         sections.append(("Statement Availability", build_sec_statement_availability_table(bundle.company_facts)))
     elif bundle.company_profile:
@@ -174,12 +191,24 @@ def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limi
         frames = {request: future.result() for request, future in futures.items()}
         sections.append(
             (
+                "Overview",
+                build_yahoo_overview_table(
+                    market_snapshot=bundle.market_snapshot,
+                    income_frame=frames[("income", "annual")],
+                    balance_frame=frames[("balance", "annual")],
+                    cashflow_frame=frames[("cashflow", "annual")],
+                    currency=company_currency,
+                ),
+            )
+        )
+        sections.append(
+            (
                 "Key Financials",
                 build_yahoo_snapshot_key_financials_table(
                     income_frame=frames[("income", "annual")],
                     balance_frame=frames[("balance", "annual")],
                     cashflow_frame=frames[("cashflow", "annual")],
-                    currency=str(bundle.resolution.currency or (bundle.company_profile or {}).get("currency") or "USD"),
+                    currency=company_currency,
                 ),
             )
         )
@@ -188,7 +217,7 @@ def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limi
                 "Statement Availability",
                 build_yahoo_statement_availability_table(
                     frames,
-                    currency=str(bundle.resolution.currency or (bundle.company_profile or {}).get("currency") or "USD"),
+                    currency=company_currency,
                 ),
             )
         )

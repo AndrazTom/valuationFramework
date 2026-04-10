@@ -54,6 +54,7 @@ Current backend behavior:
   - resolution
   - company/profile metadata
   - market snapshot
+  - overview
   - key financials
   - statement availability
   - recent core filings
@@ -93,6 +94,7 @@ Raw numeric precision stays in backend tables. Human-readable notation is applie
 
 - flexible identifier resolution
 - enriched company metadata even for SEC-backed issuers when Yahoo profile data is available
+- compact overview rows that combine market data with the best available financial backbone
 - market snapshot
 - key financials
 - statement availability by statement and period

@@ -115,6 +115,7 @@ def test_company_cli_writes_files(monkeypatch, tmp_path: Path):
 
     assert result == 0
     assert (tmp_path / "BRK-B" / "resolution.csv").exists()
+    assert (tmp_path / "BRK-B" / "overview.md").exists()
     assert (tmp_path / "BRK-B" / "key_financials.md").exists()
     assert (tmp_path / "BRK-B" / "statement_availability.md").exists()
 
@@ -159,6 +160,7 @@ def test_company_cli_writes_files_for_yahoo_fallback(monkeypatch, tmp_path: Path
     result = cli.main(["company", "BNP.PA", "--outdir", str(tmp_path)])
 
     assert result == 0
+    assert (tmp_path / "BNP-PA" / "overview.md").exists()
     assert (tmp_path / "BNP-PA" / "key_financials.md").exists()
     assert (tmp_path / "BNP-PA" / "statement_availability.md").exists()
 
@@ -534,8 +536,10 @@ def test_company_cli_json_format_writes_bundle_and_section_files(monkeypatch, tm
     output = json.loads(capsys.readouterr().out)
     assert output["command"] == "company"
     assert "company" in output["sections"]
+    assert "overview" in output["sections"]
     assert (tmp_path / "BRK-B" / "bundle.json").exists()
     assert (tmp_path / "BRK-B" / "company.json").exists()
+    assert (tmp_path / "BRK-B" / "overview.json").exists()
     assert not (tmp_path / "BRK-B" / "company.md").exists()
 
 

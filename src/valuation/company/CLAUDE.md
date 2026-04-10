@@ -17,3 +17,13 @@ Rules:
 - prefer official SEC facts for financial statements
 - use Yahoo only for search and market snapshot convenience
 - if a metric is missing, leave it blank rather than inventing heuristics
+- keep the compact `overview` layer stable before expanding deeper metric sets
+- current `overview` rows should expose:
+  - `metric`
+  - `value`
+  - `unit`
+  - `source`
+  - `as_of`
+  - `status`
+  - `reason`
+- `company` should present overview before key financials and statement availability
