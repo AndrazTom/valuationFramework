@@ -74,6 +74,31 @@ class FakeYahooClient:
     def fetch_price_snapshot(self, ticker):
         return {"ticker": ticker.upper(), "last_price": 500.0}
 
+    def fetch_company_profile(self, ticker):
+        normalized = ticker.upper()
+        if normalized == "BNP.PA":
+            return {
+                "ticker": "BNP.PA",
+                "name": "BNP Paribas SA",
+                "exchange": "PAR",
+                "exchange_display": "PAR",
+                "currency": "EUR",
+                "quote_type": "EQUITY",
+                "country": "France",
+                "sector": "Financial Services",
+                "industry": "Banks",
+            }
+        if normalized in {"BRK-B", "AAPL"}:
+            return {
+                "ticker": normalized,
+                "name": "Known Company",
+                "exchange": "NYSE" if normalized == "BRK-B" else "NASDAQ",
+                "exchange_display": "NYSE" if normalized == "BRK-B" else "NASDAQ",
+                "currency": "USD",
+                "quote_type": "EQUITY",
+            }
+        return {"ticker": normalized}
+
 
 def test_resolve_company_identifier_by_cik():
     resolution = resolve_company_identifier(
@@ -84,7 +109,7 @@ def test_resolve_company_identifier_by_cik():
     )
 
     assert resolution.ticker == "BRK-B"
-    assert resolution.security_id == "ticker:NYSE:BRK-B"
+    assert resolution.security_id == "cik:0001067983"
 
 
 def test_resolve_company_identifier_by_isin():
@@ -119,3 +144,29 @@ def test_fetch_company_facts():
 
     assert bundle.resolution.ticker == "BRK-B"
     assert bundle.company_facts == {"facts": {}}
+
+
+def test_resolve_company_identifier_non_us_ticker_uses_yahoo_fallback():
+    resolution = resolve_company_identifier(
+        "BNP.PA",
+        identifier_kind="ticker",
+        sec_client=FakeSecClient(),
+        yahoo_client=FakeYahooClient(),
+    )
+
+    assert resolution.ticker == "BNP.PA"
+    assert resolution.sec_company is None
+    assert resolution.company_name == "BNP Paribas SA"
+    assert resolution.security_id == "ticker:PAR:BNP.PA"
+
+
+def test_fetch_company_facts_non_us_uses_yahoo_source():
+    bundle = fetch_company_facts(
+        "BNP.PA",
+        identifier_kind="ticker",
+        sec_client=FakeSecClient(),
+        yahoo_client=FakeYahooClient(),
+    )
+
+    assert bundle.statement_source == "yahoo"
+    assert bundle.company_facts is None

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from valuation import cli
@@ -40,6 +41,26 @@ class FakeYahooClient:
     def search_quotes(self, query, max_results=10):
         return []
 
+    def fetch_company_profile(self, ticker):
+        return {
+            "ticker": ticker.upper(),
+            "name": "Example Co",
+            "exchange": "PAR",
+            "exchange_display": "PAR",
+            "currency": "EUR",
+            "quote_type": "EQUITY",
+            "country": "France",
+        }
+
+    def fetch_statement_frame(self, ticker, *, statement, period):
+        if statement == "income":
+            return pd.DataFrame(
+                {
+                    pd.Timestamp("2025-12-31"): {"Total Revenue": 100.0, "Net Income": 20.0},
+                }
+            )
+        return pd.DataFrame()
+
 
 def test_cli_rejects_negative_filings_limit():
     with pytest.raises(SystemExit):
@@ -72,6 +93,8 @@ def test_company_cli_writes_files(monkeypatch, tmp_path: Path):
                     "security_id": "ticker:NYSE:BRK-B",
                     "ticker": "BRK-B",
                     "exchange": "NYSE",
+                    "company_name": "BERKSHIRE HATHAWAY INC",
+                    "country": "United States",
                     "sec_company": SecCompany(
                         ticker="BRK-B",
                         cik="0001067983",
@@ -83,6 +106,7 @@ def test_company_cli_writes_files(monkeypatch, tmp_path: Path):
             "market_snapshot": {"ticker": "BRK-B", "last_price": 500.0},
             "submissions": {"filings": {"recent": {}}},
             "company_facts": {"facts": {}},
+            "company_profile": None,
         },
     )())
 
@@ -111,6 +135,8 @@ def test_statements_cli_writes_files(monkeypatch, tmp_path: Path):
                         "security_id": "ticker:NASDAQ:AAPL",
                         "ticker": "AAPL",
                         "exchange": "NASDAQ",
+                        "company_name": "APPLE INC",
+                        "country": "United States",
                         "sec_company": SecCompany(
                             ticker="AAPL",
                             cik="0000320193",
@@ -120,6 +146,7 @@ def test_statements_cli_writes_files(monkeypatch, tmp_path: Path):
                     },
                 )(),
                 "company_facts": {"facts": {}},
+                "statement_source": "sec",
             },
         )(),
     )
@@ -177,3 +204,51 @@ def test_statements_cli_rejects_reversed_range():
     )
 
     assert result == 1
+
+
+def test_statements_cli_writes_files_for_yahoo_fallback(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(cli, "YahooFinanceClient", lambda: FakeYahooClient())
+    monkeypatch.setattr(
+        cli,
+        "fetch_company_facts",
+        lambda identifier, identifier_kind="auto": type(
+            "Bundle",
+            (),
+            {
+                "resolution": type(
+                    "Resolution",
+                    (),
+                    {
+                        "input_value": identifier,
+                        "identifier_kind": identifier_kind,
+                        "query_used": identifier,
+                        "security_id": "ticker:PAR:BNP.PA",
+                        "ticker": "BNP.PA",
+                        "exchange": "PAR",
+                        "company_name": "BNP Paribas SA",
+                        "country": "France",
+                        "currency": "EUR",
+                        "sec_company": None,
+                    },
+                )(),
+                "company_facts": None,
+                "statement_source": "yahoo",
+            },
+        )(),
+    )
+
+    result = cli.main(
+        [
+            "statements",
+            "BNP.PA",
+            "--statement",
+            "income",
+            "--period",
+            "annual",
+            "--outdir",
+            str(tmp_path),
+        ]
+    )
+
+    assert result == 0
+    assert (tmp_path / "BNP-PA" / "income_statement_annual.csv").exists()

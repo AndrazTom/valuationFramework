@@ -9,7 +9,13 @@ from typing import Iterable, Optional, Sequence
 
 from valuation.company.service import fetch_company_facts, fetch_company_snapshot
 from valuation.company.statements import build_statement_table
-from valuation.company.tables import build_key_financials_table, resolution_to_table
+from valuation.company.tables import (
+    build_key_financials_table,
+    build_yahoo_snapshot_key_financials_table,
+    company_summary_to_table,
+    resolution_to_table,
+)
+from valuation.company.yahoo_statements import build_yahoo_statement_table
 from valuation.data.normalize.tables import (
     recent_filings_to_table,
     sec_company_to_table,
@@ -125,14 +131,30 @@ def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limi
         identifier,
         identifier_kind=identifier_kind,
     )
+    sections = [
+        ("Resolution", resolution_to_table(bundle.resolution)),
+        ("Company", company_summary_to_table(bundle.resolution, company_profile=bundle.company_profile)),
+        ("Market Snapshot", snapshot_to_table(bundle.market_snapshot)),
+    ]
+    if bundle.company_facts:
+        sections.append(("Key Financials", build_key_financials_table(bundle.company_facts)))
+    elif bundle.company_profile:
+        yahoo = YahooFinanceClient()
+        sections.append(
+            (
+                "Key Financials",
+                build_yahoo_snapshot_key_financials_table(
+                    income_frame=yahoo.fetch_statement_frame(bundle.resolution.ticker, statement="income", period="annual"),
+                    balance_frame=yahoo.fetch_statement_frame(bundle.resolution.ticker, statement="balance", period="annual"),
+                    cashflow_frame=yahoo.fetch_statement_frame(bundle.resolution.ticker, statement="cashflow", period="annual"),
+                    currency=str(bundle.resolution.currency or (bundle.company_profile or {}).get("currency") or "USD"),
+                ),
+            )
+        )
+    if bundle.submissions:
+        sections.append(("Recent Filings", recent_filings_to_table(bundle.submissions, limit=filings_limit)))
     _emit_sections(
-        [
-            ("Resolution", resolution_to_table(bundle.resolution)),
-            ("Company", sec_company_to_table(bundle.resolution.sec_company)),
-            ("Market Snapshot", snapshot_to_table(bundle.market_snapshot)),
-            ("Key Financials", build_key_financials_table(bundle.company_facts)),
-            ("Recent Filings", recent_filings_to_table(bundle.submissions, limit=filings_limit)),
-        ],
+        sections,
         Path(outdir) / bundle.resolution.ticker.upper().replace(".", "-"),
     )
     return 0
@@ -162,21 +184,35 @@ def run_statements(
         identifier,
         identifier_kind=identifier_kind,
     )
-    statement_table = build_statement_table(
-        bundle.company_facts,
-        statement=statement,
-        period=period,
-        limit=limit,
-        start_year=start_year,
-        end_year=end_year,
-        start_quarter=start_quarter,
-        end_quarter=end_quarter,
-    )
+    if bundle.statement_source == "sec":
+        statement_table = build_statement_table(
+            bundle.company_facts,
+            statement=statement,
+            period=period,
+            limit=limit,
+            start_year=start_year,
+            end_year=end_year,
+            start_quarter=start_quarter,
+            end_quarter=end_quarter,
+        )
+    else:
+        yahoo = YahooFinanceClient()
+        statement_table = build_yahoo_statement_table(
+            yahoo.fetch_statement_frame(bundle.resolution.ticker, statement=statement, period=period),
+            statement=statement,
+            period=period,
+            currency=str(bundle.resolution.currency or "USD"),
+            limit=limit,
+            start_year=start_year,
+            end_year=end_year,
+            start_quarter=start_quarter,
+            end_quarter=end_quarter,
+        )
     title = f"{statement.title()} Statement {period.title()}"
     _emit_sections(
         [
             ("Resolution", resolution_to_table(bundle.resolution)),
-            ("Company", sec_company_to_table(bundle.resolution.sec_company)),
+            ("Company", company_summary_to_table(bundle.resolution)),
             (title, statement_table),
         ],
         Path(outdir) / bundle.resolution.ticker.upper().replace(".", "-"),

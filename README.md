@@ -16,7 +16,7 @@ Longer term, the project is meant to become a small personal alternative to the 
 ## Current Data Sources
 
 - SEC EDGAR for filings and fundamentals
-- `yfinance` for market snapshot convenience and identifier search
+- `yfinance` for market snapshots, identifier search, and global fallback financial statements when available
 
 ## Local Setup
 
@@ -24,6 +24,7 @@ Longer term, the project is meant to become a small personal alternative to the 
 ./setup
 export VALUATION_SEC_USER_AGENT="valuationFramework/0.1 your-email@example.com"
 ./vf company BRK-B
+./vf company BNP.PA
 ./vf company US0846707026
 ```
 
@@ -44,13 +45,22 @@ Supported identifier paths today:
 - CUSIP
 - ISIN
 
+Current backend behavior:
+
+- US issuers use SEC first for filings and statements
+- non-US issuers fall back to Yahoo profile + statement data when available
+- smaller markets may require explicit identifiers or cross-listings until market-specific filing adapters exist
+
 Examples:
 
 ```bash
 ./vf company AAPL
+./vf company BNP.PA
+./vf company SI0031102120
 ./vf company 0000320193 --identifier-kind cik
 ./vf company US0378331005
 ./vf statements AAPL --statement income --period annual
+./vf statements BNP.PA --statement income --period annual
 ./vf statements AAPL --statement balance --period quarterly
 ./vf statements AAPL --statement cashflow --period quarterly --start-year 2025 --start-quarter 1 --end-year 2025 --end-quarter 4
 ```

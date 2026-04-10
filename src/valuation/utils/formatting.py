@@ -28,9 +28,9 @@ def humanize_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return display
 
 
-def format_currency(value: Any) -> Any:
+def format_currency(value: Any, *, currency: str = "USD") -> Any:
     """Format a numeric value using valuation-friendly currency notation."""
-    return format_scaled_currency(value)
+    return format_scaled_currency(value, currency=currency)
 
 
 def format_quantity(value: Any) -> Any:
@@ -52,7 +52,7 @@ def _format_value_for_display(value: Any, column: str, row: pd.Series) -> Any:
         return value.replace("_", " ")
     kind = _infer_format_kind(column=column, row=row)
     if kind == "currency":
-        return format_currency(value)
+        return format_currency(value, currency=_row_currency(row))
     if kind == "percent":
         return format_percent(value)
     if kind == "quantity":
@@ -124,6 +124,15 @@ def _infer_kind_from_field(field_name: str) -> Optional[str]:
     ):
         return "currency"
     return None
+
+
+def _row_currency(row: pd.Series) -> str:
+    unit = str(row.get("unit") or "").upper()
+    if unit.endswith("/SHARES"):
+        unit = unit.removesuffix("/SHARES")
+    if unit and unit != "SHARES":
+        return unit
+    return "USD"
 
 
 def _is_number(value: Any) -> bool:
