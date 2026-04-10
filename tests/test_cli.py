@@ -115,6 +115,51 @@ def test_company_cli_writes_files(monkeypatch, tmp_path: Path):
     assert result == 0
     assert (tmp_path / "BRK-B" / "resolution.csv").exists()
     assert (tmp_path / "BRK-B" / "key_financials.md").exists()
+    assert (tmp_path / "BRK-B" / "statement_availability.md").exists()
+
+
+def test_company_cli_writes_files_for_yahoo_fallback(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(cli, "YahooFinanceClient", lambda: FakeYahooClient())
+    monkeypatch.setattr(cli, "fetch_company_snapshot", lambda identifier, identifier_kind="auto": type(
+        "Bundle",
+        (),
+        {
+            "resolution": type(
+                "Resolution",
+                (),
+                {
+                    "input_value": identifier,
+                    "identifier_kind": identifier_kind,
+                    "query_used": identifier,
+                    "security_id": "ticker:PAR:BNP.PA",
+                    "ticker": "BNP.PA",
+                    "exchange": "PAR",
+                    "company_name": "BNP Paribas SA",
+                    "country": "France",
+                    "currency": "EUR",
+                    "sec_company": None,
+                },
+            )(),
+            "market_snapshot": {"ticker": "BNP.PA", "last_price": 89.0, "currency": "EUR"},
+            "submissions": None,
+            "company_facts": None,
+            "company_profile": {
+                "ticker": "BNP.PA",
+                "name": "BNP Paribas SA",
+                "exchange": "PAR",
+                "currency": "EUR",
+                "country": "France",
+                "sector": "Financial Services",
+                "industry": "Banks",
+            },
+        },
+    )())
+
+    result = cli.main(["company", "BNP.PA", "--outdir", str(tmp_path)])
+
+    assert result == 0
+    assert (tmp_path / "BNP-PA" / "key_financials.md").exists()
+    assert (tmp_path / "BNP-PA" / "statement_availability.md").exists()
 
 
 def test_statements_cli_writes_files(monkeypatch, tmp_path: Path):

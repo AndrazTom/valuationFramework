@@ -12,12 +12,18 @@ from valuation.utils.formatting import humanize_frame
 
 DISPLAY_COLUMN_ALIASES = {
     "accession_number": "accession",
+    "accepted_at": "accepted at",
     "earnings_before_income_taxes_usd": "pre-tax earnings",
+    "filing_url": "filing url",
+    "form_group": "category",
     "goodwill_usd": "goodwill",
     "identifiable_assets_usd": "assets",
     "depreciation_and_amortization_usd": "depr & amort",
     "interest_expense_usd": "interest expense",
     "latest_price_date": "price date",
+    "metric_count": "metrics",
+    "period_count": "periods",
+    "report_date": "report date",
     "security_id": "security id",
     "identifier_kind": "id kind",
     "query_used": "query",
@@ -79,7 +85,7 @@ def _wrap_terminal_cell(value, *, column: str):
         width = 30
     elif column_name in {"field", "metric"}:
         width = 24
-    elif column_name in {"concept", "primary document"}:
+    elif column_name in {"concept", "primary document", "description", "filing url", "reason", "website"}:
         width = 36
     elif column_name == "accession":
         width = 24

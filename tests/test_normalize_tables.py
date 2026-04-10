@@ -46,7 +46,10 @@ def test_recent_filings_to_table_handles_missing_columns():
     frame = recent_filings_to_table(submissions, limit=5)
 
     assert isinstance(frame, pd.DataFrame)
-    assert frame.shape == (2, 5)
+    assert frame.shape == (2, 10)
+    assert frame.iloc[0]["report_date"] is None
+    assert frame.iloc[0]["description"] is None
+    assert frame.iloc[0]["filing_url"] is None
     assert frame.iloc[0]["primary_document"] is None
     assert frame.iloc[1]["is_inline_xbrl"] is None
 
@@ -65,6 +68,34 @@ def test_recent_filings_to_table_clamps_negative_limit():
     frame = recent_filings_to_table(submissions, limit=-5)
 
     assert frame.empty
+
+
+def test_recent_filings_to_table_filters_to_preferred_forms():
+    submissions = {
+        "filings": {
+            "recent": {
+                "accessionNumber": ["0001", "0002", "0003"],
+                "filingDate": ["2026-01-03", "2026-01-02", "2026-01-01"],
+                "reportDate": ["2025-12-31", "2025-12-15", "2025-09-30"],
+                "form": ["4", "8-K", "10-Q"],
+                "primaryDocDescription": [
+                    "Statement of changes in beneficial ownership",
+                    "Current report",
+                    "Quarterly report",
+                ],
+            }
+        }
+    }
+
+    frame = recent_filings_to_table(
+        submissions,
+        limit=5,
+        preferred_forms=("10-Q", "8-K"),
+    )
+
+    assert list(frame["form"]) == ["10-Q", "8-K"]
+    assert frame.iloc[0]["form_group"] == "quarterly"
+    assert frame.iloc[1]["report_date"] == "2025-12-15"
 
 
 def test_company_facts_to_table_picks_latest_across_candidate_concepts():

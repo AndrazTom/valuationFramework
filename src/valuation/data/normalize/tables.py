@@ -9,6 +9,21 @@ import pandas as pd
 
 from valuation.data.providers.sec import SecCompany
 
+CORE_COMPANY_FILING_FORMS = (
+    "10-K",
+    "10-K/A",
+    "10-Q",
+    "10-Q/A",
+    "8-K",
+    "20-F",
+    "20-F/A",
+    "6-K",
+    "40-F",
+    "40-F/A",
+    "DEF 14A",
+    "DEF 14A/A",
+)
+
 
 @dataclass(frozen=True)
 class CompanyFactQuery:
@@ -38,39 +53,84 @@ def sec_company_to_table(company: SecCompany) -> pd.DataFrame:
     )
 
 
-def recent_filings_to_table(submissions: Mapping[str, Any], limit: int = 10) -> pd.DataFrame:
+def recent_filings_to_table(
+    submissions: Mapping[str, Any],
+    limit: int = 10,
+    *,
+    preferred_forms: Sequence[str] | None = None,
+) -> pd.DataFrame:
     limit = max(0, limit)
     recent = submissions.get("filings", {}).get("recent", {})
+    columns = [
+        "filing_date",
+        "report_date",
+        "accepted_at",
+        "form",
+        "form_group",
+        "description",
+        "accession_number",
+        "primary_document",
+        "filing_url",
+        "is_inline_xbrl",
+    ]
     if not recent:
-        return pd.DataFrame(
-            columns=[
-                "filing_date",
-                "form",
-                "accession_number",
-                "primary_document",
-                "is_inline_xbrl",
-            ]
-        )
+        return pd.DataFrame(columns=columns)
+    if limit == 0:
+        return pd.DataFrame(columns=columns)
 
     accession_numbers: Sequence[Any] = recent.get("accessionNumber", [])
     filing_dates: Sequence[Any] = recent.get("filingDate", [])
+    report_dates: Sequence[Any] = recent.get("reportDate", [])
+    acceptance_datetimes: Sequence[Any] = recent.get("acceptanceDateTime", [])
     forms: Sequence[Any] = recent.get("form", [])
+    descriptions: Sequence[Any] = recent.get("primaryDocDescription", [])
     primary_documents: Sequence[Any] = recent.get("primaryDocument", [])
     inline_xbrl_flags: Sequence[Any] = recent.get("isInlineXBRL", [])
+    cik = submissions.get("cik")
 
-    max_rows = min(limit, len(accession_numbers))
+    preferred_form_set = None
+    if preferred_forms is not None:
+        preferred_form_set = {str(form).upper() for form in preferred_forms}
+
     rows = []
-    for index in range(max_rows):
+    for index in range(len(accession_numbers)):
+        form = _get_or_none(forms, index)
+        if preferred_form_set is not None and str(form or "").upper() not in preferred_form_set:
+            continue
         rows.append(
             {
                 "filing_date": _get_or_none(filing_dates, index),
-                "form": _get_or_none(forms, index),
+                "report_date": _get_or_none(report_dates, index),
+                "accepted_at": _get_or_none(acceptance_datetimes, index),
+                "form": form,
+                "form_group": _filing_form_group(form),
+                "description": _get_or_none(descriptions, index),
                 "accession_number": _get_or_none(accession_numbers, index),
                 "primary_document": _get_or_none(primary_documents, index),
+                "filing_url": _build_filing_url(
+                    cik=cik,
+                    accession_number=_get_or_none(accession_numbers, index),
+                    primary_document=_get_or_none(primary_documents, index),
+                ),
                 "is_inline_xbrl": _get_or_none(inline_xbrl_flags, index),
+                "_priority": _filing_priority(form),
+                "_row_index": index,
             }
         )
-    return pd.DataFrame(rows)
+    rows = sorted(
+        rows,
+        key=lambda row: (
+            row["_priority"],
+            str(row.get("filing_date") or ""),
+            str(row.get("accepted_at") or ""),
+            -int(row["_row_index"]),
+        ),
+        reverse=True,
+    )[:limit]
+    normalized_rows = []
+    for row in rows:
+        normalized_rows.append({column: row.get(column) for column in columns})
+    return pd.DataFrame(normalized_rows, columns=columns)
 
 
 def company_facts_to_table(
@@ -635,3 +695,43 @@ def _get_or_none(values: Sequence[Any], index: int) -> Any:
     if index >= len(values):
         return None
     return values[index]
+
+
+def _filing_form_group(form: Any) -> str:
+    normalized = str(form or "").upper()
+    if normalized in {"10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"}:
+        return "annual"
+    if normalized in {"10-Q", "10-Q/A"}:
+        return "quarterly"
+    if normalized in {"6-K", "6-K/A"}:
+        return "foreign_current"
+    if normalized in {"8-K", "8-K/A"}:
+        return "current"
+    if normalized.startswith("DEF "):
+        return "proxy"
+    if normalized in {"3", "4", "5", "144", "SCHEDULE 13G", "SCHEDULE 13G/A", "SCHEDULE 13D", "SCHEDULE 13D/A"}:
+        return "ownership"
+    return "other"
+
+
+def _filing_priority(form: Any) -> int:
+    priorities = {
+        "annual": 5,
+        "quarterly": 5,
+        "foreign_current": 4,
+        "current": 3,
+        "proxy": 1,
+        "ownership": 0,
+        "other": 0,
+    }
+    return priorities[_filing_form_group(form)]
+
+
+def _build_filing_url(cik: Any, accession_number: Any, primary_document: Any) -> str | None:
+    if cik in {None, ""} or accession_number in {None, ""} or primary_document in {None, ""}:
+        return None
+    cik_digits = "".join(ch for ch in str(cik) if ch.isdigit())
+    if not cik_digits:
+        return None
+    accession = str(accession_number).replace("-", "")
+    return f"https://www.sec.gov/Archives/edgar/data/{int(cik_digits)}/{accession}/{primary_document}"

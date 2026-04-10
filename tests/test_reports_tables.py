@@ -79,3 +79,23 @@ def test_render_terminal_table_uses_snapshot_currency_hint():
     rendered = render_terminal_table(frame)
 
     assert "EUR 89.49" in rendered
+
+
+def test_render_terminal_table_uses_new_filing_and_availability_aliases():
+    frame = pd.DataFrame(
+        [
+            {
+                "report_date": "2025-12-31",
+                "form_group": "annual_report",
+                "period_count": 5,
+                "metric_count": 7,
+            }
+        ]
+    )
+
+    rendered = render_terminal_table(frame)
+
+    assert "report date" in rendered
+    assert "category" in rendered
+    assert "periods" in rendered
+    assert "metrics" in rendered

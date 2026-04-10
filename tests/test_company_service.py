@@ -158,6 +158,17 @@ def test_fetch_company_snapshot():
     assert bundle.market_snapshot["last_price"] == 500.0
 
 
+def test_fetch_company_snapshot_sec_includes_profile_enrichment():
+    bundle = fetch_company_snapshot(
+        "AAPL",
+        sec_client=FakeSecClient(),
+        yahoo_client=FakeYahooClient(),
+    )
+
+    assert bundle.company_profile is not None
+    assert bundle.company_profile["currency"] == "USD"
+
+
 def test_fetch_company_facts():
     bundle = fetch_company_facts(
         "BRK-B",

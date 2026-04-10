@@ -65,9 +65,13 @@ def fetch_company_snapshot(
         sec_client=sec,
         yahoo_client=yahoo,
     )
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         market_snapshot_future = executor.submit(
             yahoo.fetch_price_snapshot,
+            resolution.ticker,
+        )
+        company_profile_future = executor.submit(
+            yahoo.fetch_company_profile,
             resolution.ticker,
         )
         if resolution.sec_company is not None:
@@ -78,21 +82,21 @@ def fetch_company_snapshot(
             )
         else:
             company_bundle_future = None
-            company_profile_future = executor.submit(
-                yahoo.fetch_company_profile,
-                resolution.ticker,
-            )
 
         market_snapshot = market_snapshot_future.result()
+        try:
+            company_profile = company_profile_future.result()
+        except Exception:
+            company_profile = None
+        if not _is_viable_yahoo_profile(company_profile):
+            company_profile = None
         if company_bundle_future is not None:
             company_bundle = company_bundle_future.result()
             submissions = company_bundle["submissions"]
             company_facts = company_bundle["company_facts"]
-            company_profile = None
         else:
             submissions = None
             company_facts = None
-            company_profile = company_profile_future.result()
     return CompanySnapshotBundle(
         resolution=resolution,
         market_snapshot=market_snapshot,

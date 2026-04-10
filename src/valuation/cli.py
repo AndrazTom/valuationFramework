@@ -11,16 +11,20 @@ from valuation.company.service import fetch_company_facts, fetch_company_snapsho
 from valuation.company.statements import build_statement_table
 from valuation.company.tables import (
     build_key_financials_table,
+    build_sec_statement_availability_table,
     build_yahoo_snapshot_key_financials_table,
+    build_yahoo_statement_availability_table,
     company_summary_to_table,
     resolution_to_table,
 )
 from valuation.company.yahoo_statements import build_yahoo_statement_table
 from valuation.data.normalize.tables import (
+    CORE_COMPANY_FILING_FORMS,
     recent_filings_to_table,
     sec_company_to_table,
     snapshot_to_table,
 )
+from concurrent.futures import ThreadPoolExecutor
 from valuation.data.providers.sec import SecClient
 from valuation.data.providers.yahoo import YahooFinanceClient
 from valuation.reports.tables import (
@@ -138,21 +142,59 @@ def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limi
     ]
     if bundle.company_facts:
         sections.append(("Key Financials", build_key_financials_table(bundle.company_facts)))
+        sections.append(("Statement Availability", build_sec_statement_availability_table(bundle.company_facts)))
     elif bundle.company_profile:
         yahoo = YahooFinanceClient()
+        requests = [
+            ("income", "annual"),
+            ("income", "quarterly"),
+            ("balance", "annual"),
+            ("balance", "quarterly"),
+            ("cashflow", "annual"),
+            ("cashflow", "quarterly"),
+        ]
+        with ThreadPoolExecutor(max_workers=len(requests)) as executor:
+            futures = {
+                request: executor.submit(
+                    yahoo.fetch_statement_frame,
+                    bundle.resolution.ticker,
+                    statement=request[0],
+                    period=request[1],
+                )
+                for request in requests
+            }
+        frames = {request: future.result() for request, future in futures.items()}
         sections.append(
             (
                 "Key Financials",
                 build_yahoo_snapshot_key_financials_table(
-                    income_frame=yahoo.fetch_statement_frame(bundle.resolution.ticker, statement="income", period="annual"),
-                    balance_frame=yahoo.fetch_statement_frame(bundle.resolution.ticker, statement="balance", period="annual"),
-                    cashflow_frame=yahoo.fetch_statement_frame(bundle.resolution.ticker, statement="cashflow", period="annual"),
+                    income_frame=frames[("income", "annual")],
+                    balance_frame=frames[("balance", "annual")],
+                    cashflow_frame=frames[("cashflow", "annual")],
+                    currency=str(bundle.resolution.currency or (bundle.company_profile or {}).get("currency") or "USD"),
+                ),
+            )
+        )
+        sections.append(
+            (
+                "Statement Availability",
+                build_yahoo_statement_availability_table(
+                    frames,
                     currency=str(bundle.resolution.currency or (bundle.company_profile or {}).get("currency") or "USD"),
                 ),
             )
         )
     if bundle.submissions:
-        sections.append(("Recent Filings", recent_filings_to_table(bundle.submissions, limit=filings_limit)))
+        sections.append(
+            (
+                "Recent Filings",
+                recent_filings_to_table(
+                    bundle.submissions,
+                    limit=filings_limit,
+                    preferred_forms=CORE_COMPANY_FILING_FORMS,
+                ),
+            )
+        )
     _emit_sections(
         sections,
         Path(outdir) / bundle.resolution.ticker.upper().replace(".", "-"),

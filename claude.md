@@ -81,6 +81,13 @@ As of 2026-04-09, `main` should contain or move toward:
 - generic `valuation company <identifier>` CLI
 - ticker / CIK / CUSIP / ISIN resolution through SEC + Yahoo
 - initial non-US fallback path through Yahoo-backed company/profile/statement workflows
+- `company` is moving toward the primary single-security backend view:
+  - resolution
+  - company/profile metadata
+  - market snapshot
+  - key financials
+  - statement availability
+  - recent analysis-relevant filings
 - compact terminal tables with shorter headers
 - selected generic SEC financial facts
 - generic statements command backed by SEC companyfacts:
@@ -111,6 +118,7 @@ As of 2026-04-09, `main` should contain or move toward:
 ## Next Main Priorities
 
 - improve statement concept coverage and defaults
+- keep strengthening `company` as the main reusable backend object before adding API/UI surface
 - prefer cleaner core-company filing views over noisy insider-form streams
 - keep narrowing wide tables where possible
 - add JSON output only after the table backbone is solid
@@ -161,6 +169,9 @@ As of 2026-04-09, `main` should contain or move toward:
   - CLI behavior note:
     - if a statement fetch normalizes to no rows, fail cleanly instead of writing a successful `(no rows)` table
     - `change_in_cash` should never fall back to `End Cash Position`; that is semantically a balance, not a flow
+  - company-view note:
+    - `company` should expose statement availability with explicit source + availability reason codes
+    - for Yahoo-backed names, empty quarterly frames should surface as provider gaps, not silent blanks
 
 ## International Notes
 
@@ -183,6 +194,31 @@ As of 2026-04-09, `main` should contain or move toward:
   - broad annual statement coverage looks workable across major EU/UK large caps
   - some issuers such as `MC.PA`, `OR.PA`, `NESN.SW`, and `SU.PA` have no Yahoo quarterly income/cashflow frames
   - those empty quarterly cases should error clearly rather than pretending the command succeeded
+
+## Company View Notes
+
+- As of 2026-04-10 hardening:
+  - SEC-backed `company` views should enrich identity rows with Yahoo profile metadata when available
+  - `company` should show a statement-availability table with:
+    - `statement`
+    - `period`
+    - `source`
+    - `status`
+    - `period_count`
+    - `latest_period`
+    - `reason`
+  - preferred reason codes currently include:
+    - `no_companyfacts_rows`
+    - `provider_returned_no_data`
+    - `no_supported_rows`
+  - for SEC issuers, recent filings in `company` should prefer analysis-relevant forms like:
+    - `10-K`
+    - `10-Q`
+    - `8-K`
+    - `20-F`
+    - `6-K`
+    - `40-F`
+    - `DEF 14A`
 
 ## Branch State
 
