@@ -11,3 +11,5 @@ Rules:
 - apply display aliases and human-readable formatting only for terminal / markdown / csv presentation
 - when adding a new `company` section, keep JSON bundle naming stable and make the section export alongside the table outputs
 - prefer small generic helpers over command-specific formatting branches
+- current export pattern is one `bundle.json` plus one file per section slug
+- empty tables are valid inputs and should stay explicit rather than triggering command-specific render branches

@@ -11,6 +11,7 @@ Current branch priority:
 - `main` should be useful on its own for generic company inspection
 - `brk` is the Berkshire-specific proving ground
 - temporary hardening branches should be merged back quickly, then deleted
+- current hardening branch `feature/overview-quality-layer` is focused on strengthening the compact overview contract before adding more backend surface
 
 Long-term direction:
 
@@ -28,6 +29,15 @@ Long-term direction:
 - coding agents should also update relevant subtree `CLAUDE.md` files regularly when module-local contracts or workflow expectations change
 - create a new subtree `CLAUDE.md` when a module has enough local context that future chats would otherwise have to rediscover it
 - add subtree `CLAUDE.md` files only when module-specific context is genuinely useful
+
+## Working Notes
+
+- run commands from the repo root
+- use the repo venv when verifying behavior:
+  - `. .venv/bin/activate`
+  - `PYTHONPATH=src pytest -q`
+- bare `pytest` can import the wrong package tree if `src/` is not on `PYTHONPATH`
+- the shell environment may not always have `rg`; standard tools like `find`, `sed`, and `grep` are acceptable fallbacks
 
 ## Current Architecture
 
@@ -48,6 +58,40 @@ Rules:
 - use Yahoo mainly for market snapshot convenience and identifier search
 - for non-US coverage, use Yahoo as the first broad fallback for profile + statements when it actually has data
 - do not pretend Yahoo is universal; small markets may need explicit market-specific adapters later
+- prefer adding stable backend tables/objects before adding more CLI surface area
+- keep module boundaries explicit:
+  - `data/providers` fetch
+  - `data/normalize` stabilizes
+  - `company` assembles product-facing tables
+  - `reports` renders and exports
+
+## Repo Map
+
+- `src/valuation/cli.py`
+  - command parsing and top-level orchestration
+  - should stay thin
+- `src/valuation/company/service.py`
+  - identifier resolution and provider orchestration
+  - decides SEC-backed versus Yahoo-backed company paths
+- `src/valuation/company/statements.py`
+  - generic SEC statement metric definitions
+  - quarterly reconstruction heuristics and sparse-data handling
+- `src/valuation/company/yahoo_statements.py`
+  - explicit Yahoo label mapping
+  - fallback path only, not a deep modeling layer
+- `src/valuation/company/tables.py`
+  - compact backend-facing company tables such as summary, overview, and statement availability
+- `src/valuation/data/normalize/tables.py`
+  - core normalization contract layer
+  - latest-fact selection, filing normalization, statement period matrix logic
+- `src/valuation/data/providers/`
+  - thin wrappers over SEC and Yahoo
+- `src/valuation/reports/tables.py`
+  - rendering and export helpers
+- `src/valuation/securities/identifiers.py`
+  - canonical `security_id` rules
+- `tests/`
+  - statement matrix and normalization tests are the main behavioral guardrails
 
 ## Main Branch Goal
 
@@ -94,6 +138,7 @@ As of 2026-04-09, `main` should contain or move toward:
   - recent analysis-relevant filings
 - compact terminal tables with shorter headers
 - minimal CLI JSON output path for machine-readable backend bundles
+- compact `overview` rows that combine market data with latest core financial metrics
 - selected generic SEC financial facts
 - generic statements command backed by SEC companyfacts:
   - income
@@ -124,6 +169,7 @@ As of 2026-04-09, `main` should contain or move toward:
 
 - improve statement concept coverage and defaults
 - keep strengthening `company` as the main reusable backend object before adding API/UI surface
+- keep the compact `overview` layer stable and increase trust/provenance before expanding metric count
 - prefer cleaner core-company filing views over noisy insider-form streams
 - keep narrowing wide tables where possible
 - keep the new JSON path minimal and backend-oriented rather than turning it into an API surface too early
@@ -135,6 +181,9 @@ As of 2026-04-09, `main` should contain or move toward:
 ## Statement Debug Notes
 
 - Berkshire currently has real SEC `companyfacts` sparsity for some standard income metrics
+- the trickiest generic statement logic currently lives in:
+  - `src/valuation/company/statements.py`
+  - `src/valuation/data/normalize/tables.py`
 - As of 2026-04-09 inspection:
   - `EarningsPerShareDiluted` is absent for BRK in SEC companyfacts
   - `WeightedAverageNumberOfDilutedSharesOutstanding` is absent for BRK in SEC companyfacts
@@ -174,6 +223,9 @@ As of 2026-04-09, `main` should contain or move toward:
   - CLI behavior note:
     - if a statement fetch normalizes to no rows, fail cleanly instead of writing a successful `(no rows)` table
     - `change_in_cash` should never fall back to `End Cash Position`; that is semantically a balance, not a flow
+  - test coverage note:
+    - `tests/test_statement_matrix.py` protects SEC quarterly matrix semantics
+    - `tests/test_yahoo_statement_tables.py` protects Yahoo label mapping and period filtering
   - company-view note:
     - `company` should expose statement availability with explicit source + availability reason codes
     - for Yahoo-backed names, empty quarterly frames should surface as provider gaps, not silent blanks
@@ -216,6 +268,9 @@ As of 2026-04-09, `main` should contain or move toward:
   - overview should combine:
     - market snapshot metrics from `yfinance`
     - latest core financial metrics from SEC or Yahoo
+  - current implementation note:
+    - overview is still built as a table in `company/tables.py`
+    - later work can promote it to a more canonical machine object if the backend needs that
   - current overview metric set should stay compact:
     - `last_price`
     - `market_cap`
@@ -257,6 +312,27 @@ As of 2026-04-09, `main` should contain or move toward:
     - `description`
     - `primary_document`
     - `filing_url`
+  - `company` command order should remain:
+    - resolution
+    - company
+    - market snapshot
+    - overview
+    - key financials
+    - statement availability
+    - recent filings
+
+## Test Notes
+
+- `tests/test_company_service.py`
+  - identifier resolution and provider-path selection
+- `tests/test_normalize_tables.py`
+  - latest-fact resolution, filing normalization, and table contracts
+- `tests/test_statement_matrix.py`
+  - quarterly duration/direct/instant semantics and sparse-data behavior
+- `tests/test_company_tables.py`
+  - company summary, overview, and statement-availability contracts
+- `tests/test_cli.py`
+  - section wiring, file outputs, and JSON bundle coverage
 
 ## Output Notes
 

@@ -27,3 +27,24 @@ Rules:
   - `status`
   - `reason`
 - `company` should present overview before key financials and statement availability
+
+Module ownership:
+
+- `service.py`
+  - resolve identifiers
+  - choose SEC-backed versus Yahoo-backed path
+  - fetch provider bundles concurrently where useful
+- `tables.py`
+  - define compact company-facing tables and overview/availability summaries
+- `statements.py`
+  - own SEC statement concept sets and quarterly reconstruction rules
+- `yahoo_statements.py`
+  - own Yahoo label mapping for fallback statements and Yahoo key financials
+
+Statement rules:
+
+- SEC quarterly flows may derive quarter values from YTD/FY facts
+- balance-sheet items should stay instant and avoid subtraction logic
+- diluted EPS / diluted shares should prefer direct-quarter values
+- helper heuristics are acceptable only when they are narrow and defensible
+- Yahoo statement handling should stay explicit and shallow; do not build complex inference layers on vendor-standardized rows
