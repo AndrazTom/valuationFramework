@@ -5,8 +5,11 @@
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+.codex
 .venv/
 __pycache__/
 *.egg-info/
 build/
+dist/
+*.whl
 outputs/

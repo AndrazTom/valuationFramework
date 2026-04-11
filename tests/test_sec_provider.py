@@ -26,14 +26,14 @@ def test_fetch_company_tickers_uses_cache(monkeypatch):
     client = SecClient()
     calls = {"count": 0}
 
-    def fake_get_json(url):
+    def fake_fetch_json(url):
         calls["count"] += 1
         return {
             "fields": ["cik", "name", "ticker", "exchange"],
             "data": [[1067983, "BERKSHIRE HATHAWAY INC", "BRK-B", "NYSE"]],
         }
 
-    monkeypatch.setattr(client, "_get_json", fake_get_json)
+    monkeypatch.setattr(client, "_fetch_json_uncached", fake_fetch_json)
 
     first = client.fetch_company_tickers()
     second = client.fetch_company_tickers()

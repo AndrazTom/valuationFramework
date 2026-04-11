@@ -1,4 +1,8 @@
-from valuation.company.service import fetch_company_snapshot, resolve_company_identifier
+from valuation.company.service import (
+    fetch_company_facts,
+    fetch_company_snapshot,
+    resolve_company_identifier,
+)
 from valuation.data.providers.sec import SecCompany
 from valuation.data.providers.yahoo import YahooSearchQuote
 
@@ -35,6 +39,11 @@ class FakeSecClient:
             bundle["company_facts"] = {"facts": {}}
         return bundle
 
+    def fetch_company_facts(self, cik):
+        if str(cik).zfill(10) in {"0001067983", "0000320193"}:
+            return {"facts": {}}
+        raise LookupError(cik)
+
 
 class FakeYahooClient:
     def search_quotes(self, query, max_results=10):
@@ -60,10 +69,58 @@ class FakeYahooClient:
                     quote_type="EQUITY",
                 )
             ]
+        if query == "FR0000121014":
+            return [
+                YahooSearchQuote(
+                    symbol="MC.PA",
+                    exchange="PAR",
+                    exchange_display="Paris",
+                    short_name="LVMH",
+                    long_name="LVMH Moet Hennessy Louis Vuitton SE",
+                    quote_type="EQUITY",
+                )
+            ]
         return []
 
     def fetch_price_snapshot(self, ticker):
         return {"ticker": ticker.upper(), "last_price": 500.0}
+
+    def fetch_company_profile(self, ticker):
+        normalized = ticker.upper()
+        if normalized == "BNP.PA":
+            return {
+                "ticker": "BNP.PA",
+                "name": "BNP Paribas SA",
+                "exchange": "PAR",
+                "exchange_display": "PAR",
+                "currency": "EUR",
+                "quote_type": "EQUITY",
+                "country": "France",
+                "sector": "Financial Services",
+                "industry": "Banks",
+            }
+        if normalized == "MC.PA":
+            return {
+                "ticker": "MC.PA",
+                "name": "LVMH",
+                "exchange": "PAR",
+                "exchange_display": "Paris",
+                "currency": "EUR",
+                "quote_type": "EQUITY",
+                "country": "France",
+                "sector": "Consumer Cyclical",
+                "industry": "Luxury Goods",
+            }
+        if normalized in {"BRK-B", "AAPL"}:
+            return {
+                "ticker": normalized,
+                "name": "Known Company",
+                "exchange": "NYSE" if normalized == "BRK-B" else "NASDAQ",
+                "exchange_display": "NYSE" if normalized == "BRK-B" else "NASDAQ",
+                "currency": "USD",
+                "quote_type": "EQUITY",
+            }
+        return {"ticker": normalized}
 
 
 def test_resolve_company_identifier_by_cik():
@@ -75,7 +132,7 @@ def test_resolve_company_identifier_by_cik():
     )
 
     assert resolution.ticker == "BRK-B"
-    assert resolution.security_id == "ticker:NYSE:BRK-B"
+    assert resolution.security_id == "cik:0001067983"
 
 
 def test_resolve_company_identifier_by_isin():
@@ -99,3 +156,63 @@ def test_fetch_company_snapshot():
 
     assert bundle.resolution.ticker == "BRK-B"
     assert bundle.market_snapshot["last_price"] == 500.0
+
+
+def test_fetch_company_snapshot_sec_includes_profile_enrichment():
+    bundle = fetch_company_snapshot(
+        "AAPL",
+        sec_client=FakeSecClient(),
+        yahoo_client=FakeYahooClient(),
+    )
+
+    assert bundle.company_profile is not None
+    assert bundle.company_profile["currency"] == "USD"
+
+
+def test_fetch_company_facts():
+    bundle = fetch_company_facts(
+        "BRK-B",
+        sec_client=FakeSecClient(),
+        yahoo_client=FakeYahooClient(),
+    )
+
+    assert bundle.resolution.ticker == "BRK-B"
+    assert bundle.company_facts == {"facts": {}}
+
+
+def test_resolve_company_identifier_non_us_ticker_uses_yahoo_fallback():
+    resolution = resolve_company_identifier(
+        "BNP.PA",
+        identifier_kind="ticker",
+        sec_client=FakeSecClient(),
+        yahoo_client=FakeYahooClient(),
+    )
+
+    assert resolution.ticker == "BNP.PA"
+    assert resolution.sec_company is None
+    assert resolution.company_name == "BNP Paribas SA"
+    assert resolution.security_id == "ticker:PAR:BNP.PA"
+
+
+def test_fetch_company_facts_non_us_uses_yahoo_source():
+    bundle = fetch_company_facts(
+        "BNP.PA",
+        identifier_kind="ticker",
+        sec_client=FakeSecClient(),
+        yahoo_client=FakeYahooClient(),
+    )
+
+    assert bundle.statement_source == "yahoo"
+    assert bundle.company_facts is None
+
+
+def test_resolve_non_us_isin_does_not_require_sec_lookup():
+    resolution = resolve_company_identifier(
+        "FR0000121014",
+        identifier_kind="auto",
+        sec_client=FakeSecClient(),
+        yahoo_client=FakeYahooClient(),
+    )
+
+    assert resolution.ticker == "MC.PA"
+    assert resolution.sec_company is None

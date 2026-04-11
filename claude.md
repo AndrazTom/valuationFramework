@@ -1,526 +1,467 @@
 # valuationFramework
 
+AI-only repo contract.
+
 ## Purpose
 
-This repository is for building a practical stock valuation framework.
+Build a practical stock-financials and valuation backbone.
 
-The scope is general: the code should support valuing many public companies.
+Current branch priority:
 
-The priority case is Berkshire Hathaway, where the goal is to estimate intrinsic value as precisely as reasonably possible without turning the repo into an overbuilt research platform.
+- `brk` should inherit the current generic company/statement backend from `main`
+- `brk` is the Berkshire-specific proving ground layered on top of that generic base
+- temporary hardening branches should be merged back quickly, then deleted
+- current branch focus is stabilizing Berkshire workflows after inheriting the newer generic backend
 
-This is also a hobby project. It does not need a rigid product end-state upfront. The repo should support exploration, with enough structure that experimental work can later be turned into reusable tooling.
+Long-term direction:
 
-## Project Philosophy
+- a smaller personal alternative to the financial-data side of TradingView
+- more emphasis on statements, balance sheets, and cash flows
+- free-first where practical
+- CLI first, thin API/UI later
 
-The right approach is to build by example:
+## Documentation Rules
 
-- start with one hard case: Berkshire Hathaway
-- use that case to discover what generic tooling is actually needed
-- extract reusable pieces into `main` only after they prove useful
-- allow the project to remain a research backend for a while before deciding whether it becomes an app
+- `README.md` is for humans
+- `claude.md` and subtree `CLAUDE.md` files are AI-only readmes
+- keep `claude.md` current so a new chat can resume work quickly
+- coding agents should update root `claude.md` whenever meaningful backend behavior, priorities, branch state, or workflow assumptions change
+- coding agents should also update relevant subtree `CLAUDE.md` files regularly when module-local contracts or workflow expectations change
+- create a new subtree `CLAUDE.md` when a module has enough local context that future chats would otherwise have to rediscover it
+- add subtree `CLAUDE.md` files only when module-specific context is genuinely useful
 
-Possible end states are all acceptable:
+## Working Notes
 
-- a strong personal valuation research backend
-- a CLI tool that produces repeatable valuation tables
-- a local API/backend that powers a UI later
-- a small portfolio of company-specific valuation modules built on one common core
+- run commands from the repo root
+- use the repo venv when verifying behavior:
+  - `. .venv/bin/activate`
+  - `PYTHONPATH=src pytest -q`
+- bare `pytest` can import the wrong package tree if `src/` is not on `PYTHONPATH`
+- the shell environment may not always have `rg`; standard tools like `find`, `sed`, and `grep` are acceptable fallbacks
 
-The project does not need a final product decision now. The immediate goal is to make it useful, inspectable, and extensible.
-
-Longer-term direction:
-
-- build a smaller personal alternative to the financial-data side of TradingView
-- emphasize statements, balance sheets, and cash flows more than charting
-- stay free-first where practical
-- treat search, watchlists, and richer UI features as later layers
-
-## Documentation Policy
-
-Keep documentation short, current, and close to the code:
-
-- `README.md` should stay concise and human-oriented
-- `claude.md` is the longer-lived agent bootstrap and repo contract
-- additional `CLAUDE.md` files may exist in subtrees when module-specific agent context is useful
-- `CLAUDE.md` files are AI-only readmes; human-facing docs belong in `README.md`
-- `claude.md` should be updated continuously so a new chat can resume work with clear context
-- core modules should explain intent with docstrings
-- use short comments only where behavior or design assumptions are non-obvious
-- update docs whenever the repo shape, runtime baseline, or workflow changes
-- prefer reusable notation helpers for large financial values instead of scattering raw 10- to 12-digit literals through code and tests
-
-## Cross-Chat Continuity
-
-Treat `claude.md` as persistent working memory for future chats.
-
-Keep it current with:
-
-- current branch strategy and active branch
-- current collaboration style with the user
-- current runtime assumptions
-- what is already implemented
-- what is intentionally deferred
-- the next likely implementation steps
-- any open steering questions that future chats should know about
-- GitHub publication state and remote repo when one exists
-
-## Collaboration Style
-
-Current working mode:
-
-- the user is steering conceptually, not doing code review at this stage
-- keep working autonomously unless a decision is genuinely blocking
-- ask short steering questions when useful, then continue on reasonable assumptions
-- use parallel sub-agents for bounded side work when it speeds up execution
-- keep `claude.md` current as the living agent contract
-
-Near-term usability goal:
-
-- keep usage relatively simple
-- prefer a CLI-first interface over a heavier application surface
-- optimize for "learnable by using it" rather than a large framework upfront
-- preserve the option to add an API/UI later without forcing that now
-- prefer repo-local commands that run the current source tree, not stale installed snapshots
-- keep `main` usable for generic company inspection, not only as an internal library branch
-
-## Collaboration Mode
-
-Current expected working style:
-
-- the user leads conceptually, not by reviewing implementation details line by line
-- the agent should keep executing for extended stretches without waiting for constant approval
-- the agent should ask focused steering questions when tradeoffs matter, but continue making progress on other safe work while waiting for answers
-- parallel exploration is encouraged when it speeds up iteration and does not create branch chaos
-- prioritize quality, maintainability, and simplicity over feature count
-
-Review expectations at this stage:
-
-- do not optimize for showing lots of code to the user
-- do not add speculative features just to make the repo look complete
-- prefer small, clean modules with obvious responsibilities
-- keep the default interface simple enough that the user can learn it later through a small CLI
-
-## Core Rules
-
-- Default language is Python.
-- Target modern Python, not the system Python.
-- Use C++ only if a real bottleneck appears later.
-- The repo must remain free to run.
-- Favor simple scripts, clear modules, and reproducible outputs over notebook-only workflows.
-- Default outputs should be tables: terminal tables, Markdown tables, CSV, and optionally Parquet.
-- keep exact raw numeric values in backend tables; apply human-readable notation only in report/render layers
-- Prefer official or primary-source fundamentals data when possible.
-- Treat market quotes and fundamentals as separate concerns.
-- Do not build a trading bot. This is a valuation repo.
-- `main` is for general-purpose valuation infrastructure.
-- `brk` is the working branch for Berkshire-specific valuation logic and experiments.
-- Code copied or adapted from other projects is acceptable only if the license allows it and attribution is preserved.
-
-## Branch Strategy
-
-Use the branches with different responsibilities:
-
-- `main`: generic data connectors, normalized financial tables, reusable valuation models, reporting, and later API/backend layers
-- `brk`: Berkshire-specific data loaders, Berkshire tables, sum-of-the-parts logic, and any temporary exploratory code needed to refine the Berkshire approach
-
-Rules for merging from `brk` back to `main`:
-
-- only merge code that is genuinely reusable
-- if a Berkshire implementation reveals a generic need, extract the reusable layer first
-- keep Berkshire assumptions out of generic modules unless they are parameterized cleanly
-
-This means Berkshire is the first example-driven implementation, not the permanent design center of `main`.
-
-## What Exists Already
-
-There are already several ways to get stock data in Python. The main distinction is not Python vs. C++; it is free-and-simple vs. licensed-and-reliable.
-
-### Data Source Scan
-
-| Option | Best for | Pros | Limits | Initial verdict |
-| --- | --- | --- | --- | --- |
-| SEC EDGAR APIs (`submissions`, `companyfacts`, filings) | Fundamentals, filings, share counts, segment data | Official, free, strong for audited data | Not a quote feed; requires respectful access and a proper `User-Agent` | Must use |
-| `yfinance` | Fast prototype quotes and historical prices | Very easy, zero key, good enough for research prototypes | Not an official exchange feed; quote quality and availability can vary | Use first |
-| Financial Modeling Prep | Unified market + fundamentals API | Broad coverage, easy integration | API key, commercial dependency, quality varies by endpoint/plan | Do not depend on it in core repo |
-| Finnhub | Realtime quotes/news/fundamentals | Good API design, useful for live data | API key and plan limits | Do not depend on it in core repo |
-| Polygon | Higher-grade market data | Better for serious realtime workflows | Paid, more infrastructure commitment | Out of scope for free-first repo |
-| OpenBB | Unified research interface | Can speed up exploration across providers | Extra abstraction layer; may hide source-specific details | Optional, not core |
-
-## Recommendation For Phase 1
-
-Use a Python-first stack:
-
-- `requests` or `httpx` for API calls
-- `pandas` for tables
-- `pyarrow` for Parquet when needed
-- `tabulate` or `rich` for readable terminal tables
-- SEC EDGAR as the primary fundamentals source
-- `yfinance` as the initial price/market-data source
-
-Runtime baseline:
-
-- package metadata should target modern Python (`>=3.12`)
-- local development can standardize on Python 3.14
-- avoid bending core dependency choices around old machine-specific interpreters
-- SEC access requires a proper `VALUATION_SEC_USER_AGENT` with contact information
-- on Python 3.14, prefer normal installs over editable installs for now
-
-This gives the fastest path to a working repo with no paid dependency on day one.
-
-Free-first interpretation:
-
-- no required paid APIs
-- no required SaaS backend
-- no hidden dependency on proprietary terminals or datasets
-- optional adapters for paid providers can exist later, but the repo must work without them
-
-Important: "realtime stock data in Python directly" usually means calling an HTTP or WebSocket API from Python. That is normal. True exchange-grade realtime data is usually paid. For a simple start, Python is enough.
-
-## Berkshire Hathaway Focus
-
-Do not treat Berkshire like a normal single-business DCF case.
-
-The primary Berkshire model should be a sum-of-the-parts valuation:
-
-1. Public equity portfolio marked to market
-2. Cash, cash equivalents, and Treasury bills
-3. Insurance operations and float
-4. Railroad, utility/energy, manufacturing, service, and retail operating businesses
-5. Debt, minority interests, and other balance-sheet adjustments
-6. Per-share value for `BRK.B`, with `BRK.A` handled via the 1:1500 conversion
-
-### Berkshire Notes
-
-- `BRK.B` is the practical market ticker to anchor price comparisons.
-- 13F data is useful, but it is only part of Berkshire's full economic value.
-- The official annual report and quarterly filings matter more than market-screening APIs for Berkshire.
-- We should expect a Berkshire-specific model module, not just reuse a generic DCF.
-
-## Planned Outputs
-
-Every important script should be able to produce tables in at least one of these forms:
-
-- terminal table for quick inspection
-- Markdown table for notes and agent summaries
-- CSV for spreadsheet work
-- Parquet for local storage and later analysis
-
-Examples of outputs we want:
-
-- current market snapshot
-- historical valuation multiples table
-- inputs table for a valuation run
-- Berkshire sum-of-the-parts bridge table
-- sensitivity table
-- valuation summary table with bull/base/bear cases
-
-## Architecture Direction
-
-The repo should be backend-first.
-
-Start with a library plus CLI/report layer. Add a web/API interface only after the data pipeline and valuation outputs are stable.
+## Current Architecture
 
 Preferred flow:
 
 1. provider adapters fetch raw data
-2. normalization layer converts raw inputs into clean tables
-3. model layer consumes normalized tables
-4. report layer emits terminal, Markdown, CSV, and Parquet outputs
-5. later, an API layer can expose the same report/model functions
+2. normalization turns provider payloads into stable tables
+3. report/render layer emits terminal, Markdown, CSV, later API responses
+4. model layer should stay separate from rendering
 
-The important design rule is that table generation should be easy and consistent. Models should return structured tabular outputs, not only free-form text.
+Rules:
 
-Frontend readiness rule:
+- keep exact raw numeric values in backend tables
+- apply human-readable formatting only in report/render layers
+- treat `security_id` as the canonical backend identifier
+- treat ticker as a market-data alias, not the only identity
+- prefer official SEC facts for financial statements
+- use Yahoo mainly for market snapshot convenience and identifier search
+- for non-US coverage, use Yahoo as the first broad fallback for profile + statements when it actually has data
+- do not pretend Yahoo is universal; small markets may need explicit market-specific adapters later
+- prefer adding stable backend tables/objects before adding more CLI surface area
+- keep module boundaries explicit:
+  - `data/providers` fetch
+  - `data/normalize` stabilizes
+  - `company` assembles product-facing tables
+  - `reports` renders and exports
 
-- keep backend outputs structured and JSON-serializable so a thin frontend or API can be added later without rewriting model logic
-- do not move business logic into a future UI layer
-- prefer CLI first, but shape the backend as if a minimal local web UI may be added later
+## Repo Map
 
-Notation rule:
+- `src/valuation/cli.py`
+  - command parsing and top-level orchestration
+  - should stay thin
+- `src/valuation/company/service.py`
+  - identifier resolution and provider orchestration
+  - decides SEC-backed versus Yahoo-backed company paths
+- `src/valuation/company/statements.py`
+  - generic SEC statement metric definitions
+  - quarterly reconstruction heuristics and sparse-data handling
+- `src/valuation/company/yahoo_statements.py`
+  - explicit Yahoo label mapping
+  - fallback path only, not a deep modeling layer
+- `src/valuation/company/tables.py`
+  - compact backend-facing company tables such as summary, overview, and statement availability
+- `src/valuation/data/normalize/tables.py`
+  - core normalization contract layer
+  - latest-fact selection, filing normalization, statement period matrix logic
+- `src/valuation/data/providers/`
+  - thin wrappers over SEC and Yahoo
+- `src/valuation/reports/tables.py`
+  - rendering and export helpers
+- `src/valuation/securities/identifiers.py`
+  - canonical `security_id` rules
+- `tests/`
+  - statement matrix and normalization tests are the main behavioral guardrails
 
-- for valuation code and tests, prefer `valuation.notation` helpers such as `B`, `M`, `T`, and `parse_scaled_number("100B")`
-- avoid raw large numeric literals unless the value is truly an identifier, accession number, CUSIP, CIK, or other exact code
+## Main Branch Goal
 
-Security identity rule:
+`main` should provide a clean generic company workflow:
 
-- do not assume ticker is the only identifier
-- use a canonical `security_id` for backend joins across providers
-- prefer `cusip:<CUSIP>` when holdings data includes a CUSIP
-- use ticker-based ids like `ticker:NYSE:BRK-B` when the workflow begins from a quoted market symbol
-- treat ticker/exchange as market-data aliases that can change or require manual mapping
-
-Interface expectations:
-
-- the core should remain a Python package with importable modules
-- the first user-facing interface should be a simple CLI
-- the generic CLI should accept flexible identifiers when the free data path supports them
-- any later API or UI should stay thin and call the same underlying library functions
-- avoid machine-specific setup assumptions beyond a modern Python runtime
-- prefer repo-local launcher scripts when they materially simplify usage
-
-## Proposed Repo Shape
-
-This is the intended direction, not a final structure:
-
-```text
-valuationFramework/
-  claude.md
-  src/
-    valuation/
-      brk/
-      data/
-        providers/
-        normalize/
-      models/
-      reports/
-      api/
-      utils/
-  tests/
-  data/
-    raw/
-    processed/
-    cache/
-  outputs/
-    tables/
-    reports/
-```
-
-Suggested module intent:
-
-- `brk/`: Berkshire-specific orchestration, table shaping, and CLI hooks that should not leak into generic modules
-- `data/providers/`: source-specific fetchers such as SEC and `yfinance`
-- `data/normalize/`: convert provider-specific payloads into common tables
-- `models/`: DCF, multiples, owner-earnings, and later Berkshire sum-of-the-parts
-- `reports/`: Markdown, terminal, CSV, and Parquet renderers
-- `api/`: later FastAPI or similar backend layer, only after the core library is stable
-
-## First Implementation Plan
-
-### Phase 1: Bootstrap
-
-- set up Python project basics
-- add a small data client for SEC EDGAR
-- add a small data client for `yfinance`
-- add normalized table schemas for prices, shares, income statement, balance sheet, and cash flow
-- add a table output utility
-- prove a clean pipeline for one ticker
-
-### Phase 2: Generic Valuation Framework
-
-- normalized financial statement loader
-- basic multiples valuation
-- simple DCF / owner-earnings model
-- report builder that emits Markdown and CSV tables
-- ensure all generic models can run without Berkshire-specific assumptions
-
-### Phase 3: Berkshire-Specific Valuation
-
-- ingest Berkshire annual and quarterly filings
-- build public holdings and cash/investments bridge
-- estimate operating-business value by segment
-- produce a Berkshire sum-of-the-parts table
-- compare intrinsic value range vs. market price
-- keep reusable pieces extractable back into `main`
-
-### Phase 4: Interface Layer
-
-- add a simple CLI entrypoint for repeatable runs
-- optionally add FastAPI endpoints for tables and valuation summaries
-- keep the interface as a thin layer over the core library
-
-## Near-Term Decision
-
-Unless there is a strong objection, the first code milestone should be:
-
-1. bootstrap a small Python package
-2. fetch `BRK-B` quote/history with `yfinance`
-3. fetch Berkshire filing/fundamental data from SEC sources
-4. render the first Markdown and terminal tables
-
-Bootstrap status as of 2026-04-09:
-
-- Python package scaffold exists
-- CLI snapshot command exists
-- installed CLI command is `valuation`
-- repo-local launcher is `./vf` and should be the default way to run the current source tree
-- `yfinance` snapshot pull works on modern Python
-- SEC pull works only when `VALUATION_SEC_USER_AGENT` is explicitly set
-- snapshot tables are written to `outputs/`, which should remain gitignored
-- active implementation branch for Berkshire work is `brk`
-- Berkshire logic now lives under `valuation.brk`
-- `valuation brk overview` produces live Berkshire overview tables
-- `valuation brk holdings` produces latest Berkshire 13F summary and top-holdings tables
-- `valuation brk holdings --live-prices` can revalue the resolved portion of Berkshire's 13F at current Yahoo prices
-- `valuation brk liquidity` produces a Berkshire liquidity bridge from SEC company facts
-- `valuation brk segments` produces a top-level Berkshire operating-segment table from the latest annual filing package
-- generic `valuation company <identifier>` resolves ticker, CIK, CUSIP, or ISIN into a baseline company view
-- tests cover normalization, CLI behavior, SEC ticker normalization, and Berkshire table/service helpers
-- Berkshire 13F XML parsing lives in `valuation.brk.holdings`
-- generic security identity helpers now live under `valuation.securities`
-- Python 3.14 editable installs are currently avoided; normal installs are the default path
-
-Current Berkshire implementation on `brk`:
-
-- Berkshire-specific CLI group: `valuation brk ...`
-- `valuation brk overview` fetches:
+- accept flexible identifiers such as ticker, CIK, CUSIP, and ISIN when the free path supports them
+- resolve them into one company/ticker view
+- output a simple baseline similar to a financials-first TradingView page:
+  - resolution
   - company metadata
-  - share-class conversion table
-  - market snapshot for `BRK-B`
-  - selected SEC company facts
-  - filtered Berkshire-relevant filings
-- `valuation brk holdings` fetches:
-  - latest Berkshire 13F accession
-  - SEC information-table XML
-  - parsed holdings rows
-  - aggregated top-holdings table by issuer/CUSIP
-  - 13F summary and top-holdings tables
-- `valuation brk holdings --live-prices` additionally:
-  - resolves a curated subset of Berkshire CUSIPs to ticker symbols
-  - pulls current Yahoo prices for resolved positions
-  - builds a resolved live-price summary and a live top-holdings table
-- `valuation brk liquidity` fetches:
-  - Berkshire cash and debt-security-related company facts
-  - a liquidity summary table
-  - a raw bridge table with source SEC concepts
-- `valuation brk segments` fetches:
-  - the latest Berkshire `10-K` filing package
-  - filing-report metadata from `FilingSummary.xml`
-  - top-level operating segment revenues, pre-tax earnings, capex, depreciation, goodwill, and assets
-- `valuation company` fetches:
-  - identifier resolution
-  - generic SEC company metadata
-  - Yahoo market snapshot
-  - selected key SEC financial facts
-  - recent SEC filings
-- the current per-share convention is `BRK.B` as the primary valuation unit
-- terminal and Markdown tables now default to human-readable numeric formatting
-- CSV remains raw for machine-friendly downstream use
-- backend tables retain precise numeric values; formatting is a presentation concern
-- `valuation.notation` now provides reusable `K`, `M`, `B`, `T`, and `parse_scaled_number(...)` helpers for valuation code and tests
+  - market snapshot
+  - key financial facts
+  - recent filings
 
-Current useful commands:
+Keep `main` generic. Do not leak Berkshire assumptions into generic modules.
 
-- `./vf snapshot BRK-B`
+## Berkshire Branch Goal
+
+`brk` is for:
+
+- latest 13F holdings
+- optional live-price revaluation
+- liquidity bridge
+- operating segment extraction
+- later Berkshire sum-of-the-parts logic
+
+As of 2026-04-11, `brk` should no longer lag far behind `main`.
+
+- inherit the generic company/snapshot/statements stack from `main`
+- keep Berkshire-specific logic in `src/valuation/brk/`
+- keep Berkshire assumptions out of generic modules unless they are reusable and parameterized cleanly
+
+Reusable pieces discovered there should be extracted back into `main`.
+
+## Current Main Features
+
+As of 2026-04-09, `main` should contain or move toward:
+
+- repo-local launcher via `./vf`
+- generic `valuation company <identifier>` CLI
+- ticker / CIK / CUSIP / ISIN resolution through SEC + Yahoo
+- initial non-US fallback path through Yahoo-backed company/profile/statement workflows
+- `company` is moving toward the primary single-security backend view:
+  - resolution
+  - company/profile metadata
+  - market snapshot
+  - overview
+  - key financials
+  - statement availability
+  - recent analysis-relevant filings
+- compact terminal tables with shorter headers
+- minimal CLI JSON output path for machine-readable backend bundles
+- compact `overview` rows that combine market data with latest core financial metrics
+- overview rows now carry lightweight provenance/completeness metadata for backend use
+- selected generic SEC financial facts
+- generic statements command backed by SEC companyfacts:
+  - income
+  - balance
+  - cashflow
+  - annual and quarterly
+  - optional start/end year filters
+  - optional start/end quarter filters for quarterly views
+  - when any statement range filter is provided, the CLI default limit should widen enough that the range filter, not the default `--limit`, controls the output
+  - quarterly handling is metric-aware:
+    - additive flows may derive from YTD/FY
+    - balance-sheet items stay instant
+    - diluted EPS / diluted shares should prefer direct-quarter facts and avoid subtraction
+
+## Current Commands
+
+- `./setup`
 - `./vf company BRK-B`
+- `./vf company BNP.PA`
+- `./vf company SI0031102120`
 - `./vf company US0846707026`
+- `./vf snapshot BRK-B`
+- `./vf statements AAPL --statement income --period annual`
+- `./vf statements BNP.PA --statement income --period annual`
+- `./vf statements AAPL --statement balance --period quarterly`
 - `./vf brk overview`
-- `./vf brk holdings`
-- `./vf brk holdings --live-prices`
+- `./vf brk holdings --limit 10`
+- `./vf brk holdings --live-prices --limit 10`
 - `./vf brk liquidity`
 - `./vf brk segments`
-- `./setup`
 
-Intentionally deferred for later:
+## Next Main Priorities
 
-- public-equity portfolio decomposition
-- insurance float-specific treatment
-- private operating-business segment valuation
-- intrinsic-value bridge and bull/base/bear ranges
+- improve statement concept coverage and defaults
+- keep strengthening `company` as the main reusable backend object before adding API/UI surface
+- keep the compact `overview` layer stable and increase trust/provenance before expanding metric count
+- keep statement availability metadata honest about partial coverage, not just all-or-nothing availability
+- prefer cleaner core-company filing views over noisy insider-form streams
+- keep narrowing wide tables where possible
+- keep the new JSON path minimal and backend-oriented rather than turning it into an API surface too early
+- decide where Yahoo fallback is sufficient versus where market-specific filing adapters are worth building
+- for Europe, prefer:
+  - Yahoo fallback for broad coverage
+  - then exchange / OAM / issuer-report adapters only where Yahoo coverage is missing or misleading
 
-Open steering question:
+## Berkshire Priorities
 
-- keep using `BRK.B` as the primary valuation unit unless the user asks to flip to `BRK.A`
+After the current mainline sync, the next Berkshire branch steps should be:
 
-## Session Handoff
+1. keep the `./vf brk ...` workflows healthy on top of the inherited generic stack
+2. add the first Berkshire sum-of-the-parts bridge table
+3. tighten Berkshire-specific filing/report extraction quality
+4. keep pushing reusable pieces back into `main` when they are genuinely generic
 
-Last updated: 2026-04-09
+## Resume Plan
 
-Current branch:
+When resuming work after the current overview hardening, keep the next steps in this order:
 
+1. strengthen overview quality and provenance
+   - keep `company` backend-first
+   - add clearer provenance and completeness signals for overview metrics
+   - prefer compact trustworthy metadata over adding many new metrics
+2. improve the compact security overview model
+   - make `overview` the stable summary backbone for one security
+   - keep `key financials` as the deeper supporting table
+   - avoid overcomplicating the schema too early
+3. keep improving statement metadata and availability reasons
+   - surface why a metric or statement is unavailable
+   - keep provider gaps explicit, especially for Yahoo-backed non-US names
+4. keep filing quality high
+   - continue prioritizing analysis-relevant forms over noisy filing streams
+   - preserve useful filing metadata for backend consumers
+5. postpone broader expansion until the core backend is stronger
+   - no urgent need to add more countries right now
+   - no urgent need to add ETF or real index support right now
+   - only expand market coverage after the core single-security workflow is more trustworthy
+
+Immediate next implementation target:
+
+- add provenance/completeness fields to the compact overview layer in a minimal way
+- keep the table output, but move toward a more canonical machine-friendly overview contract underneath if needed
+
+On `brk`, immediate branch-specific target after sync:
+
+- build the first Berkshire sum-of-the-parts bridge using:
+  - 13F holdings
+  - liquidity bridge
+  - segment summary tables
+
+## Statement Debug Notes
+
+- Berkshire currently has real SEC `companyfacts` sparsity for some standard income metrics
+- the trickiest generic statement logic currently lives in:
+  - `src/valuation/company/statements.py`
+  - `src/valuation/data/normalize/tables.py`
+- As of 2026-04-09 inspection:
+  - `EarningsPerShareDiluted` is absent for BRK in SEC companyfacts
+  - `WeightedAverageNumberOfDilutedSharesOutstanding` is absent for BRK in SEC companyfacts
+  - `GrossProfit` is absent for BRK in SEC companyfacts
+  - `OperatingIncomeLoss` exists for BRK but recent-period coverage is sparse/stale
+- Blank cells for those BRK rows are currently expected from the upstream data, not necessarily extraction bugs
+- Quarterly statement logic now distinguishes:
+  - additive flows
+  - instant balance-sheet facts
+  - direct-quarter-only metrics such as diluted EPS / diluted shares
+- Debug branch note:
+  - for some issuers like AAPL, fiscal year-end quarter diluted shares may be absent as direct quarter facts
+  - current debug behavior allows diluted shares to fall back to the FY average share count for that year-end quarter
+  - current debug behavior can then backfill diluted EPS from `quarter net income / diluted shares`
+  - this is a pragmatic fallback, not a perfect ground-truth replacement for a missing direct-quarter disclosure
+- Financial-institution note:
+  - banks like JPM often do not populate industrial-style quarterly income concepts in the way industrial issuers do
+  - generic revenue / pretax coverage should include bank-style concepts such as:
+    - `RevenuesNetOfInterestExpense`
+    - `InterestIncomeOperating`
+    - `InterestIncomeExpenseNet`
+    - `NoninterestIncome`
+    - `IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest`
+- Cross-sector sweep note:
+  - AAPL now looks broadly healthy on income, balance, and cashflow
+  - JPM income improved after bank-style revenue / pretax concept coverage
+  - CAT net income required alternate concepts such as `NetIncomeLossAvailableToCommonStockholdersBasic` / `ProfitLoss`
+  - BRK still has real upstream sparsity for diluted-share / diluted-EPS fields
+  - some rows like `gross_profit` remain sector-dependent and should not always be forced into existence
+  - user-facing statement tables should prefer dropping rows that are entirely empty across the selected periods rather than showing sector-inappropriate blanks
+  - generic balance sheet fallbacks now need to include broader equity and debt concepts where they are semantically close enough
+  - external QA against StockAnalysis quarterly pages on 2026-04-10:
+    - AAPL and JPM currently line up well on the main displayed income rows
+    - XOM had a real year-end diluted-share gap; current fallback now uses basic-share data when observed basic and diluted EPS match
+    - PGR operating income exists in vendor-standardized views but is not safely reconstructible from SEC companyfacts alone right now
+    - UNH has small vendor-vs-companyfacts differences on net income; treat current `NetIncomeLoss` selection as shareholder-oriented SEC output unless a better generic rule is proven
+  - CLI behavior note:
+    - if a statement fetch normalizes to no rows, fail cleanly instead of writing a successful `(no rows)` table
+    - `change_in_cash` should never fall back to `End Cash Position`; that is semantically a balance, not a flow
+  - test coverage note:
+    - `tests/test_statement_matrix.py` protects SEC quarterly matrix semantics
+    - `tests/test_yahoo_statement_tables.py` protects Yahoo label mapping and period filtering
+  - company-view note:
+    - `company` should expose statement availability with explicit source + availability reason codes
+    - statement availability should distinguish:
+      - `available`
+      - `partial`
+      - `unavailable`
+    - for Yahoo-backed names, empty quarterly frames should surface as provider gaps, not silent blanks
+
+## International Notes
+
+- As of 2026-04-10, non-US support does not require a total rewrite
+- current workable split:
+  - SEC-backed path for US issuers
+  - Yahoo-backed fallback for non-US issuers when Yahoo has usable profile + statement coverage
+- live proof points:
+  - `BNP.PA` works directly as a non-US large-cap fallback case
+  - `KRKG` and ISIN `SI0031102120` can resolve through non-US fallback paths, but exchange/ticker quality should be treated carefully
+  - direct `KRKG.LJ` is not usable through Yahoo and should fail cleanly rather than inventing a fake company
+- likely medium-term structure:
+  - keep Yahoo as the broad global baseline
+  - add country / market specific adapters only for markets where Yahoo fails and where official filings are realistically parseable
+  - Europe is unlikely to be one simple unified free API; expect exchange / OAM / issuer-specific work for deeper coverage
+- display note:
+  - non-USD company views should render market snapshot prices with the table currency hint instead of defaulting to USD
+  - example target behavior: `EUR 236.5`, not `$236.5`
+- European Yahoo QA note from 20-company sweep on 2026-04-10:
+  - broad annual statement coverage looks workable across major EU/UK large caps
+  - some issuers such as `MC.PA`, `OR.PA`, `NESN.SW`, and `SU.PA` have no Yahoo quarterly income/cashflow frames
+  - those empty quarterly cases should error clearly rather than pretending the command succeeded
+
+## Company View Notes
+
+- As of 2026-04-10 hardening:
+  - SEC-backed `company` views should enrich identity rows with Yahoo profile metadata when available
+  - `company` should expose a compact `overview` layer before the deeper financial tables
+  - overview rows should stay stable and backend-friendly:
+    - `metric`
+    - `value`
+    - `unit`
+    - `source`
+    - `source_table`
+    - `statement`
+    - `period_type`
+    - `as_of`
+    - `status`
+    - `completeness`
+    - `taxonomy`
+    - `concept`
+    - `matched_label`
+    - `form`
+    - `filed`
+    - `reason`
+  - overview should combine:
+    - market snapshot metrics from `yfinance`
+    - latest core financial metrics from SEC or Yahoo
+  - current implementation note:
+    - overview is still built as a table in `company/tables.py`
+    - later work can promote it to a more canonical machine object if the backend needs that
+  - completeness should stay simple:
+    - `current`
+    - `stale`
+    - `missing`
+  - current completeness behavior:
+    - market rows are `current` when the market snapshot has a value
+    - SEC rows compare each metric to the latest available `as_of` within its statement group
+    - Yahoo rows compare each metric to the latest available annual period within its statement frame
+  - current overview metric set should stay compact:
+    - `last_price`
+    - `market_cap`
+    - `shares`
+    - `revenue`
+    - `net_income`
+    - `operating_cash_flow`
+    - `cash_and_equivalents`
+    - `total_assets`
+    - `total_liabilities`
+    - `stockholders_equity`
+  - `company` should show a statement-availability table with:
+    - `statement`
+    - `period`
+    - `source`
+    - `status`
+    - `period_count`
+    - `metric_count`
+    - `expected_metric_count`
+    - `coverage_ratio`
+    - `latest_period`
+    - `reason`
+  - statement availability status should mean:
+    - `available`: mapped all expected visible metrics for that statement
+    - `partial`: statement exists but metric coverage is incomplete
+    - `unavailable`: no usable rows after normalization
+  - preferred unavailable reasons currently include:
+    - `No matching concepts found in SEC companyfacts`
+    - `Yahoo returned no statement frame`
+    - `Statement frame present but no mapped metrics`
+  - for SEC issuers, recent filings in `company` should prefer analysis-relevant forms like:
+    - `10-K`
+    - `10-Q`
+    - `8-K`
+    - `20-F`
+    - `6-K`
+    - `40-F`
+    - `DEF 14A`
+  - filing rows should preserve backend-useful metadata where available:
+    - `filing_date`
+    - `report_date`
+    - `accepted_at`
+    - `form_group`
+    - `accession_number`
+    - `description`
+    - `primary_document`
+    - `filing_url`
+  - `company` command order should remain:
+    - resolution
+    - company
+    - market snapshot
+    - overview
+    - key financials
+    - statement availability
+    - recent filings
+
+## Test Notes
+
+- `tests/test_company_service.py`
+  - identifier resolution and provider-path selection
+- `tests/test_normalize_tables.py`
+  - latest-fact resolution, filing normalization, and table contracts
+- `tests/test_statement_matrix.py`
+  - quarterly duration/direct/instant semantics and sparse-data behavior
+- `tests/test_company_tables.py`
+  - company summary, overview provenance/completeness, and statement-availability contracts
+- `tests/test_cli.py`
+  - section wiring, file outputs, and JSON bundle coverage
+
+## Output Notes
+
+- As of 2026-04-10 hardening:
+  - CLI commands support `--format json`
+  - JSON mode should:
+    - print one pure JSON bundle to stdout
+    - preserve raw numeric values instead of display-formatted strings
+    - write per-section `.json` files plus `bundle.json`
+  - current intended use is backend contract hardening, not public API design yet
+
+## Repo Hygiene Notes
+
+- local `.codex` workspace artifacts are tooling noise and should stay ignored in Git
+
+## Branch State
+
+- `main`
+  - should hold the reusable generic backbone, including:
+    - statement QA hardening
+    - first non-US Yahoo fallback path
+    - stronger `company` backbone
+    - filing-quality improvements
+    - minimal CLI JSON bundle support
 - `brk`
+  - remains the Berkshire-specific proving ground
+- current hardening branch work now proven and ready to merge:
+  - stronger `company` backbone with statement availability
+  - richer prioritized filing rows
+  - human-facing README refresh
+  - `.codex` ignored in Git
+  - minimal `--format json` backend bundle path
 
-Current working status:
+## Quality Bar
 
-- `main` has the initial bootstrap commit
-- `brk` adds Berkshire-specific package structure under `valuation.brk`
-- `valuation brk overview` works live
-- `valuation brk holdings` works live
-- `valuation company` works live for ticker and ISIN input
-- latest live 13F holdings output is aggregated by issuer/CUSIP for a cleaner valuation input table
-- tests were last green at `56 passed`
+- prioritize code quality over feature count
+- prefer fewer, clearer modules over many thin wrappers
+- delete code that is not pulling its weight
+- keep tests that protect real behavior; skip decorative or low-signal tests
+- preserve a clean path for later API/UI work without adding that surface too early
 
-Important runtime note:
+## Git / Publication
 
-- on Python 3.14, prefer normal installs like `pip install .` or `pip install '.[dev]'`
-- editable installs are currently avoided because Python 3.14 skipped the generated `__editable__...pth` file in this environment
-- `./vf` should be preferred for local usage because it executes `python -m valuation.cli` against the current `src/` tree
-- use `valuation.notation` for large financial values in code and tests instead of raw long literals
-- the GitHub remote now exists at `https://github.com/AndrazTom/valuationFramework` and is intended to stay private unless the user explicitly changes that
-
-Current useful commands:
-
-- `./vf snapshot BRK-B`
-- `./vf brk overview`
-- `./vf brk holdings`
-- `./vf brk liquidity`
-
-Most likely next implementation steps:
-
-1. improve Berkshire liquidity and Treasury treatment
-2. improve public-equity portfolio outputs and live-price resolution coverage
-3. first Berkshire sum-of-the-parts bridge table
-4. selectively extract reusable generic layers back toward `main`
-
-Questions to ask the user next:
-
-1. After public holdings, should the next priority be `cash + treasuries` or `operating businesses by segment`?
-2. Keep `BRK.B` as the primary valuation unit, or switch the repo convention to `BRK.A`?
-3. For CLI output, prefer raw numeric values, rounded human-readable values, or both?
-4. Should generated tables stay as Markdown/CSV only for now, or add Parquet next?
-5. When the next checkpoint is stable, should `brk` be committed before continuing further?
-
-## Current Decisions
-
-User decisions now in force:
-
-- primary valuation unit stays `BRK.B`
-- CLI/report output should prefer human-readable values
-- Markdown/CSV remain sufficient for now; Parquet is not currently required
-- commit stable checkpoints on `brk` before continuing deeper work
-- both `cash + treasuries` and `operating businesses by segment` matter; order can be chosen pragmatically
-
-Current default execution order:
-
-1. public holdings
-2. cash + treasuries
-3. operating businesses by segment
-4. first Berkshire sum-of-the-parts bridge
-
-Latest verified state:
-
-- `./vf brk holdings --limit 5` works live and prints human-readable values like `$61.96B` and `400M`
-- `./vf brk holdings --live-prices --limit 10` works live and revalues 24 currently resolved Berkshire positions using Yahoo prices
-- `./vf brk liquidity` works live and prints human-readable Berkshire cash and debt-security tables
-- `./vf brk segments` works live and prints Berkshire's top-level operating-segment table from the latest `10-K`
-- `./vf company BRK-B` works live as the generic company baseline
-- `./vf company US0846707026` works live via ISIN resolution
-- tests last passed at `56 passed`
-
-Chosen workflow now:
-
-1. build reusable backend primitives first
-2. prove them on Berkshire-specific commands in `brk`
-3. keep exact values in backend tables and humanized values at the render layer
-4. use canonical `security_id` for joins and treat ticker as a quote alias
-5. publish organized checkpoints to the private GitHub repo as `main` plus `brk`
-
-## Agent Guidance
-
-- Keep the framework general, but let Berkshire drive the first serious design decisions.
-- Prefer transparent calculations over black-box finance packages.
-- When choosing between a simple direct implementation and a more abstract system, choose the simple direct implementation first.
-- Preserve table-first outputs.
-- Document data provenance in reports.
-- If code is borrowed from elsewhere, verify license compatibility and keep attribution notes in the repo.
-- Build generic abstractions only after one concrete implementation proves the shape.
-
-## Reference Links To Revisit
-
-These were the useful anchors for the initial scan on 2026-04-09:
-
-- SEC EDGAR API documentation: https://api.edgarfiling.sec.gov/edgar-api.pdf
-- Berkshire Hathaway 2024 annual report / 10-K: https://www.berkshirehathaway.com/2024ar/202410-k.pdf
-- OpenBB docs: https://docs.openbb.co/
-- Financial Modeling Prep quote docs: https://site.financialmodelingprep.com/developer/docs/quote-order-quote
-
-Future updates to this file should keep the repo intent stable and refine the concrete implementation plan as the codebase appears.
+- repo remote: `https://github.com/AndrazTom/valuationFramework`
+- keep the GitHub repo private unless the user explicitly changes that
+- keep commits organized by reusable concern
+- push stable `brk` checkpoints freely
+- when generic work is ready, port it cleanly to `main`

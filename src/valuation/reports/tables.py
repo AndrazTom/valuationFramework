@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import textwrap
 
@@ -12,24 +13,24 @@ from valuation.utils.formatting import humanize_frame
 
 DISPLAY_COLUMN_ALIASES = {
     "accession_number": "accession",
+    "accepted_at": "accepted at",
+    "as_of": "as of",
+    "coverage_ratio": "coverage",
     "earnings_before_income_taxes_usd": "pre-tax earnings",
+    "expected_metric_count": "expected metrics",
+    "filing_url": "filing url",
+    "form_group": "category",
     "goodwill_usd": "goodwill",
     "identifiable_assets_usd": "assets",
     "depreciation_and_amortization_usd": "depr & amort",
     "interest_expense_usd": "interest expense",
-    "shares_or_principal": "shares",
-    "reported_value_usd": "reported value",
-    "reported_value_resolved_usd": "reported resolved",
-    "market_value_live_usd": "live value",
-    "market_value_live_resolved_usd": "live resolved",
-    "portfolio_weight": "weight",
-    "portfolio_weight_live": "live weight",
     "latest_price_date": "price date",
-    "information_table_filename": "info table file",
+    "metric_count": "metrics",
+    "period_count": "periods",
+    "report_date": "report date",
     "security_id": "security id",
     "identifier_kind": "id kind",
     "query_used": "query",
-    "cash_and_equivalents": "cash & equivalents",
 }
 
 
@@ -55,6 +56,20 @@ def write_csv(frame: pd.DataFrame, path: str | Path) -> None:
 def write_markdown(frame: pd.DataFrame, path: str | Path) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text(render_markdown_table(frame), encoding="utf-8")
+
+
+def frame_to_records(frame: pd.DataFrame) -> list[dict]:
+    if frame.empty:
+        return []
+    records = []
+    for row in frame.to_dict(orient="records"):
+        records.append({str(key): _json_safe_value(value) for key, value in row.items()})
+    return records
+
+
+def write_json(data: object, path: str | Path) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def _prepare_display_frame(frame: pd.DataFrame, *, target: str) -> pd.DataFrame:
@@ -88,7 +103,7 @@ def _wrap_terminal_cell(value, *, column: str):
         width = 30
     elif column_name in {"field", "metric"}:
         width = 24
-    elif column_name in {"concept", "primary document"}:
+    elif column_name in {"concept", "primary document", "description", "filing url", "reason", "website"}:
         width = 36
     elif column_name == "accession":
         width = 24
@@ -102,3 +117,18 @@ def _humanize_label(value):
         return value
     text = str(value).replace("_", " ").strip()
     return text
+
+
+def _json_safe_value(value):
+    if value is None:
+        return None
+    if isinstance(value, float) and pd.isna(value):
+        return None
+    if pd.isna(value):
+        return None
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except TypeError:
+            return value
+    return value

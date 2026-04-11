@@ -11,8 +11,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-import pandas as pd
-
 
 @dataclass(frozen=True)
 class SecurityIdentifier:
@@ -79,14 +77,16 @@ def identify_security(
 
 
 def with_security_ids(
-    frame: pd.DataFrame,
+    frame: "pd.DataFrame",
     *,
     ticker_column: str | None = None,
     exchange_column: str | None = None,
     cusip_column: str | None = None,
     cik_column: str | None = None,
-) -> pd.DataFrame:
+) -> "pd.DataFrame":
     """Return a copy of a table with a canonical `security_id` column."""
+    import pandas as pd
+
     enriched = frame.copy()
     if enriched.empty:
         if "security_id" not in enriched.columns:
@@ -105,7 +105,7 @@ def with_security_ids(
     return enriched
 
 
-def _value_from_row(row: pd.Series, column: str | None) -> Any:
+def _value_from_row(row: "pd.Series", column: str | None) -> Any:
     if column is None or column not in row:
         return None
     return row[column]

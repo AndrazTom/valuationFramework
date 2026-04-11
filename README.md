@@ -1,126 +1,210 @@
 # valuationFramework
 
-Backend-first stock valuation tooling.
+Backend-first stock financials and valuation tooling.
 
-The repo is meant to stay general on `main`, while Berkshire Hathaway can be explored in a dedicated `brk` branch and later folded back into generic pieces where appropriate.
+Longer term, the project is meant to become a small personal alternative to the financial-data side of TradingView, with more emphasis on statements, balance sheets, and cash flows.
 
-Longer term, this should become a small personal alternative to the financial-data side of TradingView, with more emphasis on statements, balance sheets, and cash flows.
+This branch, `brk`, inherits the current generic company/statement backend from `main` and adds Berkshire Hathaway-specific workflows on top.
 
 ## Current Scope
 
 - free-first data stack
 - Python package, not machine-specific scripts
-- table-oriented outputs
+- generic single-security workflows
+- table-oriented outputs with JSON export support
 - CLI first, API later
-- Berkshire work can advance on `brk` while `main` stays reusable
 
 ## Current Data Sources
 
 - SEC EDGAR for filings and fundamentals
-- `yfinance` for simple market data prototyping
+- `yfinance` for market snapshots, identifier search, and global fallback financial statements when available
 
 ## Local Setup
 
 ```bash
 ./setup
 export VALUATION_SEC_USER_AGENT="valuationFramework/0.1 your-email@example.com"
-./vf snapshot BRK-B
-./vf company BRK-B
-./vf company US0846707026
-./vf brk overview
-./vf brk holdings
-./vf brk liquidity
-./vf brk segments
-./vf brk holdings --live-prices --limit 10
-```
-
-Use a modern interpreter for local work. The current repo baseline is Python 3.12+, and local development is standardized on Python 3.14.
-
-For development and tests:
-
-```bash
-./setup
-./.venv/bin/python -m pytest -q
-```
-
-On Python 3.14, prefer a normal install over `pip install -e .` for now.
-
-`./vf` runs the current source tree directly, so local commands do not depend on an older installed snapshot.
-
-## Local Commands
-
-Use the repo-local launcher:
-
-```bash
-./vf snapshot BRK-B
-./vf company BRK-B
+./vf company AAPL
+./vf company BNP.PA
 ./vf company US0846707026
 ./vf brk overview
 ./vf brk holdings --limit 10
-./vf brk liquidity
-./vf brk segments
-./vf brk holdings --live-prices --limit 10
 ```
 
-If you keep `VALUATION_SEC_USER_AGENT` in a local `.env` file, `./vf` will load it automatically.
+`./vf` runs the current source tree through the local virtualenv.
 
-`./vf company ...` is the generic entrypoint. It currently supports common ticker, CIK, CUSIP, and ISIN inputs through the free SEC + Yahoo path.
+## Main Workflow
 
-## Output Shape
+The generic entrypoint is:
 
-The project should default to structured outputs:
+```bash
+./vf company <identifier>
+```
 
-- terminal tables with human-readable values
-- Markdown tables with human-readable values
-- CSV with raw machine-friendly values
-- later Parquet and API responses
+Supported identifier paths today:
 
-Raw numeric precision stays in the backend tables. Human-readable notation is applied only when rendering terminal or Markdown output.
+- ticker
+- CIK
+- CUSIP
+- ISIN
 
-## Current Berkshire Workflow
+Current backend behavior:
 
-Current recommended Berkshire workflow:
+- US issuers use SEC first for filings and statements
+- non-US issuers fall back to Yahoo profile + statement data when available
+- smaller markets may require explicit identifiers or cross-listings until market-specific filing adapters exist
+- `company` is the main single-security view and currently shows:
+  - resolution
+  - company/profile metadata
+  - market snapshot
+  - overview
+  - key financials
+  - statement availability
+  - recent core filings
 
-1. load latest reported public holdings
-2. optionally revalue resolved holdings at current market prices
-3. load cash and debt-security liquidity tables
-4. load top-level operating segment tables from the latest annual filing
-5. build a Berkshire sum-of-the-parts bridge on top of those inputs
-
-For non-Berkshire use, start with:
+Examples:
 
 ```bash
 ./vf company AAPL
+./vf company BNP.PA
+./vf company SI0031102120
 ./vf company 0000320193 --identifier-kind cik
 ./vf company US0378331005
+./vf company AAPL --format json
+./vf statements AAPL --statement income --period annual
+./vf statements BNP.PA --statement income --period annual
+./vf statements AAPL --statement balance --period quarterly
+./vf statements AAPL --statement cashflow --period quarterly --start-year 2025 --start-quarter 1 --end-year 2025 --end-quarter 4
 ```
 
-## Number Notation
+## Output Shape
 
-For valuation code and tests, avoid raw large literals when the value is conceptual rather than an identifier.
+The project supports two output modes:
 
-Use `valuation.notation` instead:
+- `--format table` (default)
+  - terminal tables with compact human-readable values
+  - Markdown files
+  - CSV files
+- `--format json`
+  - a machine-readable JSON bundle on stdout
+  - per-section `.json` files plus `bundle.json` in the output directory
 
-```python
-from valuation.notation import B, M, parse_scaled_number
+Raw numeric precision stays in backend tables. Human-readable notation is applied in the render layer.
 
-cash = 52.6 * B
-shares = 400 * M
-target_value = parse_scaled_number("100B")
+## Current Commands
+
+The repo currently revolves around three generic commands:
+
+- `./vf company <identifier>`
+  - the main single-security backend view
+  - works with ticker, CIK, CUSIP, and ISIN where the free data path supports them
+- `./vf snapshot <ticker>`
+  - a lighter market snapshot plus recent SEC filing view
+- `./vf statements <identifier>`
+  - generic income, balance sheet, and cash flow tables
+  - annual and quarterly
+  - optional year and quarter range filters
+
+If you pass statement range filters such as `--start-year` / `--end-year`, the command widens the default internal period limit so the range filter controls the output instead of a small default cut-off.
+
+On `brk`, there is also a Berkshire-only command group:
+
+- `./vf brk overview`
+- `./vf brk holdings`
+- `./vf brk liquidity`
+- `./vf brk segments`
+
+Those commands are branch-specific research workflows layered on top of the generic backend.
+
+## Current Company View
+
+`./vf company <identifier>` currently tries to behave like the backend equivalent of a TradingView company page:
+
+- flexible identifier resolution
+- enriched company metadata even for SEC-backed issuers when Yahoo profile data is available
+- compact overview rows that combine market data with the best available financial backbone
+- market snapshot
+- key financials
+- statement availability by statement and period
+- recent analysis-relevant filings
+
+The compact `overview` section is intentionally small. It combines:
+
+- market metrics such as `last_price`, `market_cap`, and `shares`
+- latest core financial metrics such as `revenue`, `net_income`, `operating_cash_flow`, `cash_and_equivalents`, `total_assets`, `total_liabilities`, and `stockholders_equity`
+
+The goal is to keep one stable, backend-friendly summary layer before the deeper tables.
+
+Overview rows also carry lightweight backend metadata such as source, statement group, period type, `as_of`, and a simple completeness signal (`current`, `stale`, or `missing`) so downstream consumers can reason about data quality without parsing the full raw provider payloads.
+
+Statement availability rows also try to distinguish between fully available statements and partial provider coverage. The current backend reports statement status together with present metric counts, expected metric counts, and a simple coverage ratio.
+
+For SEC-backed issuers, recent filings are filtered toward core company forms such as `10-K`, `10-Q`, `8-K`, `20-F`, `6-K`, `40-F`, and `DEF 14A` so the view is less noisy.
+
+## Current Statement Behavior
+
+`./vf statements <identifier>` is generic across:
+
+- `--statement income`
+- `--statement balance`
+- `--statement cashflow`
+- `--period annual`
+- `--period quarterly`
+
+Current statement behavior includes:
+
+- SEC-first statements for US issuers
+- Yahoo-backed statement fallback for non-US issuers when Yahoo has usable data
+- clearer failures when a provider returns no usable rows
+- explicit separation between:
+  - additive flow metrics
+  - instant balance-sheet metrics
+  - direct-quarter metrics such as diluted EPS and diluted shares
+- statement tables prefer dropping rows that are empty across the selected periods instead of keeping noisy all-blank rows
+
+For Yahoo-backed names, empty quarterly frames are treated as upstream provider gaps rather than silent success.
+
+## Current JSON Path
+
+`--format json` is supported on:
+
+- `./vf company`
+- `./vf snapshot`
+- `./vf statements`
+
+The JSON path is intentionally minimal and backend-oriented:
+
+- one JSON bundle is printed to stdout
+- one JSON file is written per section in the output directory
+- raw numeric values are preserved
+- the table/markdown path remains available for human inspection
+
+## Berkshire Branch Workflow
+
+`brk` keeps the generic `company`, `snapshot`, and `statements` commands, but adds Berkshire-focused commands under:
+
+```bash
+./vf brk <subcommand>
 ```
 
-## Security Identity
+Current Berkshire workflows include:
 
-Treat ticker symbols as market-data aliases, not the only identity key.
+- `overview`
+  - Berkshire market snapshot
+  - share-class bridge
+  - selected SEC facts
+  - filtered core filings
+- `holdings`
+  - latest 13F holdings
+  - optional live-price enrichment where ticker mappings exist
+- `liquidity`
+  - Berkshire cash and debt-securities bridge tables
+- `segments`
+  - operating segment extraction from the latest annual filing report tables
 
-- use a canonical `security_id` in backend tables
-- prefer `CUSIP` when holdings data has it
-- use `ticker + exchange` when the workflow starts from a market symbol
-- resolve current prices through a separate alias layer
+The intent on this branch is to use Berkshire as the hard valuation case while still inheriting the reusable generic infrastructure from `main`.
 
-## Documentation Policy
+## Documentation
 
-- `README.md` stays short and human-oriented
-- `claude.md` is the more detailed repo contract for AI agents
-- subtree `CLAUDE.md` files are AI-only notes for specific modules
-- important behavior should be documented in module docstrings and targeted comments near the code
+- `README.md` is human-facing
+- `claude.md` and subtree `CLAUDE.md` files are AI-only notes

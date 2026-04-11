@@ -27,11 +27,7 @@ Setup complete.
 
 Next:
   export VALUATION_SEC_USER_AGENT="valuationFramework/0.1 your-email@example.com"
-  ./vf snapshot BRK-B
   ./vf company BRK-B
   ./vf company US0846707026
-  ./vf brk overview
-  ./vf brk holdings
-  ./vf brk liquidity
-  ./vf brk segments
+  ./vf snapshot BRK-B
 EOF

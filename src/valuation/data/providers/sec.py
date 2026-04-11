@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from io import StringIO
 from typing import Any, Dict, List, Mapping, Optional
+import xml.etree.ElementTree as ET
 
 import pandas as pd
 import requests
-import xml.etree.ElementTree as ET
 
 from valuation.config import get_sec_user_agent, using_default_sec_user_agent
 
@@ -54,7 +55,7 @@ class SecClient:
             }
         )
 
-    def _get_json(self, url: str) -> Mapping[str, Any]:
+    def _fetch_json_uncached(self, url: str) -> Mapping[str, Any]:
         """Fetch JSON and convert common SEC access failures into actionable errors."""
         response = self.session.get(url, timeout=self.timeout)
         try:
@@ -88,7 +89,9 @@ class SecClient:
         if self._company_tickers_cache is not None:
             return self._company_tickers_cache
 
-        payload = self._get_json(f"{SEC_FILES_BASE_URL}/company_tickers_exchange.json")
+        payload = self._fetch_json_uncached(
+            f"{SEC_FILES_BASE_URL}/company_tickers_exchange.json"
+        )
         fields = payload.get("fields", [])
         rows = payload.get("data", [])
         companies: List[SecCompany] = []
@@ -125,19 +128,19 @@ class SecClient:
         raise LookupError("CIK not found in SEC company mapping: %s" % cik)
 
     def fetch_submissions(self, cik: int | str) -> Mapping[str, Any]:
-        return self._get_json(
+        return self._fetch_json_uncached(
             f"{SEC_DATA_BASE_URL}/submissions/CIK{_format_cik(cik)}.json"
         )
 
     def fetch_company_facts(self, cik: int | str) -> Mapping[str, Any]:
-        return self._get_json(
+        return self._fetch_json_uncached(
             f"{SEC_DATA_BASE_URL}/api/xbrl/companyfacts/CIK{_format_cik(cik)}.json"
         )
 
     def fetch_filing_index(self, cik: int | str, accession_number: str) -> Mapping[str, Any]:
         accession = accession_number.replace("-", "")
         cik_number = int(_format_cik(cik))
-        return self._get_json(
+        return self._fetch_json_uncached(
             f"https://www.sec.gov/Archives/edgar/data/{cik_number}/{accession}/index.json"
         )
 
@@ -198,11 +201,17 @@ class SecClient:
     ) -> Dict[str, Any]:
         """Return a small SEC payload bundle for downstream commands."""
         company = self.lookup_company(ticker)
-        submissions = self.fetch_submissions(company.cik)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            submissions_future = executor.submit(self.fetch_submissions, company.cik)
+            company_facts_future = None
+            if include_company_facts:
+                company_facts_future = executor.submit(self.fetch_company_facts, company.cik)
+
+            submissions = submissions_future.result()
         bundle = {
             "company": company,
             "submissions": submissions,
         }
-        if include_company_facts:
-            bundle["company_facts"] = self.fetch_company_facts(company.cik)
+        if company_facts_future is not None:
+            bundle["company_facts"] = company_facts_future.result()
         return bundle
