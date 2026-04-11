@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
@@ -27,7 +28,7 @@ from valuation.data.normalize.tables import (
     sec_company_to_table,
     snapshot_to_table,
 )
-from concurrent.futures import ThreadPoolExecutor
+from valuation.config import load_project_env
 from valuation.data.providers.sec import SecClient
 from valuation.data.providers.yahoo import YahooFinanceClient
 from valuation.reports.tables import (
@@ -358,6 +359,7 @@ def _emit_sections(
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
+    load_project_env()
     parser = build_parser()
     args = parser.parse_args(argv)
 

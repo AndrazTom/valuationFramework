@@ -21,13 +21,19 @@ Longer term, the project is meant to become a small personal alternative to the 
 
 ```bash
 ./setup
-export VALUATION_SEC_USER_AGENT="valuationFramework/0.1 your-email@example.com"
 ./vf company AAPL
 ./vf company BNP.PA
 ./vf company US0846707026
 ```
 
 `./vf` runs the current source tree through the local virtualenv.
+
+For SEC-backed commands, use either:
+
+- a repo-local `.env` with `VALUATION_SEC_USER_AGENT=valuationFramework/0.1 your-email@example.com`
+- or an exported shell variable such as `export VALUATION_SEC_USER_AGENT="valuationFramework/0.1 your-email@example.com"`
+
+The code now loads `.env` directly as well, so both `./vf ...` and `python -m valuation.cli ...` pick up the same local configuration. An exported environment variable still overrides `.env`.
 
 ## Main Workflow
 

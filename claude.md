@@ -38,6 +38,10 @@ Long-term direction:
   - `PYTHONPATH=src pytest -q`
 - bare `pytest` can import the wrong package tree if `src/` is not on `PYTHONPATH`
 - the shell environment may not always have `rg`; standard tools like `find`, `sed`, and `grep` are acceptable fallbacks
+- SEC env note:
+  - support both a repo-local `.env` and explicit exported variables
+  - code should load `.env` without relying only on the `vf` shell wrapper
+  - exported env vars should keep precedence over `.env`
 
 ## Current Architecture
 
@@ -157,6 +161,7 @@ As of 2026-04-09, `main` should contain or move toward:
 ## Current Commands
 
 - `./setup`
+- create a local `.env` with `VALUATION_SEC_USER_AGENT=...` or export it in shell for SEC access
 - `./vf company BRK-B`
 - `./vf company BNP.PA`
 - `./vf company SI0031102120`
