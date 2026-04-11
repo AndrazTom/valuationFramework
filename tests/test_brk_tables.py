@@ -1,12 +1,15 @@
 import pandas as pd
 
 from valuation.notation import B, M
+from valuation.brk.service import BrkLiquidityFiling, BrkSegmentFiling
+from valuation.brk.segments import BrkSegmentReportSet
 from valuation.brk.tables import (
     build_13f_summary_table,
     build_13f_live_price_summary_table,
     build_key_facts_table,
     build_liquidity_bridge_table,
     build_liquidity_summary_table,
+    build_top_level_operating_segments_summary_table,
     build_share_class_table,
     build_top_holdings_live_table,
     build_top_holdings_table,
@@ -204,37 +207,73 @@ def test_build_13f_live_price_summary_table():
 
 
 def test_build_liquidity_bridge_table():
-    company_facts = {
-        "facts": {
-            "us-gaap": {
-                "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents": {
-                    "units": {
-                        "USD": [
-                            {"val": 52 * B, "filed": "2026-03-02", "end": "2025-12-31", "form": "10-K"}
-                        ]
-                    }
-                }
-            }
-        }
+    filings = [
+        BrkLiquidityFiling(
+            filing_date="2026-03-02",
+            accession_number="0001",
+            form="10-K",
+            balance_sheet=pd.DataFrame(
+                [
+                    ["Cash and cash equivalents", "", "47,719", "44,333"],
+                    ["Short-term investments in U.S. Treasury Bills", "", "321,434", "286,472"],
+                    ["Investments in fixed maturity securities", "", "17,816", "15,364"],
+                ],
+                columns=[
+                    "Consolidated Balance Sheets",
+                    "Consolidated Balance Sheets",
+                    "Dec. 31, 2025",
+                    "Dec. 31, 2024",
+                ],
+            ),
+        )
+    ]
+
+    frame = build_liquidity_bridge_table(filings)
+
+    assert set(frame["metric"]) == {
+        "cash_and_equivalents",
+        "short_term_us_treasury_bills",
+        "fixed_maturity_securities",
     }
-
-    frame = build_liquidity_bridge_table(company_facts)
-
-    assert "cash_and_equivalents" in set(frame["metric"])
+    assert frame[frame["metric"] == "short_term_us_treasury_bills"].iloc[0]["value_usd"] == 321434 * M
 
 
 def test_build_liquidity_summary_table():
     bridge = pd.DataFrame(
         [
-            {"metric": "cash_and_equivalents", "value": 52 * B},
-            {"metric": "available_for_sale_debt_fair_value", "value": 17.8 * B},
-            {"metric": "debt_maturing_within_1y", "value": 12.9 * B},
-            {"metric": "debt_maturing_2_to_5y", "value": 4 * B},
-            {"metric": "debt_maturing_6_to_10y", "value": 500 * M},
+            {"filing_date": "2026-03-02", "form": "10-K", "period_end": "2025-12-31", "accession_number": "0001", "metric": "cash_and_equivalents", "value_usd": 47.719 * B},
+            {"filing_date": "2026-03-02", "form": "10-K", "period_end": "2025-12-31", "accession_number": "0001", "metric": "short_term_us_treasury_bills", "value_usd": 321.434 * B},
+            {"filing_date": "2026-03-02", "form": "10-K", "period_end": "2025-12-31", "accession_number": "0001", "metric": "fixed_maturity_securities", "value_usd": 17.816 * B},
         ]
     )
 
     summary = build_liquidity_summary_table(bridge)
 
-    assert summary[summary["field"] == "debt_securities_noncurrent"].iloc[0]["value"] == 4.5 * B
-    assert summary[summary["field"] == "liquidity_total_estimate"].iloc[0]["value"] == 69.8 * B
+    assert summary.iloc[0]["core_liquidity_total_usd"] == 369.153 * B
+    assert summary.iloc[0]["liquid_investments_total_usd"] == 386.969 * B
+
+
+def test_build_top_level_operating_segments_summary_table_history():
+    filings = [
+        BrkSegmentFiling(
+            filing_date="2026-03-02",
+            accession_number="0001",
+            form="10-K",
+            reports=BrkSegmentReportSet(
+                filing_date="2026-03-02",
+                accession_number="0001",
+                earnings_detail=pd.DataFrame(
+                    [
+                        {"report": "earnings", "member_path": "Operating Businesses | BNSF", "member_name": "BNSF", "metric": "Revenues", "duration_months": 12, "period_end": "2025-12-31", "value": 23 * M},
+                    ]
+                ),
+                reconciliation_detail=pd.DataFrame(),
+                additional_detail=pd.DataFrame(),
+            ),
+        )
+    ]
+    summary = build_top_level_operating_segments_summary_table(filings, period="annual")
+
+    assert summary.iloc[0]["filing_date"] == "2026-03-02"
+    assert summary.iloc[0]["period_end"] == "2025-12-31"
+    assert summary.iloc[0]["revenues_usd"] == 23 * M

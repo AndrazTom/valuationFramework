@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Sequence
 
 import pandas as pd
 
+from valuation.brk.service import BrkLiquidityFiling, BrkSegmentFiling
 from valuation.brk.service import BRK_A_TICKER, BRK_A_TO_B_CONVERSION, BRK_B_TICKER
 from valuation.brk.segments import build_top_level_operating_segments_table
 from valuation.data.normalize.tables import CompanyFactQuery, company_facts_to_table
 from valuation.brk.holdings import aggregate_13f_holdings
+from valuation.notation import MILLION
 from valuation.securities.pricing import enrich_holdings_with_market_prices
 
 BRK_FACT_DEFINITIONS: Sequence[CompanyFactQuery] = (
@@ -86,6 +89,13 @@ BRK_LIQUIDITY_FACT_DEFINITIONS: Sequence[CompanyFactQuery] = (
     ),
 )
 
+BRK_LIQUIDITY_REPORT_LABELS = {
+    "cash_and_equivalents": "Cash and cash equivalents",
+    "short_term_us_treasury_bills": "Short-term investments in U.S. Treasury Bills",
+    "fixed_maturity_securities": "Investments in fixed maturity securities",
+    "payable_for_purchase_of_us_treasury_bills": "Payable for purchase of U.S. Treasury Bills",
+}
+
 CORE_BRK_FORMS = ("10-K", "10-Q", "8-K", "DEF 14A", "13F-HR", "13F-HR/A")
 
 
@@ -112,44 +122,94 @@ def build_key_facts_table(company_facts: dict) -> pd.DataFrame:
     return company_facts_to_table(company_facts, BRK_FACT_DEFINITIONS)
 
 
-def build_liquidity_bridge_table(company_facts: dict) -> pd.DataFrame:
-    """Return the raw SEC fact bridge used for Berkshire liquidity estimates."""
-    return company_facts_to_table(company_facts, BRK_LIQUIDITY_FACT_DEFINITIONS)
+def build_liquidity_bridge_table(filings: Sequence[BrkLiquidityFiling]) -> pd.DataFrame:
+    """Return the Berkshire liquidity bridge from filing balance-sheet reports."""
+    rows = []
+    for filing in filings:
+        period_end, values = _extract_liquidity_values(filing.balance_sheet)
+        if period_end is None:
+            continue
+        for metric, value in values.items():
+            rows.append(
+                {
+                    "filing_date": filing.filing_date,
+                    "form": filing.form,
+                    "period_end": period_end,
+                    "accession_number": filing.accession_number,
+                    "metric": metric,
+                    "label": BRK_LIQUIDITY_REPORT_LABELS[metric],
+                    "value_usd": value,
+                }
+            )
+    return pd.DataFrame(rows)
 
 
 def build_liquidity_summary_table(bridge: pd.DataFrame) -> pd.DataFrame:
-    """Summarize Berkshire liquidity buckets from the bridge facts."""
+    """Summarize Berkshire liquidity history from filing report rows."""
     if bridge.empty:
-        return pd.DataFrame(columns=["field", "value"])
+        return pd.DataFrame(
+            columns=[
+                "filing_date",
+                "form",
+                "period_end",
+                "cash_and_equivalents_usd",
+                "short_term_us_treasury_bills_usd",
+                "core_liquidity_total_usd",
+                "fixed_maturity_securities_usd",
+                "liquid_investments_total_usd",
+                "payable_for_purchase_of_us_treasury_bills_usd",
+            ]
+        )
 
-    values = {
-        row["metric"]: row["value"]
-        for _, row in bridge.iterrows()
-        if pd.notna(row["value"])
-    }
-    debt_current = values.get("debt_maturing_within_1y")
-    debt_noncurrent = _sum_defined(
-        values.get("debt_maturing_2_to_5y"),
-        values.get("debt_maturing_6_to_10y"),
-        values.get("debt_maturing_after_10y"),
-        values.get("debt_without_single_maturity"),
+    summary = (
+        bridge.pivot_table(
+            index=["filing_date", "form", "period_end", "accession_number"],
+            columns="metric",
+            values="value_usd",
+            aggfunc="first",
+        )
+        .reset_index()
+        .rename_axis(columns=None)
     )
-    all_debt_securities = values.get("available_for_sale_debt_fair_value")
-    liquidity_total = _sum_defined(
-        values.get("cash_and_equivalents"),
-        all_debt_securities,
+    summary = summary.rename(
+        columns={
+            "cash_and_equivalents": "cash_and_equivalents_usd",
+            "short_term_us_treasury_bills": "short_term_us_treasury_bills_usd",
+            "fixed_maturity_securities": "fixed_maturity_securities_usd",
+            "payable_for_purchase_of_us_treasury_bills": "payable_for_purchase_of_us_treasury_bills_usd",
+        }
     )
-
-    return pd.DataFrame(
-        [
-            {"field": "cash_and_equivalents", "value": values.get("cash_and_equivalents")},
-            {"field": "cash_equivalents_component", "value": values.get("cash_equivalents_component")},
-            {"field": "debt_securities_total", "value": all_debt_securities},
-            {"field": "debt_securities_current", "value": debt_current},
-            {"field": "debt_securities_noncurrent", "value": debt_noncurrent},
-            {"field": "liquidity_total_estimate", "value": liquidity_total},
-        ]
+    summary["core_liquidity_total_usd"] = summary.apply(
+        lambda row: _sum_defined(
+            row.get("cash_and_equivalents_usd"),
+            row.get("short_term_us_treasury_bills_usd"),
+        ),
+        axis=1,
     )
+    summary["liquid_investments_total_usd"] = summary.apply(
+        lambda row: _sum_defined(
+            row.get("core_liquidity_total_usd"),
+            row.get("fixed_maturity_securities_usd"),
+        ),
+        axis=1,
+    )
+    preferred_order = [
+        "filing_date",
+        "form",
+        "period_end",
+        "accession_number",
+        "cash_and_equivalents_usd",
+        "short_term_us_treasury_bills_usd",
+        "core_liquidity_total_usd",
+        "fixed_maturity_securities_usd",
+        "liquid_investments_total_usd",
+        "payable_for_purchase_of_us_treasury_bills_usd",
+    ]
+    available_columns = [column for column in preferred_order if column in summary.columns]
+    return summary[available_columns].sort_values(
+        by=["filing_date", "period_end"],
+        ascending=False,
+    ).reset_index(drop=True)
 
 
 def filter_core_filings_table(frame: pd.DataFrame, limit: int = 10) -> pd.DataFrame:
@@ -284,19 +344,43 @@ def build_13f_live_price_summary_table(
     )
 
 
-def build_segment_report_summary_table(filing_date: str, accession_number: str) -> pd.DataFrame:
-    """Summarize the segment filing used for Berkshire operating tables."""
+def build_segment_report_summary_table(filings: Sequence[BrkSegmentFiling]) -> pd.DataFrame:
+    """Summarize the Berkshire segment filings included in the current output."""
     return pd.DataFrame(
         [
-            {"field": "filing_date", "value": filing_date},
-            {"field": "accession_number", "value": accession_number},
+            {
+                "filing_date": filing.filing_date,
+                "form": filing.form,
+                "accession_number": filing.accession_number,
+            }
+            for filing in filings
         ]
     )
 
 
-def build_top_level_operating_segments_summary_table(report_set) -> pd.DataFrame:
-    """Return Berkshire's top-level operating segments for the latest annual filing."""
-    return build_top_level_operating_segments_table(report_set)
+def build_top_level_operating_segments_summary_table(
+    filings: Sequence[BrkSegmentFiling],
+    *,
+    period: str,
+) -> pd.DataFrame:
+    """Return Berkshire top-level operating segments across selected filings."""
+    tables = []
+    for filing in filings:
+        table = build_top_level_operating_segments_table(filing.reports, period=period)
+        if table.empty:
+            continue
+        table.insert(0, "accession_number", filing.accession_number)
+        table.insert(0, "form", filing.form)
+        table.insert(0, "filing_date", filing.filing_date)
+        tables.append(table)
+    if not tables:
+        return pd.DataFrame()
+    combined = pd.concat(tables, ignore_index=True)
+    return combined.sort_values(
+        by=["filing_date", "period_end", "revenues_usd"],
+        ascending=[False, False, False],
+        na_position="last",
+    ).reset_index(drop=True)
 
 
 def _sum_defined(*values):
@@ -304,3 +388,73 @@ def _sum_defined(*values):
     if not defined:
         return None
     return sum(defined)
+
+
+def _extract_liquidity_values(frame: pd.DataFrame) -> tuple[str | None, dict[str, float]]:
+    if frame.empty:
+        return None, {}
+    labels = frame.iloc[:, 0].astype(str).str.strip()
+    current_column_index = _latest_date_column_index(frame.columns)
+    if current_column_index is None:
+        return None, {}
+    current_column = frame.columns[current_column_index]
+    period_end = _parse_report_date(str(current_column))
+    if period_end is None:
+        return None, {}
+    values = {}
+    for metric, label in BRK_LIQUIDITY_REPORT_LABELS.items():
+        matched = frame[labels == label]
+        if matched.empty:
+            continue
+        parsed_value = _parse_balance_sheet_value(matched.iloc[0, current_column_index])
+        if parsed_value is None:
+            continue
+        values[metric] = parsed_value
+    return period_end, values
+
+
+def _latest_date_column_index(columns) -> int | None:
+    dated_columns = []
+    for index, column in enumerate(columns):
+        parsed = _parse_report_date(str(column))
+        if parsed is not None:
+            dated_columns.append((parsed, index))
+    if not dated_columns:
+        return None
+    return max(dated_columns, key=lambda item: item[0])[1]
+
+
+def _parse_report_date(value: str) -> str | None:
+    cleaned = value.replace(".", "")
+    try:
+        return datetime.strptime(cleaned, "%b %d, %Y").date().isoformat()
+    except ValueError:
+        return None
+
+
+def _parse_balance_sheet_value(value: object) -> float | None:
+    if value is None or pd.isna(value):
+        return None
+    text = str(value).replace("\xa0", " ").strip()
+    if not text:
+        return None
+    negative = text.startswith("(") and text.endswith(")")
+    cleaned = (
+        text.replace("$", "")
+        .replace(",", "")
+        .replace("[1]", "")
+        .replace("[2]", "")
+        .replace("[3]", "")
+        .replace("(", "")
+        .replace(")", "")
+        .strip()
+    )
+    if cleaned in {"", "NaN", "nan"}:
+        return None
+    try:
+        numeric = float(cleaned)
+    except ValueError:
+        return None
+    if negative:
+        numeric *= -1
+    return numeric * MILLION

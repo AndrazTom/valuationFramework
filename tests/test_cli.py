@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from valuation import cli
+from valuation.brk import cli as brk_cli
 from valuation.data.providers.sec import SecCompany
 
 
@@ -253,6 +254,158 @@ def test_statements_cli_rejects_reversed_range():
             "2025",
             "--end-quarter",
             "2",
+        ]
+    )
+
+    assert result == 1
+
+
+def test_brk_liquidity_cli_accepts_period_and_limit(monkeypatch, tmp_path: Path):
+    captured = {}
+
+    def fake_fetch(period="annual", limit=1, **kwargs):
+        captured["period"] = period
+        captured["limit"] = limit
+        return type(
+            "Bundle",
+            (),
+            {
+                "filings": [],
+            },
+        )()
+
+    monkeypatch.setattr(
+        brk_cli,
+        "fetch_brk_liquidity",
+        fake_fetch,
+    )
+    monkeypatch.setattr(brk_cli, "build_liquidity_bridge_table", lambda filings: pd.DataFrame())
+    monkeypatch.setattr(brk_cli, "build_liquidity_summary_table", lambda bridge: pd.DataFrame())
+
+    result = cli.main(
+        [
+            "brk",
+            "liquidity",
+            "--period",
+            "quarterly",
+            "--limit",
+            "3",
+            "--outdir",
+            str(tmp_path),
+        ]
+    )
+
+    assert result == 0
+    assert captured == {"period": "quarterly", "limit": 3}
+
+
+def test_brk_liquidity_cli_uses_range_filters_and_widens_default_limit(monkeypatch, tmp_path: Path):
+    captured = {}
+
+    def fake_fetch(
+        period="annual",
+        limit=1,
+        start_year=None,
+        end_year=None,
+        start_quarter=None,
+        end_quarter=None,
+    ):
+        captured["period"] = period
+        captured["limit"] = limit
+        captured["start_year"] = start_year
+        captured["end_year"] = end_year
+        captured["start_quarter"] = start_quarter
+        captured["end_quarter"] = end_quarter
+        return type("Bundle", (), {"filings": []})()
+
+    monkeypatch.setattr(brk_cli, "fetch_brk_liquidity", fake_fetch)
+    monkeypatch.setattr(brk_cli, "build_liquidity_bridge_table", lambda filings: pd.DataFrame())
+    monkeypatch.setattr(brk_cli, "build_liquidity_summary_table", lambda bridge: pd.DataFrame())
+
+    result = cli.main(
+        [
+            "brk",
+            "liquidity",
+            "--period",
+            "quarterly",
+            "--start-year",
+            "2019",
+            "--start-quarter",
+            "1",
+            "--end-year",
+            "2023",
+            "--end-quarter",
+            "3",
+            "--outdir",
+            str(tmp_path),
+        ]
+    )
+
+    assert result == 0
+    assert captured == {
+        "period": "quarterly",
+        "limit": 99,
+        "start_year": 2019,
+        "end_year": 2023,
+        "start_quarter": 1,
+        "end_quarter": 3,
+    }
+
+
+def test_brk_segments_cli_accepts_period_and_limit(monkeypatch, tmp_path: Path):
+    captured = {}
+
+    def fake_fetch(period="annual", limit=1, **kwargs):
+        captured["period"] = period
+        captured["limit"] = limit
+        return type(
+            "Bundle",
+            (),
+            {
+                "filings": [],
+            },
+        )()
+
+    monkeypatch.setattr(
+        brk_cli,
+        "fetch_brk_segments",
+        fake_fetch,
+    )
+    monkeypatch.setattr(brk_cli, "build_segment_report_summary_table", lambda filings: pd.DataFrame())
+    monkeypatch.setattr(
+        brk_cli,
+        "build_top_level_operating_segments_summary_table",
+        lambda filings, period="annual": pd.DataFrame(),
+    )
+
+    result = cli.main(
+        [
+            "brk",
+            "segments",
+            "--period",
+            "quarterly",
+            "--limit",
+            "2",
+            "--outdir",
+            str(tmp_path),
+        ]
+    )
+
+    assert result == 0
+    assert captured == {"period": "quarterly", "limit": 2}
+
+
+def test_brk_segments_cli_rejects_invalid_range(tmp_path: Path):
+    result = cli.main(
+        [
+            "brk",
+            "segments",
+            "--period",
+            "annual",
+            "--start-quarter",
+            "1",
+            "--outdir",
+            str(tmp_path),
         ]
     )
 

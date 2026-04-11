@@ -12,6 +12,11 @@ Current branch priority:
 - `brk` is the Berkshire-specific proving ground layered on top of that generic base
 - temporary hardening branches should be merged back quickly, then deleted
 - current branch focus is stabilizing Berkshire workflows after inheriting the newer generic backend
+- current hardening branch has already:
+  - moved Berkshire liquidity from sparse companyfacts to filing balance-sheet tables
+  - made Berkshire segments work again without relying on `lxml`
+  - added annual/quarterly history controls to Berkshire liquidity and segment commands
+  - added explicit Berkshire start/end period filters, with range filters widening the default history limit
 
 Long-term direction:
 
@@ -90,6 +95,7 @@ Rules:
   - latest-fact selection, filing normalization, statement period matrix logic
 - `src/valuation/data/providers/`
   - thin wrappers over SEC and Yahoo
+  - SEC filing report tables are now parsed in-code from HTML rather than relying on `pandas.read_html` + `lxml`
 - `src/valuation/reports/tables.py`
   - rendering and export helpers
 - `src/valuation/securities/identifiers.py`
@@ -179,8 +185,12 @@ As of 2026-04-09, `main` should contain or move toward:
 - `./vf brk overview`
 - `./vf brk holdings --limit 10`
 - `./vf brk holdings --live-prices --limit 10`
-- `./vf brk liquidity`
-- `./vf brk segments`
+- `./vf brk liquidity --period annual --limit 4`
+- `./vf brk liquidity --period quarterly --limit 4`
+- `./vf brk segments --period annual --limit 4`
+- `./vf brk segments --period quarterly --limit 4`
+- `./vf brk liquidity --period quarterly --start-year 2019 --start-quarter 1 --end-year 2023 --end-quarter 3`
+- `./vf brk segments --period quarterly --start-year 2019 --start-quarter 1 --end-year 2023 --end-quarter 3`
 
 ## Next Main Priorities
 
@@ -239,6 +249,8 @@ On `brk`, immediate branch-specific target after sync:
   - 13F holdings
   - liquidity bridge
   - segment summary tables
+- keep Berkshire liquidity grounded in filing balance-sheet tables, especially U.S. Treasury Bill rows
+- keep Berkshire quarterly segments on true 3-month data instead of YTD values
 
 ## Statement Debug Notes
 
