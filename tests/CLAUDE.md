@@ -22,3 +22,5 @@ Coverage map:
 - `test_company_tables.py` is also where overview provenance/completeness behavior is currently locked down
 - `test_company_tables.py` also locks down statement-availability partial-coverage behavior
 - `test_cli.py` covers section wiring and output artifacts
+- `test_security_pricing.py` covers reusable price-change enrichment and graceful degradation on quote/history failures
+- `test_yahoo_provider.py` covers Yahoo provider fallbacks when fast-info or history calls fail

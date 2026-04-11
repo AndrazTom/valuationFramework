@@ -20,6 +20,9 @@ Current branch priority:
   - fixed Berkshire segment rows being split across alternate SEC member paths
   - changed multi-period Berkshire segment output to emit one table per filing period
   - added optional Berkshire holdings price-change windows on live-priced holdings output
+  - added Berkshire-vs-holdings price-change comparison tables
+  - added a first Berkshire market-implied SOTP bridge command
+  - hardened Yahoo live-price paths so Berkshire pricing commands degrade to partial coverage instead of crashing on rate limits
   - confirmed that some remaining blank cells in older annual Berkshire segment tables are real SEC report-table coverage gaps, not renderer bugs
 
 Long-term direction:
@@ -190,6 +193,8 @@ As of 2026-04-09, `main` should contain or move toward:
 - `./vf brk holdings --limit 10`
 - `./vf brk holdings --live-prices --limit 10`
 - `./vf brk holdings --price-change 1M --limit 10`
+- `./vf brk sotp`
+- `./vf brk sotp --price-change 1M`
 - `./vf brk liquidity --period annual --limit 4`
 - `./vf brk liquidity --period quarterly --limit 4`
 - `./vf brk segments --period annual --limit 4`

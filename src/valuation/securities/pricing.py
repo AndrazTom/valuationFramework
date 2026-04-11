@@ -11,6 +11,35 @@ from valuation.data.providers.yahoo import YahooFinanceClient
 PRICE_CHANGE_WINDOWS = ("1D", "5D", "1M", "3M", "YTD", "1Y", "5Y", "ALL")
 
 
+def fetch_price_change_snapshot(
+    ticker: str,
+    *,
+    price_change_window: str,
+    yahoo_client: Optional[YahooFinanceClient] = None,
+) -> dict[str, object]:
+    """Return a current price snapshot augmented with one normalized change window."""
+    normalized_window = normalize_price_change_window(price_change_window)
+    yahoo = yahoo_client or YahooFinanceClient()
+    snapshot = _safe_fetch_price_snapshot(yahoo, ticker)
+    history = _safe_fetch_history(
+        yahoo,
+        ticker,
+        period=_history_period_for_change_window(normalized_window),
+    )
+    price_change_pct = _compute_price_change_pct(
+        snapshots_by_ticker={ticker: snapshot},
+        histories_by_ticker={ticker: history},
+        ticker=ticker,
+        window=normalized_window,
+    )
+    return {
+        **snapshot,
+        "ticker": str(snapshot.get("ticker") or ticker).upper(),
+        "price_change_window": normalized_window,
+        "price_change_pct": price_change_pct,
+    }
+
+
 def enrich_holdings_with_market_prices(
     holdings: pd.DataFrame,
     reference: pd.DataFrame,
@@ -32,16 +61,16 @@ def enrich_holdings_with_market_prices(
     yahoo = yahoo_client or YahooFinanceClient()
     normalized_window = normalize_price_change_window(price_change_window)
     snapshots_by_ticker = {
-        ticker: yahoo.fetch_price_snapshot(ticker)
+        ticker: _safe_fetch_price_snapshot(yahoo, ticker)
         for ticker in sorted(set(enriched["ticker"].dropna()))
     }
     histories_by_ticker = {}
     if normalized_window is not None:
         histories_by_ticker = {
-            ticker: yahoo.fetch_history(
+            ticker: _safe_fetch_history(
+                yahoo,
                 ticker,
                 period=_history_period_for_change_window(normalized_window),
-                interval="1d",
             )
             for ticker in sorted(set(enriched["ticker"].dropna()))
         }
@@ -85,6 +114,61 @@ def normalize_price_change_window(value: str | None) -> str | None:
     return normalized
 
 
+def fetch_ticker_price_change(
+    ticker: str,
+    *,
+    window: str,
+    yahoo_client: Optional[YahooFinanceClient] = None,
+) -> dict[str, object]:
+    """Return a small reusable price-change snapshot for one ticker."""
+    normalized_window = normalize_price_change_window(window)
+    if normalized_window is None:
+        raise ValueError("price change window is required")
+    yahoo = yahoo_client or YahooFinanceClient()
+    snapshot = _safe_fetch_price_snapshot(yahoo, ticker)
+    history = _safe_fetch_history(
+        yahoo,
+        ticker,
+        period=_history_period_for_change_window(normalized_window),
+    )
+    price_change_pct = calculate_price_change_pct(
+        snapshot=snapshot,
+        history=history,
+        window=normalized_window,
+    )
+    return {
+        "ticker": str(snapshot.get("ticker") or ticker).upper(),
+        "last_price": snapshot.get("last_price"),
+        "latest_price_date": snapshot.get("latest_price_date"),
+        "price_change_window": normalized_window,
+        "price_change_pct": price_change_pct,
+        "source": snapshot.get("source"),
+    }
+
+
+def calculate_price_change_pct(
+    *,
+    snapshot: Mapping[str, object],
+    history: pd.DataFrame,
+    window: str,
+) -> float | None:
+    """Compute a change percentage from one quote snapshot and history frame."""
+    normalized_window = normalize_price_change_window(window)
+    if normalized_window is None:
+        return None
+    latest_price = snapshot.get("last_price")
+    if latest_price is None:
+        latest_price = _latest_history_close(history)
+    baseline = _baseline_close_for_window(
+        window=normalized_window,
+        snapshot=snapshot,
+        history=history,
+    )
+    if latest_price is None or baseline in {None, 0}:
+        return None
+    return (float(latest_price) / float(baseline)) - 1.0
+
+
 def _snapshot_value(
     snapshots_by_ticker: Mapping[str, Mapping[str, object]],
     ticker: object,
@@ -120,13 +204,7 @@ def _compute_price_change_pct(
     ticker_text = str(ticker)
     snapshot = snapshots_by_ticker.get(ticker_text) or {}
     history = histories_by_ticker.get(ticker_text, pd.DataFrame())
-    latest_price = snapshot.get("last_price")
-    if latest_price is None:
-        latest_price = _latest_history_close(history)
-    baseline = _baseline_close_for_window(window=window, snapshot=snapshot, history=history)
-    if latest_price is None or baseline in {None, 0}:
-        return None
-    return (float(latest_price) / float(baseline)) - 1.0
+    return calculate_price_change_pct(snapshot=snapshot, history=history, window=window)
 
 
 def _baseline_close_for_window(
@@ -207,3 +285,26 @@ def _history_period_for_change_window(window: str) -> str:
         "5Y": "10y",
         "ALL": "max",
     }[window]
+
+
+def _safe_fetch_price_snapshot(yahoo: YahooFinanceClient, ticker: str) -> dict[str, object]:
+    try:
+        return yahoo.fetch_price_snapshot(ticker)
+    except Exception:
+        return {"ticker": str(ticker).upper(), "source": "yfinance"}
+
+
+def _safe_fetch_history(
+    yahoo: YahooFinanceClient,
+    ticker: str,
+    *,
+    period: str,
+) -> pd.DataFrame:
+    try:
+        return yahoo.fetch_history(
+            ticker,
+            period=period,
+            interval="1d",
+        )
+    except Exception:
+        return pd.DataFrame()

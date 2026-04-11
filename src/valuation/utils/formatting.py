@@ -15,8 +15,9 @@ def humanize_frame(frame: pd.DataFrame) -> pd.DataFrame:
     if frame.empty:
         return frame.copy()
 
-    display = frame.copy()
-    table_currency = _frame_currency_hint(display)
+    source = frame.copy()
+    display = source.copy()
+    table_currency = _frame_currency_hint(source)
     for column in display.columns:
         display[column] = [
             _format_value_for_display(
@@ -25,7 +26,7 @@ def humanize_frame(frame: pd.DataFrame) -> pd.DataFrame:
                 row=row,
                 table_currency=table_currency,
             )
-            for _, row in display.iterrows()
+            for _, row in source.iterrows()
         ]
     return display
 
@@ -75,8 +76,6 @@ def _infer_format_kind(column: str, row: pd.Series) -> Optional[str]:
         "two_hundred_day_average",
     }:
         return "currency"
-    if "metric" in row and column_name not in {"metric", "unit"}:
-        return _infer_kind_from_field(str(row["metric"]).lower())
     if column_name in {"coverage_ratio"} or column_name.endswith("_pct"):
         return "percent"
     if column_name in {"portfolio_weight"} or "weight" in column_name:
@@ -90,6 +89,8 @@ def _infer_format_kind(column: str, row: pd.Series) -> Optional[str]:
         "voting_none",
     }:
         return "quantity"
+    if "metric" in row and column_name not in {"metric", "unit"}:
+        return _infer_kind_from_field(str(row["metric"]).lower())
     if column_name == "value" and "field" in row:
         return _infer_kind_from_field(str(row["field"]).lower())
     if column_name == "value" and "metric" in row:
@@ -98,12 +99,17 @@ def _infer_format_kind(column: str, row: pd.Series) -> Optional[str]:
 
 
 def _infer_kind_from_field(field_name: str) -> Optional[str]:
-    if any(token in field_name for token in ("share", "count", "position")):
-        return "quantity"
-    if "weight" in field_name:
+    normalized_field = field_name.strip().lower().replace(" ", "_")
+    if normalized_field.endswith("_pct") or normalized_field.endswith("_ratio"):
         return "percent"
+    if normalized_field.endswith("_usd"):
+        return "currency"
+    if "weight" in normalized_field:
+        return "percent"
+    if any(token in normalized_field for token in ("share", "count", "position")):
+        return "quantity"
     if any(
-        token in field_name
+        token in normalized_field
         for token in (
             "price",
             "open",

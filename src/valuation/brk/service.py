@@ -78,6 +78,16 @@ class BrkSegmentsBundle:
     filings: list[BrkSegmentFiling]
 
 
+@dataclass
+class BrkValuationBundle:
+    """Core Berkshire inputs for a first transparent SOTP bridge."""
+
+    overview: BrkOverviewBundle
+    holdings: Brk13FBundle
+    liquidity: BrkLiquidityBundle
+    segments: BrkSegmentsBundle
+
+
 def fetch_brk_overview(
     sec_client: Optional[SecClient] = None,
     yahoo_client: Optional[YahooFinanceClient] = None,
@@ -266,6 +276,23 @@ def fetch_brk_segments(
     return BrkSegmentsBundle(
         company=company,
         filings=segment_filings,
+    )
+
+
+def fetch_brk_valuation_bundle(
+    sec_client: Optional[SecClient] = None,
+    yahoo_client: Optional[YahooFinanceClient] = None,
+    *,
+    period: str = "annual",
+) -> BrkValuationBundle:
+    """Fetch the current Berkshire inputs needed for a first SOTP bridge."""
+    sec = sec_client or SecClient()
+    yahoo = yahoo_client or YahooFinanceClient()
+    return BrkValuationBundle(
+        overview=fetch_brk_overview(sec_client=sec, yahoo_client=yahoo),
+        holdings=fetch_latest_brk_13f(sec_client=sec),
+        liquidity=fetch_brk_liquidity(sec_client=sec, period=period, limit=1),
+        segments=fetch_brk_segments(sec_client=sec, period=period, limit=1),
     )
 
 

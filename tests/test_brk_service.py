@@ -5,6 +5,7 @@ from valuation.brk.service import (
     fetch_brk_segments,
     fetch_brk_liquidity,
     fetch_brk_overview,
+    fetch_brk_valuation_bundle,
     find_recent_filings,
     find_brk_13f_filings,
 )
@@ -107,6 +108,36 @@ class FakeSecClient:
                 ("9 Months Ended", "Sep. 30, 2024"),
             ],
         )
+
+    def fetch_filing_index(self, cik, accession_number):
+        assert cik == "0001067983"
+        assert accession_number == "0002"
+        return {"directory": {"item": [{"name": "info.xml"}]}}
+
+    def fetch_filing_text(self, cik, accession_number, filename):
+        assert cik == "0001067983"
+        assert accession_number == "0002"
+        assert filename == "info.xml"
+        return """
+<informationTable xmlns="http://www.sec.gov/edgar/document/thirteenf/informationtable">
+  <infoTable>
+    <nameOfIssuer>APPLE INC</nameOfIssuer>
+    <titleOfClass>COM</titleOfClass>
+    <cusip>037833100</cusip>
+    <value>100</value>
+    <shrsOrPrnAmt>
+      <sshPrnamt>10</sshPrnamt>
+      <sshPrnamtType>SH</sshPrnamtType>
+    </shrsOrPrnAmt>
+    <investmentDiscretion>SOLE</investmentDiscretion>
+    <votingAuthority>
+      <Sole>10</Sole>
+      <Shared>0</Shared>
+      <None>0</None>
+    </votingAuthority>
+  </infoTable>
+</informationTable>
+"""
 
 
 class FakeYahooClient:
@@ -215,3 +246,15 @@ def test_fetch_brk_segments_supports_quarterly_history():
 
     assert len(bundle.filings) == 1
     assert bundle.filings[0].form == "10-Q"
+
+
+def test_fetch_brk_valuation_bundle_assembles_inputs():
+    bundle = fetch_brk_valuation_bundle(
+        sec_client=FakeSecClient(),
+        yahoo_client=FakeYahooClient(),
+    )
+
+    assert bundle.overview.market_snapshot["last_price"] == 500.0
+    assert bundle.holdings.filing_date == "2026-02-14"
+    assert len(bundle.liquidity.filings) == 1
+    assert len(bundle.segments.filings) == 1

@@ -17,11 +17,14 @@ Current Berkshire stack:
   - `./vf brk holdings`
   - `./vf brk liquidity`
 - `./vf brk segments`
+- `./vf brk sotp`
 - latest 13F holdings
 - optional live-price revaluation for resolved holdings
 - optional live price-change windows on holdings via `--price-change` / `--price-change-window`
+- BRK-vs-holdings price-change comparison when a change window is selected
 - liquidity history from SEC filing balance-sheet tables
 - top-level operating segment extraction from filing report tables
+- first Berkshire market-implied SOTP bridge
 - liquidity and segments both support:
   - `--period annual|quarterly`
   - `--limit`
@@ -30,10 +33,11 @@ Current Berkshire stack:
 - SEC live checks should work with either:
   - repo-local `.env`
   - exported env vars, which should override `.env`
+- Yahoo live-price paths should degrade to partial coverage instead of crashing when quote/history fetches are rate-limited
 
 Next major output:
 
-- a first Berkshire sum-of-the-parts bridge table
+- Berkshire holdings history across filings
 
 Rules:
 

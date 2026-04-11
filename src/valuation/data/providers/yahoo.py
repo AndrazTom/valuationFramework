@@ -29,45 +29,59 @@ class YahooSearchQuote:
 class YahooFinanceClient:
     """Thin wrapper over yfinance for a stable repo-level interface."""
 
+    def __init__(self) -> None:
+        self._snapshot_cache: dict[str, Dict[str, Any]] = {}
+        self._history_cache: dict[tuple[str, str, str], "pd.DataFrame"] = {}
+
     def fetch_price_snapshot(self, ticker: str) -> Dict[str, Any]:
         """Return a small, stable snapshot instead of exposing raw yfinance objects."""
+        cache_key = ticker.upper()
+        if cache_key in self._snapshot_cache:
+            return dict(self._snapshot_cache[cache_key])
         yf = _load_yfinance()
         instrument = yf.Ticker(ticker)
-        info = instrument.fast_info or {}
-        last_price = _coerce_float(info.get("last_price"))
+        info = _safe_fast_info(instrument)
+        last_price = _coerce_float(_safe_mapping_get(info, "last_price"))
         latest_close = None
         latest_date = None
 
         # `history()` is noticeably slower than `fast_info`; only pay that cost when
         # the primary quote path does not yield a usable last price.
         if last_price is None:
-            history = instrument.history(period="5d", interval="1d", auto_adjust=False)
+            history = _safe_history(
+                instrument,
+                period="5d",
+                interval="1d",
+                auto_adjust=False,
+            )
             if not history.empty:
                 latest_row = history.tail(1).iloc[0]
                 latest_close = float(latest_row.get("Close"))
                 latest_date = history.tail(1).index[0]
 
-        return {
+        snapshot = {
             "ticker": ticker.upper(),
-            "currency": info.get("currency"),
-            "exchange": info.get("exchange"),
-            "quote_type": info.get("quote_type"),
+            "currency": _safe_mapping_get(info, "currency"),
+            "exchange": _safe_mapping_get(info, "exchange"),
+            "quote_type": _safe_mapping_get(info, "quote_type"),
             "last_price": last_price if last_price is not None else latest_close,
-            "previous_close": _coerce_float(info.get("previous_close")),
-            "open": _coerce_float(info.get("open")),
-            "day_high": _coerce_float(info.get("day_high")),
-            "day_low": _coerce_float(info.get("day_low")),
-            "market_cap": _coerce_float(info.get("market_cap")),
-            "shares": _coerce_float(info.get("shares")),
-            "fifty_day_average": _coerce_float(info.get("fifty_day_average")),
+            "previous_close": _coerce_float(_safe_mapping_get(info, "previous_close")),
+            "open": _coerce_float(_safe_mapping_get(info, "open")),
+            "day_high": _coerce_float(_safe_mapping_get(info, "day_high")),
+            "day_low": _coerce_float(_safe_mapping_get(info, "day_low")),
+            "market_cap": _coerce_float(_safe_mapping_get(info, "market_cap")),
+            "shares": _coerce_float(_safe_mapping_get(info, "shares")),
+            "fifty_day_average": _coerce_float(_safe_mapping_get(info, "fifty_day_average")),
             "two_hundred_day_average": _coerce_float(
-                info.get("two_hundred_day_average")
+                _safe_mapping_get(info, "two_hundred_day_average")
             ),
             "latest_price_date": (
                 latest_date.strftime("%Y-%m-%d") if latest_date is not None else None
             ),
             "source": "yfinance",
         }
+        self._snapshot_cache[cache_key] = dict(snapshot)
+        return snapshot
 
     def fetch_history(
         self,
@@ -78,20 +92,27 @@ class YahooFinanceClient:
         """Return normalized historical OHLCV rows for downstream tables."""
         import pandas as pd
 
+        cache_key = (ticker.upper(), period, interval)
+        if cache_key in self._history_cache:
+            return self._history_cache[cache_key].copy()
         yf = _load_yfinance()
         instrument = yf.Ticker(ticker)
-        history = instrument.history(
+        history = _safe_history(
+            instrument,
             period=period,
             interval=interval,
             auto_adjust=False,
         )
         if history.empty:
-            return pd.DataFrame()
+            empty = pd.DataFrame()
+            self._history_cache[cache_key] = empty
+            return empty.copy()
         normalized = history.reset_index()
         normalized.columns = [
             str(column).lower().replace(" ", "_") for column in normalized.columns
         ]
         normalized["ticker"] = ticker.upper()
+        self._history_cache[cache_key] = normalized.copy()
         return normalized
 
     def search_quotes(self, query: str, max_results: int = 10) -> list[YahooSearchQuote]:
@@ -164,6 +185,33 @@ def _load_yfinance():
     import yfinance as yf
 
     return yf
+
+
+def _safe_fast_info(instrument):
+    try:
+        return instrument.fast_info or {}
+    except Exception:
+        return {}
+
+
+def _safe_mapping_get(mapping: Any, key: str, default: Any = None) -> Any:
+    if mapping is None:
+        return default
+    try:
+        if hasattr(mapping, "get"):
+            return mapping.get(key, default)
+        return mapping[key]
+    except Exception:
+        return default
+
+
+def _safe_history(instrument, **kwargs):
+    import pandas as pd
+
+    try:
+        return instrument.history(**kwargs)
+    except Exception:
+        return pd.DataFrame()
 
 
 def _statement_attribute(*, statement: str, period: str) -> str:

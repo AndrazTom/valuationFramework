@@ -7,13 +7,13 @@ from typing import Sequence
 
 import pandas as pd
 
-from valuation.brk.service import BrkLiquidityFiling, BrkSegmentFiling
+from valuation.brk.service import BrkLiquidityFiling, BrkSegmentFiling, BrkValuationBundle
 from valuation.brk.service import BRK_A_TICKER, BRK_A_TO_B_CONVERSION, BRK_B_TICKER
 from valuation.brk.segments import build_top_level_operating_segments_table
 from valuation.data.normalize.tables import CompanyFactQuery, company_facts_to_table
 from valuation.brk.holdings import aggregate_13f_holdings
 from valuation.notation import MILLION
-from valuation.securities.pricing import enrich_holdings_with_market_prices
+from valuation.securities.pricing import enrich_holdings_with_market_prices, fetch_price_change_snapshot
 
 BRK_FACT_DEFINITIONS: Sequence[CompanyFactQuery] = (
     CompanyFactQuery(
@@ -274,17 +274,18 @@ def build_top_holdings_live_table(
     limit: int = 20,
     yahoo_client=None,
     price_change_window: str | None = None,
+    enriched_holdings: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Return Berkshire top holdings with current market-price enrichment."""
     if holdings.empty:
         return holdings
     limit = max(0, limit)
-    aggregated = aggregate_13f_holdings(holdings)
-    enriched = enrich_holdings_with_market_prices(
-        aggregated,
+    enriched = _enriched_holdings_frame(
+        holdings,
         reference,
         yahoo_client=yahoo_client,
         price_change_window=price_change_window,
+        enriched_holdings=enriched_holdings,
     )
     total_live_value = enriched["market_value_live_usd"].dropna().sum()
     selected_columns = [
@@ -312,17 +313,18 @@ def build_13f_live_price_summary_table(
     reference: pd.DataFrame,
     yahoo_client=None,
     price_change_window: str | None = None,
+    enriched_holdings: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Summarize live-price coverage for Berkshire's latest 13F positions."""
     if holdings.empty:
         return pd.DataFrame(columns=["field", "value"])
 
-    aggregated = aggregate_13f_holdings(holdings)
-    enriched = enrich_holdings_with_market_prices(
-        aggregated,
+    enriched = _enriched_holdings_frame(
+        holdings,
         reference,
         yahoo_client=yahoo_client,
         price_change_window=price_change_window,
+        enriched_holdings=enriched_holdings,
     )
     resolved = enriched["market_value_live_usd"].notna()
     resolved_count = int(resolved.sum())
@@ -347,6 +349,390 @@ def build_13f_live_price_summary_table(
     ]
     if price_change_window is not None:
         rows.append({"field": "price_change_window", "value": price_change_window})
+    return pd.DataFrame(rows)
+
+
+def build_holdings_vs_brk_price_change_table(
+    holdings: pd.DataFrame,
+    reference: pd.DataFrame,
+    *,
+    price_change_window: str,
+    limit: int | None = None,
+    yahoo_client=None,
+    enriched_holdings: pd.DataFrame | None = None,
+    brk_snapshot: dict[str, object] | None = None,
+) -> pd.DataFrame:
+    """Compare Berkshire's own price change to a resolved public-holdings basket."""
+    if holdings.empty:
+        return pd.DataFrame(columns=["field", "value"])
+
+    enriched = _enriched_holdings_frame(
+        holdings,
+        reference,
+        yahoo_client=yahoo_client,
+        price_change_window=price_change_window,
+        enriched_holdings=enriched_holdings,
+    )
+    brk_snapshot = brk_snapshot or fetch_price_change_snapshot(
+        BRK_B_TICKER,
+        price_change_window=price_change_window,
+        yahoo_client=yahoo_client,
+    )
+
+    resolved = enriched[
+        enriched["price_change_pct"].notna() & enriched["value_usd"].notna()
+    ].copy()
+    resolved_reported_value = resolved["value_usd"].sum() if not resolved.empty else None
+    resolved_live_value = resolved["market_value_live_usd"].dropna().sum() if not resolved.empty else None
+    holdings_weighted_change = _weighted_price_change_from_frame(resolved)
+    top_slice = resolved
+    if limit is not None:
+        top_slice = resolved.head(max(0, limit)).copy()
+    top_slice_weighted_change = _weighted_price_change_from_frame(top_slice)
+    top_slice_reported_value = top_slice["value_usd"].sum() if not top_slice.empty else None
+
+    brk_change = brk_snapshot.get("price_change_pct")
+    change_spread = None
+    if brk_change is not None and holdings_weighted_change is not None:
+        change_spread = holdings_weighted_change - brk_change
+    top_slice_spread = None
+    if brk_change is not None and top_slice_weighted_change is not None:
+        top_slice_spread = top_slice_weighted_change - brk_change
+
+    return pd.DataFrame(
+        [
+            {"field": "price_change_window", "value": price_change_window},
+            {"field": "brk_b_price_change_pct", "value": brk_change},
+            {"field": "resolved_holdings_weighted_change_pct", "value": holdings_weighted_change},
+            {"field": "holdings_minus_brk_b_change_pct", "value": change_spread},
+            {"field": "top_holdings_limit", "value": int(len(top_slice))},
+            {"field": "top_holdings_reported_value_usd", "value": top_slice_reported_value},
+            {"field": "top_holdings_weighted_change_pct", "value": top_slice_weighted_change},
+            {"field": "top_holdings_minus_brk_b_change_pct", "value": top_slice_spread},
+            {"field": "resolved_positions_count", "value": int(len(resolved))},
+            {"field": "resolved_positions_reported_value_usd", "value": resolved_reported_value},
+            {"field": "resolved_positions_live_value_usd", "value": resolved_live_value},
+            {"field": "brk_b_last_price", "value": brk_snapshot.get("last_price")},
+            {"field": "latest_price_date", "value": brk_snapshot.get("latest_price_date")},
+        ]
+    )
+
+
+def build_latest_liquidity_snapshot_table(bridge: pd.DataFrame) -> pd.DataFrame:
+    """Return the latest Berkshire liquidity row plus a net liquidity line."""
+    summary = build_liquidity_summary_table(bridge)
+    if summary.empty:
+        return summary
+    latest = summary.head(1).copy()
+    latest["net_liquid_investments_usd"] = latest.apply(
+        lambda row: _sum_defined(
+            row.get("liquid_investments_total_usd"),
+            -float(row["payable_for_purchase_of_us_treasury_bills_usd"])
+            if row.get("payable_for_purchase_of_us_treasury_bills_usd") is not None
+            and pd.notna(row.get("payable_for_purchase_of_us_treasury_bills_usd"))
+            else None,
+        ),
+        axis=1,
+    )
+    ordered = [
+        "filing_date",
+        "form",
+        "period_end",
+        "accession_number",
+        "cash_and_equivalents_usd",
+        "short_term_us_treasury_bills_usd",
+        "fixed_maturity_securities_usd",
+        "liquid_investments_total_usd",
+        "payable_for_purchase_of_us_treasury_bills_usd",
+        "net_liquid_investments_usd",
+    ]
+    return latest[[column for column in ordered if column in latest.columns]].reset_index(drop=True)
+
+
+def build_public_equity_portfolio_summary_table(
+    holdings: pd.DataFrame,
+    reference: pd.DataFrame,
+    *,
+    yahoo_client=None,
+    enriched_holdings: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Summarize Berkshire's latest public-equity block for valuation work."""
+    if holdings.empty:
+        return pd.DataFrame(columns=["field", "value"])
+    enriched = _enriched_holdings_frame(
+        holdings,
+        reference,
+        yahoo_client=yahoo_client,
+        enriched_holdings=enriched_holdings,
+    )
+    resolved = enriched["market_value_live_usd"].notna()
+    reported_total = enriched["value_usd"].dropna().sum()
+    live_resolved = enriched.loc[resolved, "market_value_live_usd"].dropna().sum()
+    unresolved_reported = enriched.loc[~resolved, "value_usd"].dropna().sum()
+    blended_value = _sum_defined(live_resolved, unresolved_reported)
+    latest_price_date = None
+    if "latest_price_date" in enriched.columns:
+        dates = [value for value in enriched["latest_price_date"].dropna().tolist() if value]
+        if dates:
+            latest_price_date = max(dates)
+    return pd.DataFrame(
+        [
+            {"field": "reported_13f_value_usd", "value": reported_total},
+            {"field": "live_resolved_13f_value_usd", "value": live_resolved},
+            {"field": "unresolved_13f_value_reported_usd", "value": unresolved_reported},
+            {"field": "blended_13f_value_usd", "value": blended_value},
+            {
+                "field": "live_price_coverage_pct",
+                "value": (live_resolved / reported_total) if reported_total else None,
+            },
+            {"field": "positions_total", "value": int(len(enriched))},
+            {"field": "positions_live_priced", "value": int(resolved.sum())},
+            {"field": "positions_unresolved", "value": int((~resolved).sum())},
+            {"field": "latest_price_date", "value": latest_price_date},
+        ]
+    )
+
+
+def build_market_anchor_table(market_snapshot: dict) -> pd.DataFrame:
+    """Return the market anchor for Berkshire valuation work."""
+    market_cap = _market_cap_from_snapshot(market_snapshot)
+    return pd.DataFrame(
+        [
+            {"field": "primary_valuation_unit", "value": BRK_B_TICKER},
+            {"field": "last_price", "value": market_snapshot.get("last_price")},
+            {"field": "latest_price_date", "value": market_snapshot.get("latest_price_date")},
+            {"field": "shares_outstanding", "value": market_snapshot.get("shares")},
+            {"field": "market_cap_usd", "value": market_cap},
+        ]
+    )
+
+
+def build_brk_valuation_assumptions_table(*, period: str) -> pd.DataFrame:
+    """Return the assumptions used in the first Berkshire bridge."""
+    return pd.DataFrame(
+        [
+            {"field": "valuation_unit", "value": BRK_B_TICKER},
+            {"field": "selected_period_type", "value": period},
+            {"field": "market_anchor", "value": "Yahoo market snapshot market cap"},
+            {
+                "field": "public_equities_basis",
+                "value": "Latest 13F with live prices where resolved and reported values for unresolved positions",
+            },
+            {
+                "field": "public_equities_scope",
+                "value": "13F positions only; excludes non-13F public equities and controlled subsidiaries",
+            },
+            {
+                "field": "liquidity_basis",
+                "value": "Latest filing balance-sheet bridge including cash, Treasury Bills, and fixed maturity securities",
+            },
+            {
+                "field": "residual_definition",
+                "value": "Market cap less blended 13F public equities less net liquid investments",
+            },
+        ]
+    )
+
+
+def build_brk_component_bridge_table(
+    market_snapshot: dict,
+    public_equity_summary: pd.DataFrame,
+    latest_liquidity_snapshot: pd.DataFrame,
+) -> pd.DataFrame:
+    """Return a first explicit Berkshire component bridge."""
+    market_cap = _market_cap_from_snapshot(market_snapshot)
+    shares = market_snapshot.get("shares")
+    public_equities = _field_value(public_equity_summary, "blended_13f_value_usd")
+    net_liquid = _frame_row_value(latest_liquidity_snapshot, "net_liquid_investments_usd")
+    implied_other = None
+    if market_cap is not None:
+        implied_other = float(market_cap)
+        for value in (public_equities, net_liquid):
+            if value is not None and pd.notna(value):
+                implied_other -= float(value)
+
+    rows = [
+        {
+            "component": "market_cap",
+            "value_usd": market_cap,
+            "per_brk_b_share_usd": _per_share_value(market_cap, shares),
+            "share_of_market_cap_pct": 1.0 if market_cap else None,
+            "method": "Current Yahoo market cap anchor",
+        },
+        {
+            "component": "public_equities_13f_blended",
+            "value_usd": public_equities,
+            "per_brk_b_share_usd": _per_share_value(public_equities, shares),
+            "share_of_market_cap_pct": (public_equities / market_cap) if market_cap and public_equities is not None else None,
+            "method": "Latest 13F using live prices where resolved and reported values otherwise",
+        },
+        {
+            "component": "net_liquid_investments",
+            "value_usd": net_liquid,
+            "per_brk_b_share_usd": _per_share_value(net_liquid, shares),
+            "share_of_market_cap_pct": (net_liquid / market_cap) if market_cap and net_liquid is not None else None,
+            "method": "Latest filing liquid investments net of Treasury Bill purchase payable",
+        },
+        {
+            "component": "implied_operating_businesses_and_non_13f_assets",
+            "value_usd": implied_other,
+            "per_brk_b_share_usd": _per_share_value(implied_other, shares),
+            "share_of_market_cap_pct": (implied_other / market_cap) if market_cap and implied_other is not None else None,
+            "method": "Residual after subtracting blended 13F public equities and net liquid investments",
+        },
+    ]
+    return pd.DataFrame(rows)
+
+
+
+
+def build_brk_valuation_context_table(
+    bundle: BrkValuationBundle,
+    reference: pd.DataFrame,
+    *,
+    yahoo_client=None,
+    enriched_holdings: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Return the key inputs behind Berkshire's current valuation bridge."""
+    holdings_metrics = _live_holdings_metrics(
+        bundle.holdings.holdings,
+        reference,
+        yahoo_client=yahoo_client,
+        enriched_holdings=enriched_holdings,
+    )
+    liquidity_summary = build_liquidity_summary_table(
+        build_liquidity_bridge_table(bundle.liquidity.filings)
+    )
+    latest_liquidity = liquidity_summary.iloc[0] if not liquidity_summary.empty else pd.Series(dtype=object)
+    latest_segments = _latest_segments_table(bundle.segments.filings)
+    segment_period_end = latest_segments.iloc[0]["period_end"] if not latest_segments.empty else None
+    market_snapshot = bundle.overview.market_snapshot
+    resolved_market_cap = _resolved_market_cap(market_snapshot)
+    brk_b_equivalent_shares = _implied_brk_b_equivalent_shares(market_snapshot)
+
+    return pd.DataFrame(
+        [
+            {"field": "brk_b_last_price", "value": market_snapshot.get("last_price")},
+            {"field": "market_cap", "value": resolved_market_cap},
+            {"field": "implied_brk_b_equivalent_shares", "value": brk_b_equivalent_shares},
+            {"field": "latest_price_date", "value": market_snapshot.get("latest_price_date")},
+            {"field": "13f_filing_date", "value": bundle.holdings.filing_date},
+            {"field": "13f_reported_value_usd", "value": holdings_metrics["reported_value_usd"]},
+            {"field": "13f_live_resolved_value_usd", "value": holdings_metrics["live_value_usd"]},
+            {"field": "13f_live_coverage_ratio", "value": holdings_metrics["coverage_ratio"]},
+            {"field": "liquidity_period_end", "value": latest_liquidity.get("period_end")},
+            {"field": "net_liquidity_total_usd", "value": _net_liquidity_total(latest_liquidity)},
+            {"field": "segment_period_end", "value": segment_period_end},
+        ]
+    )
+
+
+def build_market_implied_sotp_bridge_table(
+    bundle: BrkValuationBundle,
+    reference: pd.DataFrame,
+    *,
+    yahoo_client=None,
+    enriched_holdings: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Return a first explicit Berkshire market-implied SOTP bridge."""
+    market_snapshot = bundle.overview.market_snapshot
+    market_cap = _resolved_market_cap(market_snapshot)
+    share_count = _implied_brk_b_equivalent_shares(market_snapshot)
+    holdings_metrics = _live_holdings_metrics(
+        bundle.holdings.holdings,
+        reference,
+        yahoo_client=yahoo_client,
+        enriched_holdings=enriched_holdings,
+    )
+    liquidity_snapshot = build_latest_liquidity_snapshot_table(
+        build_liquidity_bridge_table(bundle.liquidity.filings)
+    )
+
+    cash_and_equivalents = _frame_row_value(liquidity_snapshot, "cash_and_equivalents_usd")
+    short_term_t_bills = _frame_row_value(liquidity_snapshot, "short_term_us_treasury_bills_usd")
+    fixed_maturity = _frame_row_value(liquidity_snapshot, "fixed_maturity_securities_usd")
+    payable_component = _frame_row_value(
+        liquidity_snapshot,
+        "payable_for_purchase_of_us_treasury_bills_usd",
+    )
+    if payable_component is not None and pd.notna(payable_component):
+        payable_component = -float(payable_component)
+    net_liquidity = _frame_row_value(liquidity_snapshot, "net_liquid_investments_usd")
+    public_equities = holdings_metrics["blended_value_usd"]
+    quoted_plus_liquidity = _sum_defined(public_equities, net_liquidity)
+    residual = None
+    if market_cap is not None and quoted_plus_liquidity is not None and pd.notna(market_cap):
+        residual = float(market_cap) - float(quoted_plus_liquidity)
+
+    coverage_text = None
+    if holdings_metrics["coverage_ratio"] is not None:
+        coverage_text = f"Live 13F price coverage {holdings_metrics['coverage_ratio'] * 100:.1f}%"
+
+    rows = [
+        {
+            "metric": "public_equity_holdings_blended",
+            "value_usd": public_equities,
+            "per_brk_b_share_usd": _per_share_value(public_equities, share_count),
+            "market_cap_weight": _ratio(public_equities, market_cap),
+            "note": coverage_text or "Latest 13F using live prices where resolved and reported values otherwise",
+        },
+        {
+            "metric": "cash_and_equivalents",
+            "value_usd": cash_and_equivalents,
+            "per_brk_b_share_usd": _per_share_value(cash_and_equivalents, share_count),
+            "market_cap_weight": _ratio(cash_and_equivalents, market_cap),
+            "note": "Latest filing balance-sheet cash",
+        },
+        {
+            "metric": "short_term_us_treasury_bills",
+            "value_usd": short_term_t_bills,
+            "per_brk_b_share_usd": _per_share_value(short_term_t_bills, share_count),
+            "market_cap_weight": _ratio(short_term_t_bills, market_cap),
+            "note": "Latest filing Treasury-bill position",
+        },
+        {
+            "metric": "fixed_maturity_securities",
+            "value_usd": fixed_maturity,
+            "per_brk_b_share_usd": _per_share_value(fixed_maturity, share_count),
+            "market_cap_weight": _ratio(fixed_maturity, market_cap),
+            "note": "Latest filing fixed maturity securities",
+        },
+        {
+            "metric": "payable_for_purchase_of_us_treasury_bills",
+            "value_usd": payable_component,
+            "per_brk_b_share_usd": _per_share_value(payable_component, share_count),
+            "market_cap_weight": _ratio(payable_component, market_cap),
+            "note": "Deducted from liquidity when reported",
+        },
+        {
+            "metric": "net_liquidity_total",
+            "value_usd": net_liquidity,
+            "per_brk_b_share_usd": _per_share_value(net_liquidity, share_count),
+            "market_cap_weight": _ratio(net_liquidity, market_cap),
+            "note": "Cash + Treasury bills + fixed maturity securities - payable",
+        },
+        {
+            "metric": "quoted_holdings_plus_net_liquidity",
+            "value_usd": quoted_plus_liquidity,
+            "per_brk_b_share_usd": _per_share_value(quoted_plus_liquidity, share_count),
+            "market_cap_weight": _ratio(quoted_plus_liquidity, market_cap),
+            "note": "Blended 13F public equities plus net liquidity subtotal",
+        },
+        {
+            "metric": "market_cap",
+            "value_usd": market_cap,
+            "per_brk_b_share_usd": _per_share_value(market_cap, share_count),
+            "market_cap_weight": 1.0 if market_cap is not None and pd.notna(market_cap) else None,
+            "note": "Current Berkshire market capitalization",
+        },
+        {
+            "metric": "residual_operating_and_other",
+            "value_usd": residual,
+            "per_brk_b_share_usd": _per_share_value(residual, share_count),
+            "market_cap_weight": _ratio(residual, market_cap),
+            "note": "Residual after blended 13F public equities and net liquidity; includes operating businesses, non-13F assets, debt, and other items",
+        },
+    ]
     return pd.DataFrame(rows)
 
 
@@ -427,11 +813,174 @@ def _segment_period_title(
     return f"Top-Level Operating Segments {label} ({filing.filing_date})"
 
 
+def _live_holdings_metrics(
+    holdings: pd.DataFrame,
+    reference: pd.DataFrame,
+    *,
+    yahoo_client=None,
+    enriched_holdings: pd.DataFrame | None = None,
+) -> dict[str, float | int | None]:
+    if holdings.empty:
+        return {
+            "positions_total": 0,
+            "resolved_positions": 0,
+            "reported_value_usd": None,
+            "resolved_reported_value_usd": None,
+            "unresolved_reported_value_usd": None,
+            "live_value_usd": None,
+            "blended_value_usd": None,
+            "coverage_ratio": None,
+        }
+    enriched = _enriched_holdings_frame(
+        holdings,
+        reference,
+        yahoo_client=yahoo_client,
+        enriched_holdings=enriched_holdings,
+    )
+    resolved = enriched[enriched["market_value_live_usd"].notna()].copy()
+    reported_value = enriched["value_usd"].dropna().sum()
+    resolved_reported_value = resolved["value_usd"].dropna().sum()
+    live_value = resolved["market_value_live_usd"].dropna().sum()
+    unresolved_reported_value = enriched.loc[
+        enriched["market_value_live_usd"].isna(),
+        "value_usd",
+    ].dropna().sum()
+    blended_value = _sum_defined(live_value, unresolved_reported_value)
+    coverage_ratio = None
+    if reported_value:
+        coverage_ratio = resolved_reported_value / reported_value
+    return {
+        "positions_total": int(len(enriched)),
+        "resolved_positions": int(len(resolved)),
+        "reported_value_usd": reported_value if pd.notna(reported_value) else None,
+        "resolved_reported_value_usd": resolved_reported_value if pd.notna(resolved_reported_value) else None,
+        "unresolved_reported_value_usd": unresolved_reported_value if pd.notna(unresolved_reported_value) else None,
+        "live_value_usd": live_value if pd.notna(live_value) else None,
+        "blended_value_usd": blended_value if blended_value is not None and pd.notna(blended_value) else None,
+        "coverage_ratio": coverage_ratio,
+    }
+
+
+def _enriched_holdings_frame(
+    holdings: pd.DataFrame,
+    reference: pd.DataFrame,
+    *,
+    yahoo_client=None,
+    price_change_window: str | None = None,
+    enriched_holdings: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    if enriched_holdings is not None:
+        return enriched_holdings.copy()
+    aggregated = aggregate_13f_holdings(holdings)
+    return enrich_holdings_with_market_prices(
+        aggregated,
+        reference,
+        yahoo_client=yahoo_client,
+        price_change_window=price_change_window,
+    )
+
+
+def _latest_segments_table(filings: Sequence[BrkSegmentFiling]) -> pd.DataFrame:
+    if not filings:
+        return pd.DataFrame()
+    return build_top_level_operating_segments_table(filings[0].reports, period="annual")
+
+
+def _implied_brk_b_equivalent_shares(market_snapshot: dict) -> float | None:
+    market_cap = market_snapshot.get("market_cap")
+    last_price = market_snapshot.get("last_price")
+    if market_cap is not None and last_price not in {None, 0} and pd.notna(market_cap) and pd.notna(last_price):
+        return float(market_cap) / float(last_price)
+    shares = market_snapshot.get("shares")
+    if shares is None or pd.isna(shares):
+        return None
+    return float(shares)
+
+
+def _resolved_market_cap(market_snapshot: dict) -> float | None:
+    market_cap = market_snapshot.get("market_cap")
+    if market_cap is not None and pd.notna(market_cap):
+        return float(market_cap)
+    shares = market_snapshot.get("shares")
+    last_price = market_snapshot.get("last_price")
+    if shares is None or last_price in {None, 0}:
+        return None
+    if pd.isna(shares) or pd.isna(last_price):
+        return None
+    return float(shares) * float(last_price)
+
+
+def _per_share_value(value: float | None, share_count: float | None) -> float | None:
+    if value is None or share_count in {None, 0}:
+        return None
+    if pd.isna(value) or pd.isna(share_count):
+        return None
+    return float(value) / float(share_count)
+
+
+def _ratio(value: float | None, total: float | None) -> float | None:
+    if value is None or total in {None, 0}:
+        return None
+    if pd.isna(value) or pd.isna(total):
+        return None
+    return float(value) / float(total)
+
+
+def _net_liquidity_total(row: pd.Series) -> float | None:
+    if row.empty:
+        return None
+    payable = row.get("payable_for_purchase_of_us_treasury_bills_usd")
+    payable_component = -float(payable) if payable is not None and pd.notna(payable) else None
+    return _sum_defined(
+        row.get("cash_and_equivalents_usd"),
+        row.get("short_term_us_treasury_bills_usd"),
+        row.get("fixed_maturity_securities_usd"),
+        payable_component,
+    )
+
+
 def _sum_defined(*values):
     defined = [value for value in values if value is not None and pd.notna(value)]
     if not defined:
         return None
     return sum(defined)
+
+
+def _weighted_price_change_from_frame(frame: pd.DataFrame) -> float | None:
+    if frame.empty or "value_usd" not in frame.columns or "price_change_pct" not in frame.columns:
+        return None
+    total_weight = frame["value_usd"].dropna().sum()
+    if not total_weight:
+        return None
+    return float((frame["value_usd"] * frame["price_change_pct"]).sum() / total_weight)
+
+
+def _field_value(frame: pd.DataFrame, field: str):
+    if frame.empty or "field" not in frame.columns or "value" not in frame.columns:
+        return None
+    matches = frame[frame["field"] == field]
+    if matches.empty:
+        return None
+    return matches.iloc[0]["value"]
+
+
+def _frame_row_value(frame: pd.DataFrame, column: str):
+    if frame.empty or column not in frame.columns:
+        return None
+    return frame.iloc[0][column]
+
+
+def _market_cap_from_snapshot(market_snapshot: dict) -> float | None:
+    market_cap = market_snapshot.get("market_cap")
+    if market_cap is not None and pd.notna(market_cap):
+        return float(market_cap)
+    last_price = market_snapshot.get("last_price")
+    shares = market_snapshot.get("shares")
+    if last_price is None or shares is None or pd.isna(last_price) or pd.isna(shares):
+        return None
+    return float(last_price) * float(shares)
+
+
 
 
 def _extract_liquidity_values(frame: pd.DataFrame) -> tuple[str | None, dict[str, float]]:

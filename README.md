@@ -119,6 +119,8 @@ On `brk`, there is also a Berkshire-only command group:
 - `./vf brk holdings`
 - `./vf brk holdings --live-prices --limit 10`
 - `./vf brk holdings --price-change 1M --limit 10`
+- `./vf brk sotp`
+- `./vf brk sotp --price-change 1M`
 - `./vf brk liquidity --period annual --limit 4`
 - `./vf brk liquidity --period quarterly --limit 4`
 - `./vf brk segments --period annual --limit 4`
@@ -212,6 +214,12 @@ Current Berkshire workflows include:
   - latest 13F holdings
   - optional live-price enrichment where ticker mappings exist
   - optional `--price-change` / `--price-change-window` column for windows such as `1D`, `1M`, `YTD`, and `1Y`
+  - Berkshire-vs-holdings change comparison when a price-change window is selected
+  - if Yahoo rate-limits live pricing, the command now degrades to partial/empty live coverage instead of crashing
+- `sotp`
+  - first Berkshire market-implied SOTP bridge
+  - explicit valuation assumptions, market anchor, public-equity summary, liquidity snapshot, and residual operating-and-other bridge
+  - optional `--price-change` comparison between BRK and the resolved holdings basket
 - `liquidity`
   - Berkshire liquidity history from filing balance sheets, not just companyfacts
   - includes cash, short-term U.S. Treasury Bills, fixed maturity securities, and explicit core liquidity totals

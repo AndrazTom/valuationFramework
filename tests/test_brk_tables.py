@@ -2,15 +2,26 @@ import pandas as pd
 import pytest
 
 from valuation.notation import B, M
-from valuation.brk.service import BrkLiquidityFiling, BrkSegmentFiling
+from valuation.brk.service import (
+    Brk13FBundle,
+    BrkLiquidityBundle,
+    BrkLiquidityFiling,
+    BrkOverviewBundle,
+    BrkSegmentFiling,
+    BrkSegmentsBundle,
+    BrkValuationBundle,
+)
 from valuation.brk.segments import BrkSegmentReportSet
 from valuation.brk.tables import (
     build_13f_summary_table,
     build_13f_live_price_summary_table,
+    build_brk_valuation_context_table,
     build_segment_period_sections,
+    build_holdings_vs_brk_price_change_table,
     build_key_facts_table,
     build_liquidity_bridge_table,
     build_liquidity_summary_table,
+    build_market_implied_sotp_bridge_table,
     build_top_level_operating_segments_summary_table,
     build_share_class_table,
     build_top_holdings_live_table,
@@ -24,9 +35,10 @@ class FakeYahooClient:
     def fetch_price_snapshot(self, ticker):
         return {
             "ticker": ticker,
-            "last_price": {"AAPL": 200.0, "AXP": 300.0}[ticker],
-            "previous_close": {"AAPL": 180.0, "AXP": 270.0}[ticker],
+            "last_price": {"AAPL": 200.0, "AXP": 300.0, "BRK-B": 500.0}[ticker],
+            "previous_close": {"AAPL": 180.0, "AXP": 270.0, "BRK-B": 480.0}[ticker],
             "latest_price_date": "2026-04-09",
+            "market_cap": {"AAPL": None, "AXP": None, "BRK-B": 1000.0}[ticker],
             "source": "yfinance",
         }
 
@@ -39,6 +51,7 @@ class FakeYahooClient:
                 "close": {
                     "AAPL": [100.0, 120.0, 150.0, 200.0],
                     "AXP": [200.0, 220.0, 260.0, 300.0],
+                    "BRK-B": [400.0, 430.0, 470.0, 500.0],
                 }[ticker],
             }
         )
@@ -344,6 +357,48 @@ def test_build_top_level_operating_segments_summary_table_history():
     assert summary.iloc[0]["revenues_usd"] == 23 * M
 
 
+def test_build_holdings_vs_brk_price_change_table():
+    holdings = pd.DataFrame(
+        [
+            {
+                "security_id": "cusip:037833100",
+                "issuer": "APPLE INC",
+                "class_title": "COM",
+                "cusip": "037833100",
+                "value_usd": 1000,
+                "shares_or_principal": 10,
+            },
+            {
+                "security_id": "cusip:025816109",
+                "issuer": "AMERICAN EXPRESS CO",
+                "class_title": "COM",
+                "cusip": "025816109",
+                "value_usd": 900,
+                "shares_or_principal": 20,
+            },
+        ]
+    )
+    reference = pd.DataFrame(
+        [
+            {"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"},
+            {"security_id": "cusip:025816109", "ticker": "AXP", "exchange": "NYSE"},
+        ]
+    )
+
+    frame = build_holdings_vs_brk_price_change_table(
+        holdings,
+        reference,
+        price_change_window="1M",
+        limit=1,
+        yahoo_client=FakeYahooClient(),
+    )
+
+    assert frame[frame["field"] == "price_change_window"].iloc[0]["value"] == "1M"
+    assert frame[frame["field"] == "brk_b_price_change_pct"].iloc[0]["value"] == pytest.approx((500.0 / 470.0) - 1.0)
+    assert frame[frame["field"] == "top_holdings_limit"].iloc[0]["value"] == 1
+    assert frame[frame["field"] == "top_holdings_weighted_change_pct"].iloc[0]["value"] == pytest.approx((200.0 / 150.0) - 1.0)
+
+
 def test_build_segment_period_sections_returns_one_table_per_period():
     filings = [
         BrkSegmentFiling(
@@ -386,3 +441,143 @@ def test_build_segment_period_sections_returns_one_table_per_period():
         "Top-Level Operating Segments FY 2025 (2026-03-02)",
         "Top-Level Operating Segments FY 2024 (2025-03-01)",
     ]
+
+
+def test_build_brk_valuation_context_table():
+    reference = pd.DataFrame(
+        [
+            {"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"},
+            {"security_id": "cusip:025816109", "ticker": "AXP", "exchange": "NYSE"},
+        ]
+    )
+    bundle = BrkValuationBundle(
+        overview=BrkOverviewBundle(
+            company=None,
+            market_snapshot={"ticker": "BRK-B", "last_price": 500.0, "market_cap": 1000.0 * M},
+            submissions={},
+            company_facts={},
+        ),
+        holdings=Brk13FBundle(
+            company=None,
+            filing_date="2026-02-17",
+            accession_number="0001",
+            information_table_filename="info.xml",
+            holdings=pd.DataFrame(
+                [
+                    {"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 100.0, "shares_or_principal": 0.2},
+                    {"security_id": "cusip:025816109", "issuer": "AMERICAN EXPRESS CO", "class_title": "COM", "cusip": "025816109", "value_usd": 90.0, "shares_or_principal": 0.1},
+                ]
+            ),
+        ),
+        liquidity=BrkLiquidityBundle(
+            company=None,
+            filings=[
+                BrkLiquidityFiling(
+                    filing_date="2026-03-02",
+                    accession_number="0002",
+                    form="10-K",
+                    balance_sheet=pd.DataFrame(
+                        [
+                            ["Cash and cash equivalents", "", "100", "90"],
+                            ["Short-term investments in U.S. Treasury Bills", "", "200", "180"],
+                            ["Investments in fixed maturity securities", "", "50", "40"],
+                            ["Payable for purchase of U.S. Treasury Bills", "", "10", "5"],
+                        ],
+                        columns=[
+                            "Consolidated Balance Sheets",
+                            "Consolidated Balance Sheets",
+                            "Dec. 31, 2025",
+                            "Dec. 31, 2024",
+                        ],
+                    ),
+                )
+            ],
+        ),
+        segments=BrkSegmentsBundle(
+            company=None,
+            filings=[
+                BrkSegmentFiling(
+                    filing_date="2026-03-02",
+                    accession_number="0003",
+                    form="10-K",
+                    reports=BrkSegmentReportSet(
+                        filing_date="2026-03-02",
+                        accession_number="0003",
+                        earnings_detail=pd.DataFrame(
+                            [
+                                {"report": "earnings", "member_path": "Operating Businesses | BNSF", "member_name": "BNSF", "metric": "Revenues", "duration_months": 12, "period_end": "2025-12-31", "value": 23 * M},
+                            ]
+                        ),
+                        reconciliation_detail=pd.DataFrame(),
+                        additional_detail=pd.DataFrame(),
+                    ),
+                )
+            ],
+        ),
+    )
+
+    context = build_brk_valuation_context_table(bundle, reference, yahoo_client=FakeYahooClient())
+
+    assert context[context["field"] == "13f_live_coverage_ratio"].iloc[0]["value"] == 1.0
+    assert context[context["field"] == "net_liquidity_total_usd"].iloc[0]["value"] == 340.0 * M
+    assert context[context["field"] == "segment_period_end"].iloc[0]["value"] == "2025-12-31"
+
+
+def test_build_market_implied_sotp_bridge_table():
+    reference = pd.DataFrame(
+        [
+            {"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"},
+            {"security_id": "cusip:025816109", "ticker": "AXP", "exchange": "NYSE"},
+        ]
+    )
+    bundle = BrkValuationBundle(
+        overview=BrkOverviewBundle(
+            company=None,
+            market_snapshot={"ticker": "BRK-B", "last_price": 500.0, "market_cap": 1000.0 * M},
+            submissions={},
+            company_facts={},
+        ),
+        holdings=Brk13FBundle(
+            company=None,
+            filing_date="2026-02-17",
+            accession_number="0001",
+            information_table_filename="info.xml",
+            holdings=pd.DataFrame(
+                [
+                    {"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 100.0, "shares_or_principal": 0.2},
+                    {"security_id": "cusip:025816109", "issuer": "AMERICAN EXPRESS CO", "class_title": "COM", "cusip": "025816109", "value_usd": 90.0, "shares_or_principal": 0.1},
+                ]
+            ),
+        ),
+        liquidity=BrkLiquidityBundle(
+            company=None,
+            filings=[
+                BrkLiquidityFiling(
+                    filing_date="2026-03-02",
+                    accession_number="0002",
+                    form="10-K",
+                    balance_sheet=pd.DataFrame(
+                        [
+                            ["Cash and cash equivalents", "", "100", "90"],
+                            ["Short-term investments in U.S. Treasury Bills", "", "200", "180"],
+                            ["Investments in fixed maturity securities", "", "50", "40"],
+                            ["Payable for purchase of U.S. Treasury Bills", "", "10", "5"],
+                        ],
+                        columns=[
+                            "Consolidated Balance Sheets",
+                            "Consolidated Balance Sheets",
+                            "Dec. 31, 2025",
+                            "Dec. 31, 2024",
+                        ],
+                    ),
+                )
+            ],
+        ),
+        segments=BrkSegmentsBundle(company=None, filings=[]),
+    )
+
+    bridge = build_market_implied_sotp_bridge_table(bundle, reference, yahoo_client=FakeYahooClient())
+
+    assert bridge[bridge["metric"] == "public_equity_holdings_blended"].iloc[0]["value_usd"] == 70.0
+    assert bridge[bridge["metric"] == "net_liquidity_total"].iloc[0]["value_usd"] == 340.0 * M
+    assert bridge[bridge["metric"] == "residual_operating_and_other"].iloc[0]["value_usd"] == pytest.approx((1000.0 * M) - (340.0 * M) - 70.0)

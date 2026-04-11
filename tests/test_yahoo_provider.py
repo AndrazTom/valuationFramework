@@ -49,3 +49,47 @@ def test_fetch_price_snapshot_skips_history_when_fast_info_has_last_price(monkey
 
     assert snapshot["ticker"] == "AAPL"
     assert snapshot["last_price"] == 123.45
+
+
+def test_fetch_price_snapshot_handles_fast_info_rate_limit(monkeypatch):
+    class ExplodingInfo:
+        def get(self, key, default=None):
+            raise RuntimeError("rate limited")
+
+    class FakeTicker:
+        def __init__(self, ticker):
+            self.fast_info = ExplodingInfo()
+
+        def history(self, **kwargs):
+            raise RuntimeError("rate limited")
+
+    class FakeYahooModule:
+        Ticker = FakeTicker
+
+    monkeypatch.setattr("valuation.data.providers.yahoo._load_yfinance", lambda: FakeYahooModule)
+
+    client = YahooFinanceClient()
+    snapshot = client.fetch_price_snapshot("AAPL")
+
+    assert snapshot["ticker"] == "AAPL"
+    assert snapshot["last_price"] is None
+    assert snapshot["exchange"] is None
+
+
+def test_fetch_history_returns_empty_frame_on_provider_error(monkeypatch):
+    class FakeTicker:
+        def __init__(self, ticker):
+            self.fast_info = {}
+
+        def history(self, **kwargs):
+            raise RuntimeError("rate limited")
+
+    class FakeYahooModule:
+        Ticker = FakeTicker
+
+    monkeypatch.setattr("valuation.data.providers.yahoo._load_yfinance", lambda: FakeYahooModule)
+
+    client = YahooFinanceClient()
+    history = client.fetch_history("AAPL")
+
+    assert history.empty

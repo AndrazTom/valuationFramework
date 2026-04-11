@@ -89,6 +89,22 @@ def test_humanize_frame_keeps_position_counts_as_quantities():
     assert display.iloc[1]["value"] == "$269.77B"
 
 
+def test_humanize_frame_formats_field_pct_ratio_and_usd_suffixes():
+    frame = pd.DataFrame(
+        [
+            {"field": "brk_b_price_change_pct", "value": -0.032},
+            {"field": "13f_live_coverage_ratio", "value": 0.983},
+            {"field": "resolved_positions_reported_value_usd", "value": 269.51 * B},
+        ]
+    )
+
+    display = humanize_frame(frame)
+
+    assert display.iloc[0]["value"] == "-3.2%"
+    assert display.iloc[1]["value"] == "98.3%"
+    assert display.iloc[2]["value"] == "$269.51B"
+
+
 def test_humanize_frame_prioritizes_usd_columns_over_metric_name():
     frame = pd.DataFrame(
         [
@@ -101,3 +117,18 @@ def test_humanize_frame_prioritizes_usd_columns_over_metric_name():
 
     assert display.iloc[0]["value_usd"] == "$305.37B"
     assert display.iloc[1]["value_usd"] == "$17.94B"
+
+
+def test_humanize_frame_prioritizes_weight_columns_over_metric_name():
+    frame = pd.DataFrame(
+        [
+            {
+                "metric": "short_term_us_treasury_bills",
+                "market_cap_weight": 0.3105,
+            }
+        ]
+    )
+
+    display = humanize_frame(frame)
+
+    assert display.iloc[0]["market_cap_weight"] == "31.1%"
