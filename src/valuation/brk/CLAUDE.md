@@ -21,6 +21,9 @@ Current Berkshire stack:
 - optional live-price revaluation for resolved holdings
 - liquidity bridge from SEC company facts
 - operating segment extraction from filing report tables
+- SEC live checks should work with either:
+  - repo-local `.env`
+  - exported env vars, which should override `.env`
 
 Next major output:
 
