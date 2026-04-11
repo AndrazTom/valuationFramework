@@ -16,6 +16,7 @@ from valuation.data.providers.yahoo import YahooFinanceClient
 BRK_B_TICKER = "BRK-B"
 BRK_A_TICKER = "BRK-A"
 BRK_A_TO_B_CONVERSION = 1500
+BALANCE_SHEET_REPORT_SHORT_NAME = "Consolidated Balance Sheets"
 
 
 @dataclass
@@ -40,21 +41,39 @@ class Brk13FBundle:
 
 
 @dataclass
+class BrkLiquidityFiling:
+    """One Berkshire filing with a parsed balance-sheet report table."""
+
+    filing_date: str
+    accession_number: str
+    form: str
+    balance_sheet: pd.DataFrame
+
+
+@dataclass
 class BrkLiquidityBundle:
-    """Berkshire company facts bundle for liquidity analysis."""
+    """Berkshire filing bundle for liquidity analysis."""
 
     company: SecCompany
-    company_facts: Mapping[str, Any]
+    filings: list[BrkLiquidityFiling]
+
+
+@dataclass
+class BrkSegmentFiling:
+    """One Berkshire filing with normalized segment report tables."""
+
+    filing_date: str
+    accession_number: str
+    form: str
+    reports: BrkSegmentReportSet
 
 
 @dataclass
 class BrkSegmentsBundle:
-    """Berkshire segment report bundle from the latest annual filing."""
+    """Berkshire segment report bundles across filings."""
 
     company: SecCompany
-    filing_date: str
-    accession_number: str
-    reports: BrkSegmentReportSet
+    filings: list[BrkSegmentFiling]
 
 
 def fetch_brk_overview(
@@ -79,16 +98,47 @@ def fetch_brk_overview(
     )
 
 
-def fetch_brk_liquidity(sec_client: Optional[SecClient] = None) -> BrkLiquidityBundle:
-    """Fetch the Berkshire facts needed for the liquidity bridge."""
+def fetch_brk_liquidity(
+    sec_client: Optional[SecClient] = None,
+    *,
+    period: str = "annual",
+    limit: int = 1,
+) -> BrkLiquidityBundle:
+    """Fetch Berkshire balance-sheet reports for liquidity analysis."""
     sec = sec_client or SecClient()
-    company_bundle = sec.fetch_company_bundle(
-        BRK_B_TICKER,
-        include_company_facts=True,
+    company_bundle = sec.fetch_company_bundle(BRK_B_TICKER)
+    if limit == 0:
+        return BrkLiquidityBundle(
+            company=company_bundle["company"],
+            filings=[],
+        )
+    filings = find_recent_filings(
+        company_bundle["submissions"],
+        forms=_forms_for_period(period),
+        limit=limit,
     )
+    liquidity_filings = []
+    for filing in filings:
+        reports = sec.fetch_filing_summary_reports(
+            company_bundle["company"].cik,
+            filing["accession_number"],
+        )
+        report = _find_report(reports, BALANCE_SHEET_REPORT_SHORT_NAME)
+        liquidity_filings.append(
+            BrkLiquidityFiling(
+                filing_date=filing["filing_date"],
+                accession_number=filing["accession_number"],
+                form=filing["form"],
+                balance_sheet=sec.fetch_report_table(
+                    company_bundle["company"].cik,
+                    filing["accession_number"],
+                    report.html_file_name,
+                ),
+            )
+        )
     return BrkLiquidityBundle(
         company=company_bundle["company"],
-        company_facts=company_bundle["company_facts"],
+        filings=liquidity_filings,
     )
 
 
@@ -121,37 +171,56 @@ def fetch_latest_brk_13f(sec_client: Optional[SecClient] = None) -> Brk13FBundle
     )
 
 
-def fetch_brk_segments(sec_client: Optional[SecClient] = None) -> BrkSegmentsBundle:
-    """Fetch Berkshire's latest segment-report tables from the annual filing package."""
+def fetch_brk_segments(
+    sec_client: Optional[SecClient] = None,
+    *,
+    period: str = "annual",
+    limit: int = 1,
+) -> BrkSegmentsBundle:
+    """Fetch Berkshire segment-report tables across annual or quarterly filings."""
     sec = sec_client or SecClient()
     company_bundle = sec.fetch_company_bundle(BRK_B_TICKER)
     company = company_bundle["company"]
     submissions = company_bundle["submissions"]
-    filing = find_recent_filings(submissions, forms=("10-K",), limit=1)[0]
-    reports = sec.fetch_filing_summary_reports(company.cik, filing["accession_number"])
-    report_map = {report.short_name: report for report in reports}
-
-    def load_report(short_name: str) -> pd.DataFrame:
-        report = report_map[short_name]
-        frame = sec.fetch_report_table(
-            company.cik,
-            filing["accession_number"],
-            report.html_file_name,
-        )
-        return normalize_segment_report_table(frame, report_name=short_name)
-
-    report_set = BrkSegmentReportSet(
-        filing_date=filing["filing_date"],
-        accession_number=filing["accession_number"],
-        earnings_detail=load_report(SEGMENT_REPORT_LABELS["earnings"]),
-        reconciliation_detail=load_report(SEGMENT_REPORT_LABELS["reconciliations"]),
-        additional_detail=load_report(SEGMENT_REPORT_LABELS["additional"]),
+    if limit == 0:
+        return BrkSegmentsBundle(company=company, filings=[])
+    filings = find_recent_filings(
+        submissions,
+        forms=_forms_for_period(period),
+        limit=limit,
     )
+    segment_filings = []
+    for filing in filings:
+        reports = sec.fetch_filing_summary_reports(company.cik, filing["accession_number"])
+        report_map = {report.short_name: report for report in reports}
+
+        def load_report(short_name: str) -> pd.DataFrame:
+            report = report_map[short_name]
+            frame = sec.fetch_report_table(
+                company.cik,
+                filing["accession_number"],
+                report.html_file_name,
+            )
+            return normalize_segment_report_table(frame, report_name=short_name)
+
+        report_set = BrkSegmentReportSet(
+            filing_date=filing["filing_date"],
+            accession_number=filing["accession_number"],
+            earnings_detail=load_report(SEGMENT_REPORT_LABELS["earnings"]),
+            reconciliation_detail=load_report(SEGMENT_REPORT_LABELS["reconciliations"]),
+            additional_detail=load_report(SEGMENT_REPORT_LABELS["additional"]),
+        )
+        segment_filings.append(
+            BrkSegmentFiling(
+                filing_date=filing["filing_date"],
+                accession_number=filing["accession_number"],
+                form=filing["form"],
+                reports=report_set,
+            )
+        )
     return BrkSegmentsBundle(
         company=company,
-        filing_date=filing["filing_date"],
-        accession_number=filing["accession_number"],
-        reports=report_set,
+        filings=segment_filings,
     )
 
 
@@ -207,3 +276,18 @@ def _find_information_table_filename(
         if "<informationTable" in text:
             return filename
     raise LookupError("Could not locate a 13F information table XML file.")
+
+
+def _forms_for_period(period: str) -> tuple[str, ...]:
+    if period == "annual":
+        return ("10-K",)
+    if period == "quarterly":
+        return ("10-Q",)
+    raise ValueError(f"Unsupported Berkshire period: {period}")
+
+
+def _find_report(reports: list, short_name: str):
+    for report in reports:
+        if report.short_name == short_name:
+            return report
+    raise LookupError(f"Could not find filing report: {short_name}")

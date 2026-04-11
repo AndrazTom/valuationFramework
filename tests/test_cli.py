@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from valuation import cli
+from valuation.brk import cli as brk_cli
 from valuation.data.providers.sec import SecCompany
 
 
@@ -257,6 +258,88 @@ def test_statements_cli_rejects_reversed_range():
     )
 
     assert result == 1
+
+
+def test_brk_liquidity_cli_accepts_period_and_limit(monkeypatch, tmp_path: Path):
+    captured = {}
+
+    def fake_fetch(period="annual", limit=1):
+        captured["period"] = period
+        captured["limit"] = limit
+        return type(
+            "Bundle",
+            (),
+            {
+                "filings": [],
+            },
+        )()
+
+    monkeypatch.setattr(
+        brk_cli,
+        "fetch_brk_liquidity",
+        fake_fetch,
+    )
+    monkeypatch.setattr(brk_cli, "build_liquidity_bridge_table", lambda filings: pd.DataFrame())
+    monkeypatch.setattr(brk_cli, "build_liquidity_summary_table", lambda bridge: pd.DataFrame())
+
+    result = cli.main(
+        [
+            "brk",
+            "liquidity",
+            "--period",
+            "quarterly",
+            "--limit",
+            "3",
+            "--outdir",
+            str(tmp_path),
+        ]
+    )
+
+    assert result == 0
+    assert captured == {"period": "quarterly", "limit": 3}
+
+
+def test_brk_segments_cli_accepts_period_and_limit(monkeypatch, tmp_path: Path):
+    captured = {}
+
+    def fake_fetch(period="annual", limit=1):
+        captured["period"] = period
+        captured["limit"] = limit
+        return type(
+            "Bundle",
+            (),
+            {
+                "filings": [],
+            },
+        )()
+
+    monkeypatch.setattr(
+        brk_cli,
+        "fetch_brk_segments",
+        fake_fetch,
+    )
+    monkeypatch.setattr(brk_cli, "build_segment_report_summary_table", lambda filings: pd.DataFrame())
+    monkeypatch.setattr(
+        brk_cli,
+        "build_top_level_operating_segments_summary_table",
+        lambda filings, period="annual": pd.DataFrame(),
+    )
+
+    result = cli.main(
+        [
+            "brk",
+            "segments",
+            "--period",
+            "quarterly",
+            "--limit",
+            "2",
+            "--outdir",
+            str(tmp_path),
+        ]
+    )
+
+    assert result == 0
+    assert captured == {"period": "quarterly", "limit": 2}
 
 
 def test_statements_cli_writes_files_for_yahoo_fallback(monkeypatch, tmp_path: Path):

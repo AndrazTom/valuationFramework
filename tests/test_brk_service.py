@@ -24,10 +24,10 @@ class FakeSecClient:
             "submissions": {
                 "filings": {
                     "recent": {
-                        "form": ["10-K", "13F-HR"],
-                        "filingDate": ["2026-03-02", "2026-02-14"],
-                        "accessionNumber": ["0001", "0002"],
-                        "primaryDocument": ["brka.htm", "13f.htm"],
+                        "form": ["10-K", "10-Q", "13F-HR"],
+                        "filingDate": ["2026-03-02", "2025-11-03", "2026-02-14"],
+                        "accessionNumber": ["0001", "0003", "0002"],
+                        "primaryDocument": ["brka.htm", "brka-q3.htm", "13f.htm"],
                     }
                 }
             },
@@ -38,10 +38,15 @@ class FakeSecClient:
 
     def fetch_filing_summary_reports(self, cik, accession_number):
         assert cik == "0001067983"
-        assert accession_number == "0001"
+        assert accession_number in {"0001", "0003"}
         from valuation.data.providers.sec import SecFilingReport
 
         return [
+            SecFilingReport(
+                html_file_name="R2.htm",
+                short_name="Consolidated Balance Sheets",
+                long_name="Consolidated Balance Sheets",
+            ),
             SecFilingReport(
                 html_file_name="R136.htm",
                 short_name="Business segment data - Earnings data (Detail)",
@@ -61,17 +66,44 @@ class FakeSecClient:
 
     def fetch_report_table(self, cik, accession_number, filename):
         assert cik == "0001067983"
-        assert accession_number == "0001"
+        if filename == "R2.htm":
+            return pd.DataFrame(
+                [
+                    ["Cash and cash equivalents", "", "47,719", "44,333"],
+                    ["Short-term investments in U.S. Treasury Bills", "", "321,434", "286,472"],
+                    ["Investments in fixed maturity securities", "", "17,816", "15,364"],
+                ],
+                columns=[
+                    "Consolidated Balance Sheets",
+                    "Consolidated Balance Sheets",
+                    "Dec. 31, 2025",
+                    "Dec. 31, 2024",
+                ],
+            )
+        if accession_number == "0001":
+            return pd.DataFrame(
+                [
+                    ["Operating Businesses [Member] | BNSF [Member]", None, None, None],
+                    ["Revenues", "23", "24", "25"],
+                ],
+                columns=[
+                    ("stub", "label"),
+                    ("12 Months Ended", "Dec. 31, 2023"),
+                    ("12 Months Ended", "Dec. 31, 2024"),
+                    ("12 Months Ended", "Dec. 31, 2025"),
+                ],
+            )
         return pd.DataFrame(
             [
-                ["Operating Businesses [Member] | BNSF [Member]", None, None, None],
-                ["Revenues", "23", "24", "25"],
+                ["Operating Businesses [Member] | BNSF [Member]", None, None, None, None],
+                ["Revenues", "20", "19", "60", "58"],
             ],
             columns=[
                 ("stub", "label"),
-                ("12 Months Ended", "Dec. 31, 2023"),
-                ("12 Months Ended", "Dec. 31, 2024"),
-                ("12 Months Ended", "Dec. 31, 2025"),
+                ("3 Months Ended", "Sep. 30, 2025"),
+                ("3 Months Ended", "Sep. 30, 2024"),
+                ("9 Months Ended", "Sep. 30, 2025"),
+                ("9 Months Ended", "Sep. 30, 2024"),
             ],
         )
 
@@ -96,7 +128,19 @@ def test_fetch_brk_liquidity_assembles_bundle():
     bundle = fetch_brk_liquidity(sec_client=FakeSecClient())
 
     assert bundle.company.ticker == "BRK-B"
-    assert bundle.company_facts == {"facts": {}}
+    assert bundle.filings[0].form == "10-K"
+    assert not bundle.filings[0].balance_sheet.empty
+
+
+def test_fetch_brk_liquidity_supports_quarterly_history():
+    bundle = fetch_brk_liquidity(
+        sec_client=FakeSecClient(),
+        period="quarterly",
+        limit=1,
+    )
+
+    assert len(bundle.filings) == 1
+    assert bundle.filings[0].form == "10-Q"
 
 
 def test_find_brk_13f_filings_finds_first_matching_form():
@@ -139,5 +183,17 @@ def test_fetch_brk_segments_assembles_bundle():
     bundle = fetch_brk_segments(sec_client=fake)
 
     assert bundle.company.ticker == "BRK-B"
-    assert bundle.filing_date == "2026-03-02"
-    assert bundle.accession_number == "0001"
+    assert bundle.filings[0].filing_date == "2026-03-02"
+    assert bundle.filings[0].accession_number == "0001"
+
+
+def test_fetch_brk_segments_supports_quarterly_history():
+    fake = FakeSecClient()
+    bundle = fetch_brk_segments(
+        sec_client=fake,
+        period="quarterly",
+        limit=1,
+    )
+
+    assert len(bundle.filings) == 1
+    assert bundle.filings[0].form == "10-Q"

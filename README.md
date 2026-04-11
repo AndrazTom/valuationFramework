@@ -117,8 +117,10 @@ On `brk`, there is also a Berkshire-only command group:
 
 - `./vf brk overview`
 - `./vf brk holdings`
-- `./vf brk liquidity`
-- `./vf brk segments`
+- `./vf brk liquidity --period annual --limit 4`
+- `./vf brk liquidity --period quarterly --limit 4`
+- `./vf brk segments --period annual --limit 4`
+- `./vf brk segments --period quarterly --limit 4`
 
 Those commands are branch-specific research workflows layered on top of the generic backend.
 
@@ -204,9 +206,13 @@ Current Berkshire workflows include:
   - latest 13F holdings
   - optional live-price enrichment where ticker mappings exist
 - `liquidity`
-  - Berkshire cash and debt-securities bridge tables
+  - Berkshire liquidity history from filing balance sheets, not just companyfacts
+  - includes cash, short-term U.S. Treasury Bills, fixed maturity securities, and explicit core liquidity totals
+  - supports `--period annual|quarterly` and `--limit`
 - `segments`
-  - operating segment extraction from the latest annual filing report tables
+  - operating segment history from SEC filing report tables
+  - supports `--period annual|quarterly` and `--limit`
+  - quarterly segment output prefers 3-month columns instead of mixing in 9-month YTD values
 
 The intent on this branch is to use Berkshire as the hard valuation case while still inheriting the reusable generic infrastructure from `main`.
 

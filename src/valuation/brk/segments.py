@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+import re
 from typing import Optional
 
 import pandas as pd
@@ -22,8 +24,25 @@ TOP_LEVEL_OPERATING_METRICS = (
     "Capital expenditures",
     "Depreciation and amortization",
     "Goodwill at year-end",
+    "Goodwill",
     "Identifiable assets at year-end",
+    "Assets",
 )
+
+FLOW_METRIC_RENAMES = {
+    "Revenues": "revenues_usd",
+    "Earnings before income taxes": "earnings_before_income_taxes_usd",
+    "Interest expense": "interest_expense_usd",
+    "Capital expenditures": "capex_usd",
+    "Depreciation and amortization": "depreciation_and_amortization_usd",
+}
+
+STOCK_METRIC_RENAMES = {
+    "Goodwill at year-end": "goodwill_usd",
+    "Goodwill": "goodwill_usd",
+    "Identifiable assets at year-end": "identifiable_assets_usd",
+    "Assets": "identifiable_assets_usd",
+}
 
 SEGMENT_LABEL_ALIASES = {
     "Business Segments": "Operating Businesses",
@@ -57,6 +76,9 @@ def normalize_segment_report_table(
                 "member_path",
                 "member_name",
                 "metric",
+                "column_label",
+                "duration_label",
+                "duration_months",
                 "period_end",
                 "value",
             ]
@@ -64,17 +86,16 @@ def normalize_segment_report_table(
 
     flat = frame.copy()
     flat.columns = [_flatten_column_name(column) for column in flat.columns]
-    label_column = flat.columns[0]
-    value_columns = [
-        column
-        for column in flat.columns[1:]
-        if "Dec." in column or "20" in column
+    value_column_positions = [
+        index
+        for index, column in enumerate(flat.columns[1:], start=1)
+        if "Dec." in column or "20" in column or "Sep." in column or "Jun." in column or "Mar." in column
     ]
 
     rows = []
     current_member_path: Optional[str] = None
-    for _, row in flat.iterrows():
-        label = _normalize_text(row[label_column])
+    for row_index in range(len(flat)):
+        label = _normalize_text(flat.iat[row_index, 0])
         if not label:
             continue
         if "[Member]" in label:
@@ -86,10 +107,14 @@ def normalize_segment_report_table(
             continue
 
         member_name = current_member_path.split(" | ")[-1]
-        for column in value_columns:
-            period_end = _extract_period_end(column)
-            parsed_value = _parse_report_value(row[column], scale_multiplier=scale_multiplier)
-            if period_end is None or parsed_value is None:
+        for column_index in value_column_positions:
+            column = flat.columns[column_index]
+            period = _extract_period_metadata(column)
+            parsed_value = _parse_report_value(
+                flat.iat[row_index, column_index],
+                scale_multiplier=scale_multiplier,
+            )
+            if period is None or parsed_value is None:
                 continue
             rows.append(
                 {
@@ -97,67 +122,112 @@ def normalize_segment_report_table(
                     "member_path": current_member_path,
                     "member_name": member_name,
                     "metric": label,
-                    "period_end": period_end,
+                    "column_label": period["column_label"],
+                    "duration_label": period["duration_label"],
+                    "duration_months": period["duration_months"],
+                    "period_end": period["period_end"],
                     "value": parsed_value,
                 }
             )
     return pd.DataFrame(rows)
 
 
-def build_top_level_operating_segments_table(report_set: BrkSegmentReportSet) -> pd.DataFrame:
-    """Return a practical Berkshire segment table for current-year operating analysis."""
-    period_end = _latest_period_end(report_set.earnings_detail, report_set.additional_detail)
+def build_top_level_operating_segments_table(
+    report_set: BrkSegmentReportSet,
+    *,
+    period: str = "annual",
+) -> pd.DataFrame:
+    """Return Berkshire top-level segments for annual or quarterly reporting periods."""
+    flow_duration_months = _flow_duration_months(period)
+    period_end = _latest_period_end(
+        report_set.earnings_detail,
+        duration_months=flow_duration_months,
+    )
     if period_end is None:
         return pd.DataFrame()
-    earnings = _select_top_level_period_rows(report_set.earnings_detail, period_end=period_end)
-    additional = _select_top_level_period_rows(report_set.additional_detail, period_end=period_end)
-    combined = pd.concat([earnings, additional], ignore_index=True)
+    flow_rows = pd.concat(
+        [
+            _select_top_level_period_rows(
+                report_set.earnings_detail,
+                period_end=period_end,
+                duration_months=flow_duration_months,
+            ),
+            _select_top_level_period_rows(
+                report_set.additional_detail,
+                period_end=period_end,
+                duration_months=flow_duration_months,
+            ),
+        ],
+        ignore_index=True,
+    )
+    stock_rows = _select_top_level_period_rows(
+        report_set.additional_detail,
+        period_end=period_end,
+    )
+    combined = pd.concat([flow_rows, stock_rows], ignore_index=True)
     if combined.empty:
         return pd.DataFrame()
 
-    combined = combined[combined["metric"].isin(TOP_LEVEL_OPERATING_METRICS)]
+    combined = combined[combined["metric"].isin(TOP_LEVEL_OPERATING_METRICS)].copy()
+    combined["canonical_metric"] = combined["metric"].map(
+        {
+            **FLOW_METRIC_RENAMES,
+            **STOCK_METRIC_RENAMES,
+        }
+    )
+    combined = combined[combined["canonical_metric"].notna()]
+    combined = combined.drop_duplicates(
+        subset=["member_path", "member_name", "canonical_metric", "period_end"],
+        keep="first",
+    )
     pivoted = (
         combined.pivot_table(
             index=["member_path", "member_name"],
-            columns="metric",
+            columns="canonical_metric",
             values="value",
             aggfunc="first",
         )
         .reset_index()
         .rename_axis(columns=None)
     )
-    rename_map = {
-        "Revenues": "revenues_usd",
-        "Earnings before income taxes": "earnings_before_income_taxes_usd",
-        "Interest expense": "interest_expense_usd",
-        "Capital expenditures": "capex_usd",
-        "Depreciation and amortization": "depreciation_and_amortization_usd",
-        "Goodwill at year-end": "goodwill_usd",
-        "Identifiable assets at year-end": "identifiable_assets_usd",
-    }
-    result = pivoted.rename(columns=rename_map)
+    result = pivoted
     if "member_path" in result.columns:
         result = result.drop(columns=["member_path"])
     result = result.rename(columns={"member_name": "segment"})
+    result.insert(0, "period_type", period)
+    result.insert(0, "period_end", period_end)
     return result.sort_values(by="revenues_usd", ascending=False, na_position="last").reset_index(drop=True)
 
 
-def _select_top_level_period_rows(frame: pd.DataFrame, *, period_end: str) -> pd.DataFrame:
+def _select_top_level_period_rows(
+    frame: pd.DataFrame,
+    *,
+    period_end: str,
+    duration_months: int | None = None,
+) -> pd.DataFrame:
     if frame.empty:
         return frame
     filtered = frame[frame["period_end"] == period_end].copy()
+    if duration_months is not None and "duration_months" in filtered.columns:
+        filtered = filtered[filtered["duration_months"] == duration_months]
     filtered = filtered[
         filtered["member_path"].apply(_is_top_level_operating_path)
     ]
     return filtered.reset_index(drop=True)
 
 
-def _latest_period_end(*frames: pd.DataFrame) -> Optional[str]:
+def _latest_period_end(
+    frame: pd.DataFrame,
+    *,
+    duration_months: int | None = None,
+) -> Optional[str]:
+    if frame.empty or "period_end" not in frame.columns:
+        return None
+    working = frame
+    if duration_months is not None and "duration_months" in working.columns:
+        working = working[working["duration_months"] == duration_months]
     period_ends = []
-    for frame in frames:
-        if frame.empty or "period_end" not in frame.columns:
-            continue
-        period_ends.extend([value for value in frame["period_end"].dropna().tolist() if value])
+    period_ends.extend([value for value in working["period_end"].dropna().tolist() if value])
     if not period_ends:
         return None
     return max(period_ends)
@@ -204,14 +274,22 @@ def _should_skip_metric_row(label: str) -> bool:
     }
 
 
-def _extract_period_end(column_name: str) -> Optional[str]:
-    if "2025" in column_name:
-        return "2025-12-31"
-    if "2024" in column_name:
-        return "2024-12-31"
-    if "2023" in column_name:
-        return "2023-12-31"
-    return None
+def _extract_period_metadata(column_name: str) -> Optional[dict[str, object]]:
+    date_match = re.search(r"([A-Z][a-z]{2}\.?\s+\d{1,2},\s+\d{4})", column_name)
+    if date_match is None:
+        return None
+    period_end = _parse_date(date_match.group(1))
+    if period_end is None:
+        return None
+    duration_match = re.search(r"(\d+)\s+Months?\s+Ended", column_name)
+    duration_label = duration_match.group(0) if duration_match else None
+    duration_months = int(duration_match.group(1)) if duration_match else None
+    return {
+        "column_label": column_name,
+        "duration_label": duration_label,
+        "duration_months": duration_months,
+        "period_end": period_end,
+    }
 
 
 def _parse_report_value(value: object, *, scale_multiplier: int) -> Optional[float]:
@@ -238,3 +316,19 @@ def _parse_report_value(value: object, *, scale_multiplier: int) -> Optional[flo
     if negative:
         numeric *= -1
     return numeric * scale_multiplier
+
+
+def _parse_date(value: str) -> Optional[str]:
+    cleaned = value.replace(".", "")
+    try:
+        return datetime.strptime(cleaned, "%b %d, %Y").date().isoformat()
+    except ValueError:
+        return None
+
+
+def _flow_duration_months(period: str) -> int:
+    if period == "annual":
+        return 12
+    if period == "quarterly":
+        return 3
+    raise ValueError(f"Unsupported Berkshire segment period: {period}")

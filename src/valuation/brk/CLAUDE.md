@@ -19,8 +19,11 @@ Current Berkshire stack:
   - `./vf brk segments`
 - latest 13F holdings
 - optional live-price revaluation for resolved holdings
-- liquidity bridge from SEC company facts
+- liquidity history from SEC filing balance-sheet tables
 - operating segment extraction from filing report tables
+- liquidity and segments both support:
+  - `--period annual|quarterly`
+  - `--limit`
 - SEC live checks should work with either:
   - repo-local `.env`
   - exported env vars, which should override `.env`
@@ -35,3 +38,8 @@ Rules:
 - separate reported values from live-revalued values
 - keep `BRK.B` as the default share unit unless the user changes that
 - keep Berkshire-specific logic in this subtree rather than leaking it into generic modules
+- for liquidity:
+  - prefer the filing balance-sheet report over SEC companyfacts
+  - keep the U.S. Treasury Bill line explicit
+- for quarterly segments:
+  - prefer the 3-month columns over 6/9-month YTD columns when the command asks for quarterly history

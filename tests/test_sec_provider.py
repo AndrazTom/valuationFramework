@@ -61,3 +61,47 @@ def test_lookup_company_by_cik(monkeypatch):
     company = client.lookup_company_by_cik("1067983")
 
     assert company.ticker == "BRK-B"
+
+
+def test_fetch_report_table_parses_sec_html_without_lxml(monkeypatch):
+    client = SecClient()
+    html = """
+    <html>
+      <body>
+        <table class="report">
+          <tr>
+            <th colspan="2" rowspan="2">Business segment data</th>
+            <th colspan="2">3 Months Ended</th>
+          </tr>
+          <tr>
+            <th>Sep. 30, 2025</th>
+            <th>Sep. 30, 2024</th>
+          </tr>
+          <tr>
+            <td>BNSF [Member]</td>
+            <td></td>
+            <td></td>
+            <td></td>
+          </tr>
+          <tr>
+            <td>Revenues</td>
+            <td></td>
+            <td>23,441</td>
+            <td>23,490</td>
+          </tr>
+        </table>
+      </body>
+    </html>
+    """
+    monkeypatch.setattr(client, "fetch_filing_text", lambda cik, accession_number, filename: html)
+
+    frame = client.fetch_report_table("0001067983", "0001", "R1.htm")
+
+    assert list(frame.columns) == [
+        "Business segment data",
+        "Business segment data",
+        "3 Months Ended Sep. 30, 2025",
+        "3 Months Ended Sep. 30, 2024",
+    ]
+    assert frame.iloc[0, 0] == "BNSF [Member]"
+    assert frame.iloc[1, 2] == "23,441"

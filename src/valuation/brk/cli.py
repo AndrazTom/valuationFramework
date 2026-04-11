@@ -72,12 +72,36 @@ def register_brk_parser(subparsers) -> None:
         help="Fetch Berkshire cash and debt-securities bridge tables.",
     )
     liquidity_parser.add_argument("--outdir", default="outputs/tables")
+    liquidity_parser.add_argument(
+        "--period",
+        choices=("annual", "quarterly"),
+        default="annual",
+        help="Use annual 10-K or quarterly 10-Q filings.",
+    )
+    liquidity_parser.add_argument(
+        "--limit",
+        type=_non_negative_int,
+        default=1,
+        help="Number of filings to include.",
+    )
 
     segments_parser = brk_subparsers.add_parser(
         "segments",
-        help="Fetch Berkshire operating-segment tables from the latest annual filing.",
+        help="Fetch Berkshire operating-segment tables from annual or quarterly filings.",
     )
     segments_parser.add_argument("--outdir", default="outputs/tables")
+    segments_parser.add_argument(
+        "--period",
+        choices=("annual", "quarterly"),
+        default="annual",
+        help="Use annual 10-K or quarterly 10-Q filings.",
+    )
+    segments_parser.add_argument(
+        "--limit",
+        type=_non_negative_int,
+        default=1,
+        help="Number of filings to include.",
+    )
 
 
 def run_brk_command(args: argparse.Namespace) -> int:
@@ -94,9 +118,17 @@ def run_brk_command(args: argparse.Namespace) -> int:
             live_prices=args.live_prices,
         )
     if args.brk_command == "liquidity":
-        return run_brk_liquidity(outdir=args.outdir)
+        return run_brk_liquidity(
+            outdir=args.outdir,
+            period=args.period,
+            limit=args.limit,
+        )
     if args.brk_command == "segments":
-        return run_brk_segments(outdir=args.outdir)
+        return run_brk_segments(
+            outdir=args.outdir,
+            period=args.period,
+            limit=args.limit,
+        )
     raise ValueError(f"Unknown Berkshire command: {args.brk_command}")
 
 
@@ -159,29 +191,32 @@ def run_brk_holdings(outdir: str, limit: int, live_prices: bool) -> int:
     return 0
 
 
-def run_brk_liquidity(outdir: str) -> int:
-    """Build Berkshire liquidity bridge tables from SEC company facts."""
-    bundle = fetch_brk_liquidity()
-    bridge = build_liquidity_bridge_table(bundle.company_facts)
+def run_brk_liquidity(outdir: str, period: str, limit: int) -> int:
+    """Build Berkshire liquidity tables from filing balance sheets."""
+    bundle = fetch_brk_liquidity(period=period, limit=limit)
+    bridge = build_liquidity_bridge_table(bundle.filings)
     sections = [
-        ("Liquidity Summary", build_liquidity_summary_table(bridge)),
+        ("Liquidity History", build_liquidity_summary_table(bridge)),
         ("Liquidity Bridge", bridge),
     ]
     _emit_sections(sections, Path(outdir) / "BRK_LIQUIDITY")
     return 0
 
 
-def run_brk_segments(outdir: str) -> int:
-    """Build Berkshire operating-segment tables from the latest annual filing."""
-    bundle = fetch_brk_segments()
+def run_brk_segments(outdir: str, period: str, limit: int) -> int:
+    """Build Berkshire operating-segment tables from selected filings."""
+    bundle = fetch_brk_segments(period=period, limit=limit)
     sections = [
         (
-            "Segment Filing",
-            build_segment_report_summary_table(bundle.filing_date, bundle.accession_number),
+            "Segment Filings",
+            build_segment_report_summary_table(bundle.filings),
         ),
         (
             "Top-Level Operating Segments",
-            build_top_level_operating_segments_summary_table(bundle.reports),
+            build_top_level_operating_segments_summary_table(
+                bundle.filings,
+                period=period,
+            ),
         ),
     ]
     _emit_sections(sections, Path(outdir) / "BRK_SEGMENTS")

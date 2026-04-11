@@ -72,3 +72,17 @@ def test_humanize_frame_keeps_position_counts_as_quantities():
 
     assert display.iloc[0]["value"] == "24"
     assert display.iloc[1]["value"] == "$269.77B"
+
+
+def test_humanize_frame_prioritizes_usd_columns_over_metric_name():
+    frame = pd.DataFrame(
+        [
+            {"metric": "short_term_us_treasury_bills", "value_usd": 305.367 * B},
+            {"metric": "fixed_maturity_securities", "value_usd": 17.943 * B},
+        ]
+    )
+
+    display = humanize_frame(frame)
+
+    assert display.iloc[0]["value_usd"] == "$305.37B"
+    assert display.iloc[1]["value_usd"] == "$17.94B"

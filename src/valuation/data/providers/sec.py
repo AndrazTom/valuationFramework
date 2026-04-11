@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from io import StringIO
 from typing import Any, Dict, List, Mapping, Optional
 import xml.etree.ElementTree as ET
 
+from bs4 import BeautifulSoup
 import pandas as pd
 import requests
 
@@ -189,10 +189,7 @@ class SecClient:
     ) -> pd.DataFrame:
         """Read the first HTML table from a filing report page."""
         text = self.fetch_filing_text(cik, accession_number, filename)
-        tables = pd.read_html(StringIO(text))
-        if not tables:
-            return pd.DataFrame()
-        return tables[0]
+        return _parse_first_html_table(text)
 
     def fetch_company_bundle(
         self,
@@ -215,3 +212,106 @@ class SecClient:
         if company_facts_future is not None:
             bundle["company_facts"] = company_facts_future.result()
         return bundle
+
+
+def _parse_first_html_table(text: str) -> pd.DataFrame:
+    soup = BeautifulSoup(text, "html.parser")
+    table = soup.find("table")
+    if table is None:
+        return pd.DataFrame()
+
+    rows = _expand_html_table(table)
+    if not rows:
+        return pd.DataFrame()
+
+    width = max(len(row) for row in rows)
+    rows = [_pad_row(row, width) for row in rows]
+    header_row_count = _count_header_rows(table)
+    if header_row_count > len(rows):
+        header_row_count = len(rows)
+
+    if header_row_count:
+        columns = _build_header_labels(rows[:header_row_count], width)
+        body = rows[header_row_count:]
+    else:
+        columns = [f"column_{index + 1}" for index in range(width)]
+        body = rows
+
+    return pd.DataFrame(body, columns=columns)
+
+
+def _expand_html_table(table) -> list[list[str]]:
+    pending_spans: dict[int, tuple[str, int]] = {}
+    rows: list[list[str]] = []
+
+    for tr in table.find_all("tr"):
+        cells = tr.find_all(["th", "td"], recursive=False)
+        if not cells:
+            continue
+        row: list[str] = []
+        column_index = 0
+
+        def consume_pending() -> None:
+            nonlocal column_index
+            while column_index in pending_spans:
+                text, remaining = pending_spans[column_index]
+                row.append(text)
+                if remaining <= 1:
+                    del pending_spans[column_index]
+                else:
+                    pending_spans[column_index] = (text, remaining - 1)
+                column_index += 1
+
+        consume_pending()
+        for cell in cells:
+            consume_pending()
+            text = " ".join(cell.get_text(" ", strip=True).replace("\xa0", " ").split())
+            colspan = _parse_span_count(cell.get("colspan"))
+            rowspan = _parse_span_count(cell.get("rowspan"))
+            for offset in range(colspan):
+                row.append(text)
+                if rowspan > 1:
+                    pending_spans[column_index + offset] = (text, rowspan - 1)
+            column_index += colspan
+        consume_pending()
+        rows.append(row)
+
+    return rows
+
+
+def _count_header_rows(table) -> int:
+    count = 0
+    for tr in table.find_all("tr"):
+        cells = tr.find_all(["th", "td"], recursive=False)
+        if not cells:
+            continue
+        if any(cell.name == "td" for cell in cells):
+            break
+        count += 1
+    return count
+
+
+def _build_header_labels(rows: list[list[str]], width: int) -> list[str]:
+    labels: list[str] = []
+    for column_index in range(width):
+        parts: list[str] = []
+        for row in rows:
+            value = row[column_index].strip() if column_index < len(row) else ""
+            if value and (not parts or parts[-1] != value):
+                parts.append(value)
+        labels.append(" ".join(parts) if parts else f"column_{column_index + 1}")
+    return labels
+
+
+def _pad_row(row: list[str], width: int) -> list[str]:
+    if len(row) >= width:
+        return row
+    return row + [""] * (width - len(row))
+
+
+def _parse_span_count(raw_value: object) -> int:
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return 1
+    return max(value, 1)
