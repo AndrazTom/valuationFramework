@@ -17,6 +17,9 @@ Current branch priority:
   - made Berkshire segments work again without relying on `lxml`
   - added annual/quarterly history controls to Berkshire liquidity and segment commands
   - added explicit Berkshire start/end period filters, with range filters widening the default history limit
+  - fixed Berkshire segment rows being split across alternate SEC member paths
+  - changed multi-period Berkshire segment output to emit one table per filing period
+  - added optional Berkshire holdings price-change windows on live-priced holdings output
 
 Long-term direction:
 
@@ -185,6 +188,7 @@ As of 2026-04-09, `main` should contain or move toward:
 - `./vf brk overview`
 - `./vf brk holdings --limit 10`
 - `./vf brk holdings --live-prices --limit 10`
+- `./vf brk holdings --price-change 1M --limit 10`
 - `./vf brk liquidity --period annual --limit 4`
 - `./vf brk liquidity --period quarterly --limit 4`
 - `./vf brk segments --period annual --limit 4`

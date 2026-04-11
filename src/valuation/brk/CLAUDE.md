@@ -19,12 +19,14 @@ Current Berkshire stack:
 - `./vf brk segments`
 - latest 13F holdings
 - optional live-price revaluation for resolved holdings
+- optional live price-change windows on holdings via `--price-change` / `--price-change-window`
 - liquidity history from SEC filing balance-sheet tables
-- operating segment extraction from filing report tables
+- top-level operating segment extraction from filing report tables
 - liquidity and segments both support:
   - `--period annual|quarterly`
   - `--limit`
   - explicit start/end period filters
+  - when any explicit range filter is present, internal history fetch should widen to `99` even if a small `--limit` was passed
 - SEC live checks should work with either:
   - repo-local `.env`
   - exported env vars, which should override `.env`
@@ -44,3 +46,9 @@ Rules:
   - keep the U.S. Treasury Bill line explicit
 - for quarterly segments:
   - prefer the 3-month columns over 6/9-month YTD columns when the command asks for quarterly history
+  - normalize alternate SEC member paths for the same operating segment into one row
+  - when multiple filings are selected, emit one output table per filing period instead of one large combined history table
+  - keep the command framed as a top-level segment summary, not a raw dump of every note row
+- for annual segments:
+  - some older Berkshire filings only expose `Total revenues` in the earnings report plus the additional-disclosure metrics
+  - blank cells in older annual segment tables can therefore be real upstream report-table coverage limits, not necessarily parser bugs

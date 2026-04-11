@@ -273,6 +273,7 @@ def build_top_holdings_live_table(
     reference: pd.DataFrame,
     limit: int = 20,
     yahoo_client=None,
+    price_change_window: str | None = None,
 ) -> pd.DataFrame:
     """Return Berkshire top holdings with current market-price enrichment."""
     if holdings.empty:
@@ -283,20 +284,22 @@ def build_top_holdings_live_table(
         aggregated,
         reference,
         yahoo_client=yahoo_client,
+        price_change_window=price_change_window,
     )
     total_live_value = enriched["market_value_live_usd"].dropna().sum()
-    trimmed = enriched[
-        [
-            "issuer",
-            "ticker",
-            "cusip",
-            "value_usd",
-            "last_price",
-            "market_value_live_usd",
-            "shares_or_principal",
-            "latest_price_date",
-        ]
-    ].copy()
+    selected_columns = [
+        "issuer",
+        "ticker",
+        "cusip",
+        "value_usd",
+        "last_price",
+        "market_value_live_usd",
+        "shares_or_principal",
+        "latest_price_date",
+    ]
+    if price_change_window is not None:
+        selected_columns.insert(5, "price_change_pct")
+    trimmed = enriched[selected_columns].copy()
     trimmed["portfolio_weight_live"] = trimmed["market_value_live_usd"].apply(
         lambda value: (value / total_live_value) if total_live_value else None
     )
@@ -308,6 +311,7 @@ def build_13f_live_price_summary_table(
     holdings: pd.DataFrame,
     reference: pd.DataFrame,
     yahoo_client=None,
+    price_change_window: str | None = None,
 ) -> pd.DataFrame:
     """Summarize live-price coverage for Berkshire's latest 13F positions."""
     if holdings.empty:
@@ -318,6 +322,7 @@ def build_13f_live_price_summary_table(
         aggregated,
         reference,
         yahoo_client=yahoo_client,
+        price_change_window=price_change_window,
     )
     resolved = enriched["market_value_live_usd"].notna()
     resolved_count = int(resolved.sum())
@@ -331,17 +336,18 @@ def build_13f_live_price_summary_table(
         if dates:
             latest_price_date = max(dates)
 
-    return pd.DataFrame(
-        [
-            {"field": "positions_total", "value": len(enriched)},
-            {"field": "positions_with_live_price", "value": resolved_count},
-            {"field": "positions_without_live_price", "value": unresolved_count},
-            {"field": "reported_value_usd", "value": reported_value},
-            {"field": "reported_value_resolved_usd", "value": reported_value_resolved},
-            {"field": "market_value_live_resolved_usd", "value": live_value},
-            {"field": "latest_price_date", "value": latest_price_date},
-        ]
-    )
+    rows = [
+        {"field": "positions_total", "value": len(enriched)},
+        {"field": "positions_with_live_price", "value": resolved_count},
+        {"field": "positions_without_live_price", "value": unresolved_count},
+        {"field": "reported_value_usd", "value": reported_value},
+        {"field": "reported_value_resolved_usd", "value": reported_value_resolved},
+        {"field": "market_value_live_resolved_usd", "value": live_value},
+        {"field": "latest_price_date", "value": latest_price_date},
+    ]
+    if price_change_window is not None:
+        rows.append({"field": "price_change_window", "value": price_change_window})
+    return pd.DataFrame(rows)
 
 
 def build_segment_report_summary_table(filings: Sequence[BrkSegmentFiling]) -> pd.DataFrame:
@@ -376,11 +382,49 @@ def build_top_level_operating_segments_summary_table(
     if not tables:
         return pd.DataFrame()
     combined = pd.concat(tables, ignore_index=True)
+    sort_columns = ["filing_date", "period_end"]
+    ascending = [False, False]
+    if "revenues_usd" in combined.columns:
+        sort_columns.append("revenues_usd")
+        ascending.append(False)
     return combined.sort_values(
-        by=["filing_date", "period_end", "revenues_usd"],
-        ascending=[False, False, False],
+        by=sort_columns,
+        ascending=ascending,
         na_position="last",
     ).reset_index(drop=True)
+
+
+def build_segment_period_sections(
+    filings: Sequence[BrkSegmentFiling],
+    *,
+    period: str,
+) -> list[tuple[str, pd.DataFrame]]:
+    """Return one Berkshire segment table per selected filing period."""
+    sections = []
+    for filing in filings:
+        table = build_top_level_operating_segments_table(filing.reports, period=period)
+        if table.empty:
+            continue
+        sections.append((_segment_period_title(filing, table, period=period), table))
+    return sections
+
+
+def _segment_period_title(
+    filing: BrkSegmentFiling,
+    table: pd.DataFrame,
+    *,
+    period: str,
+) -> str:
+    if table.empty or "period_end" not in table.columns:
+        return f"Top-Level Operating Segments ({filing.filing_date})"
+    period_end = str(table.iloc[0]["period_end"])
+    timestamp = pd.Timestamp(period_end)
+    if period == "annual":
+        label = f"FY {timestamp.year}"
+    else:
+        quarter = ((timestamp.month - 1) // 3) + 1
+        label = f"Q{quarter} {timestamp.year}"
+    return f"Top-Level Operating Segments {label} ({filing.filing_date})"
 
 
 def _sum_defined(*values):

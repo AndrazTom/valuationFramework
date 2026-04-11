@@ -372,11 +372,8 @@ def test_brk_segments_cli_accepts_period_and_limit(monkeypatch, tmp_path: Path):
         fake_fetch,
     )
     monkeypatch.setattr(brk_cli, "build_segment_report_summary_table", lambda filings: pd.DataFrame())
-    monkeypatch.setattr(
-        brk_cli,
-        "build_top_level_operating_segments_summary_table",
-        lambda filings, period="annual": pd.DataFrame(),
-    )
+    monkeypatch.setattr(brk_cli, "build_segment_period_sections", lambda filings, period="annual": [])
+    monkeypatch.setattr(brk_cli, "build_top_level_operating_segments_summary_table", lambda filings, period="annual": pd.DataFrame())
 
     result = cli.main(
         [
@@ -393,6 +390,93 @@ def test_brk_segments_cli_accepts_period_and_limit(monkeypatch, tmp_path: Path):
 
     assert result == 0
     assert captured == {"period": "quarterly", "limit": 2}
+
+
+def test_brk_segments_cli_range_forces_limit_even_when_explicit(monkeypatch, tmp_path: Path):
+    captured = {}
+
+    def fake_fetch(period="annual", limit=1, **kwargs):
+        captured["period"] = period
+        captured["limit"] = limit
+        captured.update(kwargs)
+        return type("Bundle", (), {"filings": []})()
+
+    monkeypatch.setattr(brk_cli, "fetch_brk_segments", fake_fetch)
+    monkeypatch.setattr(brk_cli, "build_segment_report_summary_table", lambda filings: pd.DataFrame())
+    monkeypatch.setattr(brk_cli, "build_segment_period_sections", lambda filings, period="annual": [])
+    monkeypatch.setattr(brk_cli, "build_top_level_operating_segments_summary_table", lambda filings, period="annual": pd.DataFrame())
+
+    result = cli.main(
+        [
+            "brk",
+            "segments",
+            "--period",
+            "annual",
+            "--limit",
+            "2",
+            "--start-year",
+            "2022",
+            "--end-year",
+            "2024",
+            "--outdir",
+            str(tmp_path),
+        ]
+    )
+
+    assert result == 0
+    assert captured["limit"] == 99
+
+
+def test_brk_holdings_cli_price_change_enables_live_table(monkeypatch, tmp_path: Path):
+    captured = {"sections": []}
+
+    monkeypatch.setattr(
+        brk_cli,
+        "fetch_latest_brk_13f",
+        lambda: type(
+            "Bundle",
+            (),
+            {
+                "filing_date": "2026-02-17",
+                "accession_number": "0001",
+                "information_table_filename": "info.xml",
+                "holdings": pd.DataFrame([{"issuer": "APPLE INC", "value_usd": 1000}]),
+            },
+        )(),
+    )
+    monkeypatch.setattr(brk_cli, "build_13f_summary_table", lambda **kwargs: pd.DataFrame())
+    monkeypatch.setattr(brk_cli, "build_top_holdings_table", lambda holdings, limit=20: pd.DataFrame())
+    monkeypatch.setattr(brk_cli, "build_brk_security_reference", lambda: pd.DataFrame())
+    monkeypatch.setattr(
+        brk_cli,
+        "build_13f_live_price_summary_table",
+        lambda holdings, reference, price_change_window=None: pd.DataFrame(),
+    )
+
+    def fake_live_table(holdings, reference, limit=20, price_change_window=None):
+        captured["window"] = price_change_window
+        return pd.DataFrame()
+
+    def fake_emit(sections, output_dir):
+        captured["sections"] = [title for title, _ in sections]
+
+    monkeypatch.setattr(brk_cli, "build_top_holdings_live_table", fake_live_table)
+    monkeypatch.setattr(brk_cli, "_emit_sections", fake_emit)
+
+    result = cli.main(
+        [
+            "brk",
+            "holdings",
+            "--price-change",
+            "1M",
+            "--outdir",
+            str(tmp_path),
+        ]
+    )
+
+    assert result == 0
+    assert captured["window"] == "1M"
+    assert "Top Holdings Live (1M Change)" in captured["sections"]
 
 
 def test_brk_segments_cli_rejects_invalid_range(tmp_path: Path):

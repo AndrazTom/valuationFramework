@@ -195,17 +195,17 @@ def build_top_level_operating_segments_table(
             **STOCK_METRIC_RENAMES,
         }
     )
-    combined["member_name"] = combined["member_name"].map(
+    combined["segment"] = combined["member_name"].map(
         lambda value: SEGMENT_LABEL_ALIASES.get(value, value)
     )
     combined = combined[combined["canonical_metric"].notna()]
     combined = combined.drop_duplicates(
-        subset=["member_name", "canonical_metric", "period_end"],
+        subset=["segment", "canonical_metric", "period_end"],
         keep="first",
     )
     pivoted = (
         combined.pivot_table(
-            index=["member_path", "member_name"],
+            index=["segment"],
             columns="canonical_metric",
             values="value",
             aggfunc="first",
@@ -214,9 +214,6 @@ def build_top_level_operating_segments_table(
         .rename_axis(columns=None)
     )
     result = pivoted
-    if "member_path" in result.columns:
-        result = result.drop(columns=["member_path"])
-    result = result.rename(columns={"member_name": "segment"})
     result.insert(0, "period_type", period)
     result.insert(0, "period_end", period_end)
     sort_column = "revenues_usd" if "revenues_usd" in result.columns else "segment"

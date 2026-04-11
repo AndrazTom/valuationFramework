@@ -36,6 +36,21 @@ def test_humanize_frame_formats_currency_and_percent_columns():
     assert display.iloc[0]["portfolio_weight"] == "22.6%"
 
 
+def test_humanize_frame_formats_pct_suffix_columns():
+    frame = pd.DataFrame(
+        [
+            {
+                "issuer": "APPLE INC",
+                "price_change_pct": 0.125,
+            }
+        ]
+    )
+
+    display = humanize_frame(frame)
+
+    assert display.iloc[0]["price_change_pct"] == "12.5%"
+
+
 def test_humanize_frame_formats_metric_value_rows():
     frame = pd.DataFrame(
         [

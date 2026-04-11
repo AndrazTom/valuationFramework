@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import re
 from typing import Iterable
 
 from valuation.brk.service import fetch_brk_liquidity, fetch_brk_overview, fetch_brk_segments
@@ -15,6 +16,7 @@ from valuation.brk.tables import (
     build_key_facts_table,
     build_liquidity_bridge_table,
     build_liquidity_summary_table,
+    build_segment_period_sections,
     build_segment_report_summary_table,
     build_share_class_table,
     build_top_level_operating_segments_summary_table,
@@ -28,6 +30,7 @@ from valuation.data.normalize.tables import (
     snapshot_to_table,
 )
 from valuation.reports.tables import render_terminal_table, write_csv, write_markdown
+from valuation.securities.pricing import normalize_price_change_window
 
 
 def register_brk_parser(subparsers) -> None:
@@ -65,6 +68,13 @@ def register_brk_parser(subparsers) -> None:
         "--live-prices",
         action="store_true",
         help="Attempt to revalue holdings using current market prices where a ticker is known.",
+    )
+    holdings_parser.add_argument(
+        "--price-change-window",
+        "--price-change",
+        dest="price_change_window",
+        type=_price_change_window,
+        help="Add a price-change column using one window: 1D, 5D, 1M, 3M, YTD, 1Y, 5Y, ALL.",
     )
 
     liquidity_parser = brk_subparsers.add_parser(
@@ -124,6 +134,7 @@ def run_brk_command(args: argparse.Namespace) -> int:
             outdir=args.outdir,
             limit=args.limit,
             live_prices=args.live_prices,
+            price_change_window=args.price_change_window,
         )
     if args.brk_command == "liquidity":
         return run_brk_liquidity(
@@ -170,9 +181,16 @@ def run_brk_overview(outdir: str, filings_limit: int) -> int:
     return 0
 
 
-def run_brk_holdings(outdir: str, limit: int, live_prices: bool) -> int:
+def run_brk_holdings(
+    outdir: str,
+    limit: int,
+    live_prices: bool,
+    price_change_window: str | None,
+) -> int:
     """Build table outputs for Berkshire's latest 13F holdings."""
     bundle = fetch_latest_brk_13f()
+    if price_change_window is not None:
+        live_prices = True
     sections = [
         (
             "13F Summary",
@@ -191,7 +209,11 @@ def run_brk_holdings(outdir: str, limit: int, live_prices: bool) -> int:
             [
                 (
                     "Live Price Summary",
-                    build_13f_live_price_summary_table(bundle.holdings, reference),
+                    build_13f_live_price_summary_table(
+                        bundle.holdings,
+                        reference,
+                        price_change_window=price_change_window,
+                    ),
                 ),
                 (
                     "Top Holdings Live",
@@ -199,10 +221,16 @@ def run_brk_holdings(outdir: str, limit: int, live_prices: bool) -> int:
                         bundle.holdings,
                         reference,
                         limit=limit,
+                        price_change_window=price_change_window,
                     ),
                 ),
             ]
         )
+        if price_change_window is not None:
+            sections[-1] = (
+                f"Top Holdings Live ({price_change_window} Change)",
+                sections[-1][1],
+            )
     _emit_sections(sections, Path(outdir) / "BRK_13F")
     return 0
 
@@ -283,14 +311,18 @@ def run_brk_segments(
             "Segment Filings",
             build_segment_report_summary_table(bundle.filings),
         ),
-        (
-            "Top-Level Operating Segments",
-            build_top_level_operating_segments_summary_table(
-                bundle.filings,
-                period=period,
-            ),
-        ),
     ]
+    sections.extend(build_segment_period_sections(bundle.filings, period=period))
+    if len(bundle.filings) == 1 and len(sections) == 1:
+        sections.append(
+            (
+                "Top-Level Operating Segments Summary",
+                build_top_level_operating_segments_summary_table(
+                    bundle.filings,
+                    period=period,
+                ),
+            )
+        )
     _emit_sections(sections, Path(outdir) / "BRK_SEGMENTS")
     return 0
 
@@ -309,7 +341,7 @@ def _emit_sections(sections: Iterable[tuple[str, object]], output_dir: Path) -> 
 
 def _named_tables(sections: Iterable[tuple[str, object]]):
     for title, frame in sections:
-        slug = title.lower().replace(" ", "_")
+        slug = re.sub(r"[^a-z0-9]+", "_", title.lower()).strip("_")
         yield slug, frame
 
 
@@ -362,8 +394,15 @@ def _resolve_history_limit(
     start_quarter: int | None,
     end_quarter: int | None,
 ) -> int:
-    if limit is not None:
-        return limit
     if any(value is not None for value in (start_year, end_year, start_quarter, end_quarter)):
         return 99
+    if limit is not None:
+        return limit
     return 1
+
+
+def _price_change_window(value: str) -> str:
+    try:
+        return normalize_price_change_window(value) or ""
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc

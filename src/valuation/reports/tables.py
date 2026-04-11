@@ -27,6 +27,7 @@ DISPLAY_COLUMN_ALIASES = {
     "latest_price_date": "price date",
     "metric_count": "metrics",
     "period_count": "periods",
+    "price_change_pct": "price change",
     "report_date": "report date",
     "security_id": "security id",
     "identifier_kind": "id kind",
@@ -102,7 +103,7 @@ def _wrap_terminal_cell(value, *, column: str):
     if column_name in {"value", "segment"}:
         width = 30
     elif column_name in {"field", "metric"}:
-        width = 24
+        width = 30
     elif column_name in {"concept", "primary document", "description", "filing url", "reason", "website"}:
         width = 36
     elif column_name == "accession":

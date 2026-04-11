@@ -110,6 +110,32 @@ def test_build_top_level_operating_segments_table_uses_three_month_quarterly_dat
     assert summary.iloc[0]["goodwill_usd"] == 100 * MILLION
 
 
+def test_build_top_level_operating_segments_table_merges_same_segment_from_different_paths():
+    report_set = BrkSegmentReportSet(
+        filing_date="2025-12-31",
+        accession_number="0005",
+        earnings_detail=pd.DataFrame(
+            [
+                {"report": "earnings", "member_path": "BNSF", "member_name": "BNSF", "metric": "Revenues", "period_end": "2025-12-31", "value": 23 * MILLION},
+                {"report": "earnings", "member_path": "Operating Businesses | BNSF", "member_name": "BNSF", "metric": "Earnings before income taxes", "period_end": "2025-12-31", "value": 7 * MILLION},
+            ]
+        ),
+        reconciliation_detail=pd.DataFrame(),
+        additional_detail=pd.DataFrame(
+            [
+                {"report": "additional", "member_path": "Operating Businesses | BNSF", "member_name": "BNSF", "metric": "Identifiable assets at year-end", "period_end": "2025-12-31", "value": 100 * MILLION},
+            ]
+        ),
+    )
+
+    summary = build_top_level_operating_segments_table(report_set)
+
+    assert list(summary["segment"]) == ["BNSF"]
+    assert summary.iloc[0]["revenues_usd"] == 23 * MILLION
+    assert summary.iloc[0]["earnings_before_income_taxes_usd"] == 7 * MILLION
+    assert summary.iloc[0]["identifiable_assets_usd"] == 100 * MILLION
+
+
 def test_build_top_level_operating_segments_table_handles_missing_revenue_column():
     report_set = BrkSegmentReportSet(
         filing_date="2023-11-03",
@@ -148,3 +174,42 @@ def test_build_top_level_operating_segments_table_supports_older_simple_member_n
     assert set(summary["segment"]) == {"Pilot", "BHE"}
     assert summary[summary["segment"] == "Pilot"].iloc[0]["revenues_usd"] == 13 * MILLION
     assert summary[summary["segment"] == "BHE"].iloc[0]["earnings_before_income_taxes_usd"] == 2 * MILLION
+
+
+def test_build_top_level_operating_segments_table_merges_same_segment_across_report_paths():
+    report_set = BrkSegmentReportSet(
+        filing_date="2026-03-02",
+        accession_number="0005",
+        earnings_detail=pd.DataFrame(
+            [
+                {
+                    "report": "earnings",
+                    "member_path": 'Operating Businesses | Berkshire Hathaway Energy ("BHE")',
+                    "member_name": 'Berkshire Hathaway Energy ("BHE")',
+                    "metric": "Revenues",
+                    "duration_months": 12,
+                    "period_end": "2025-12-31",
+                    "value": 26 * MILLION,
+                },
+            ]
+        ),
+        reconciliation_detail=pd.DataFrame(),
+        additional_detail=pd.DataFrame(
+            [
+                {
+                    "report": "additional",
+                    "member_path": "BHE",
+                    "member_name": "BHE",
+                    "metric": "Capital expenditures",
+                    "period_end": "2025-12-31",
+                    "value": 10 * MILLION,
+                },
+            ]
+        ),
+    )
+
+    summary = build_top_level_operating_segments_table(report_set)
+
+    assert list(summary["segment"]) == ["BHE"]
+    assert summary.iloc[0]["revenues_usd"] == 26 * MILLION
+    assert summary.iloc[0]["capex_usd"] == 10 * MILLION

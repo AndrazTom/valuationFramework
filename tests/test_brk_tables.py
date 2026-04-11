@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from valuation.notation import B, M
 from valuation.brk.service import BrkLiquidityFiling, BrkSegmentFiling
@@ -6,6 +7,7 @@ from valuation.brk.segments import BrkSegmentReportSet
 from valuation.brk.tables import (
     build_13f_summary_table,
     build_13f_live_price_summary_table,
+    build_segment_period_sections,
     build_key_facts_table,
     build_liquidity_bridge_table,
     build_liquidity_summary_table,
@@ -23,9 +25,23 @@ class FakeYahooClient:
         return {
             "ticker": ticker,
             "last_price": {"AAPL": 200.0, "AXP": 300.0}[ticker],
+            "previous_close": {"AAPL": 180.0, "AXP": 270.0}[ticker],
             "latest_price_date": "2026-04-09",
             "source": "yfinance",
         }
+
+    def fetch_history(self, ticker, period="1mo", interval="1d"):
+        return pd.DataFrame(
+            {
+                "date": pd.to_datetime(
+                    ["2026-01-02", "2026-02-02", "2026-03-02", "2026-04-09"]
+                ),
+                "close": {
+                    "AAPL": [100.0, 120.0, 150.0, 200.0],
+                    "AXP": [200.0, 220.0, 260.0, 300.0],
+                }[ticker],
+            }
+        )
 
 
 def test_build_share_class_table_derives_implied_brk_a_price():
@@ -184,6 +200,35 @@ def test_build_top_holdings_live_table():
     assert list(frame["reported_value_usd"]) == [1000, 900]
 
 
+def test_build_top_holdings_live_table_adds_price_change_column():
+    holdings = pd.DataFrame(
+        [
+            {
+                "security_id": "cusip:037833100",
+                "issuer": "APPLE INC",
+                "class_title": "COM",
+                "cusip": "037833100",
+                "value_usd": 1000,
+                "shares_or_principal": 10,
+            }
+        ]
+    )
+    reference = pd.DataFrame(
+        [{"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"}]
+    )
+
+    frame = build_top_holdings_live_table(
+        holdings,
+        reference,
+        limit=1,
+        yahoo_client=FakeYahooClient(),
+        price_change_window="1M",
+    )
+
+    assert "price_change_pct" in frame.columns
+    assert frame.iloc[0]["price_change_pct"] == pytest.approx((200.0 / 150.0) - 1.0)
+
+
 def test_build_13f_live_price_summary_table():
     holdings = pd.DataFrame(
         [
@@ -204,6 +249,26 @@ def test_build_13f_live_price_summary_table():
     assert summary[summary["field"] == "positions_total"].iloc[0]["value"] == 2
     assert summary[summary["field"] == "positions_with_live_price"].iloc[0]["value"] == 1
     assert summary[summary["field"] == "market_value_live_resolved_usd"].iloc[0]["value"] == 2000.0
+
+
+def test_build_13f_live_price_summary_table_includes_price_change_window():
+    holdings = pd.DataFrame(
+        [
+            {"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 1000, "shares_or_principal": 10},
+        ]
+    )
+    reference = pd.DataFrame(
+        [{"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"}]
+    )
+
+    summary = build_13f_live_price_summary_table(
+        holdings,
+        reference,
+        yahoo_client=FakeYahooClient(),
+        price_change_window="1M",
+    )
+
+    assert summary[summary["field"] == "price_change_window"].iloc[0]["value"] == "1M"
 
 
 def test_build_liquidity_bridge_table():
@@ -277,3 +342,47 @@ def test_build_top_level_operating_segments_summary_table_history():
     assert summary.iloc[0]["filing_date"] == "2026-03-02"
     assert summary.iloc[0]["period_end"] == "2025-12-31"
     assert summary.iloc[0]["revenues_usd"] == 23 * M
+
+
+def test_build_segment_period_sections_returns_one_table_per_period():
+    filings = [
+        BrkSegmentFiling(
+            filing_date="2026-03-02",
+            accession_number="0001",
+            form="10-K",
+            reports=BrkSegmentReportSet(
+                filing_date="2026-03-02",
+                accession_number="0001",
+                earnings_detail=pd.DataFrame(
+                    [
+                        {"report": "earnings", "member_path": "Operating Businesses | BNSF", "member_name": "BNSF", "metric": "Revenues", "duration_months": 12, "period_end": "2025-12-31", "value": 23 * M},
+                    ]
+                ),
+                reconciliation_detail=pd.DataFrame(),
+                additional_detail=pd.DataFrame(),
+            ),
+        ),
+        BrkSegmentFiling(
+            filing_date="2025-03-01",
+            accession_number="0002",
+            form="10-K",
+            reports=BrkSegmentReportSet(
+                filing_date="2025-03-01",
+                accession_number="0002",
+                earnings_detail=pd.DataFrame(
+                    [
+                        {"report": "earnings", "member_path": "Operating Businesses | BNSF", "member_name": "BNSF", "metric": "Revenues", "duration_months": 12, "period_end": "2024-12-31", "value": 5 * M},
+                    ]
+                ),
+                reconciliation_detail=pd.DataFrame(),
+                additional_detail=pd.DataFrame(),
+            ),
+        ),
+    ]
+
+    sections = build_segment_period_sections(filings, period="annual")
+
+    assert [title for title, _ in sections] == [
+        "Top-Level Operating Segments FY 2025 (2026-03-02)",
+        "Top-Level Operating Segments FY 2024 (2025-03-01)",
+    ]
