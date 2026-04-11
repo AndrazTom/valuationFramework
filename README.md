@@ -222,6 +222,7 @@ Current Berkshire workflows include:
   - quarterly segment output prefers 3-month columns instead of mixing in 9-month YTD values
   - segment history is split into separate filing-period tables so multi-year output stays readable
   - current command is intentionally a top-level segment summary, not the full raw note disclosure
+  - older annual filings can legitimately leave some top-level fields blank because the reusable SEC report tables often only expose `Total revenues` plus the additional-disclosure metrics
 
 The intent on this branch is to use Berkshire as the hard valuation case while still inheriting the reusable generic infrastructure from `main`.
 

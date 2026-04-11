@@ -20,6 +20,7 @@ Current branch priority:
   - fixed Berkshire segment rows being split across alternate SEC member paths
   - changed multi-period Berkshire segment output to emit one table per filing period
   - added optional Berkshire holdings price-change windows on live-priced holdings output
+  - confirmed that some remaining blank cells in older annual Berkshire segment tables are real SEC report-table coverage gaps, not renderer bugs
 
 Long-term direction:
 
