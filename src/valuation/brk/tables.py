@@ -347,6 +347,13 @@ def build_13f_live_price_summary_table(
         {"field": "market_value_live_resolved_usd", "value": live_value},
         {"field": "latest_price_date", "value": latest_price_date},
     ]
+    if resolved_count == 0:
+        rows.append(
+            {
+                "field": "live_price_status",
+                "value": "No Yahoo prices resolved in current run",
+            }
+        )
     if price_change_window is not None:
         rows.append({"field": "price_change_window", "value": price_change_window})
     return pd.DataFrame(rows)
@@ -399,23 +406,29 @@ def build_holdings_vs_brk_price_change_table(
     if brk_change is not None and top_slice_weighted_change is not None:
         top_slice_spread = top_slice_weighted_change - brk_change
 
-    return pd.DataFrame(
-        [
-            {"field": "price_change_window", "value": price_change_window},
-            {"field": "brk_b_price_change_pct", "value": brk_change},
-            {"field": "resolved_holdings_weighted_change_pct", "value": holdings_weighted_change},
-            {"field": "holdings_minus_brk_b_change_pct", "value": change_spread},
-            {"field": "top_holdings_limit", "value": int(len(top_slice))},
-            {"field": "top_holdings_reported_value_usd", "value": top_slice_reported_value},
-            {"field": "top_holdings_weighted_change_pct", "value": top_slice_weighted_change},
-            {"field": "top_holdings_minus_brk_b_change_pct", "value": top_slice_spread},
-            {"field": "resolved_positions_count", "value": int(len(resolved))},
-            {"field": "resolved_positions_reported_value_usd", "value": resolved_reported_value},
-            {"field": "resolved_positions_live_value_usd", "value": resolved_live_value},
-            {"field": "brk_b_last_price", "value": brk_snapshot.get("last_price")},
-            {"field": "latest_price_date", "value": brk_snapshot.get("latest_price_date")},
-        ]
-    )
+    rows = [
+        {"field": "price_change_window", "value": price_change_window},
+        {"field": "brk_b_price_change_pct", "value": brk_change},
+        {"field": "resolved_holdings_weighted_change_pct", "value": holdings_weighted_change},
+        {"field": "holdings_minus_brk_b_change_pct", "value": change_spread},
+        {"field": "top_holdings_limit", "value": int(len(top_slice))},
+        {"field": "top_holdings_reported_value_usd", "value": top_slice_reported_value},
+        {"field": "top_holdings_weighted_change_pct", "value": top_slice_weighted_change},
+        {"field": "top_holdings_minus_brk_b_change_pct", "value": top_slice_spread},
+        {"field": "resolved_positions_count", "value": int(len(resolved))},
+        {"field": "resolved_positions_reported_value_usd", "value": resolved_reported_value},
+        {"field": "resolved_positions_live_value_usd", "value": resolved_live_value},
+        {"field": "brk_b_last_price", "value": brk_snapshot.get("last_price")},
+        {"field": "latest_price_date", "value": brk_snapshot.get("latest_price_date")},
+    ]
+    if brk_change is None and holdings_weighted_change is None:
+        rows.append(
+            {
+                "field": "comparison_status",
+                "value": "No BRK or holdings price-change data resolved in current run",
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def build_latest_liquidity_snapshot_table(bridge: pd.DataFrame) -> pd.DataFrame:
@@ -475,36 +488,48 @@ def build_public_equity_portfolio_summary_table(
         dates = [value for value in enriched["latest_price_date"].dropna().tolist() if value]
         if dates:
             latest_price_date = max(dates)
-    return pd.DataFrame(
-        [
-            {"field": "reported_13f_value_usd", "value": reported_total},
-            {"field": "live_resolved_13f_value_usd", "value": live_resolved},
-            {"field": "unresolved_13f_value_reported_usd", "value": unresolved_reported},
-            {"field": "blended_13f_value_usd", "value": blended_value},
+    rows = [
+        {"field": "reported_13f_value_usd", "value": reported_total},
+        {"field": "live_resolved_13f_value_usd", "value": live_resolved},
+        {"field": "unresolved_13f_value_reported_usd", "value": unresolved_reported},
+        {"field": "blended_13f_value_usd", "value": blended_value},
+        {
+            "field": "live_price_coverage_pct",
+            "value": (live_resolved / reported_total) if reported_total else None,
+        },
+        {"field": "positions_total", "value": int(len(enriched))},
+        {"field": "positions_live_priced", "value": int(resolved.sum())},
+        {"field": "positions_unresolved", "value": int((~resolved).sum())},
+        {"field": "latest_price_date", "value": latest_price_date},
+    ]
+    if int(resolved.sum()) == 0:
+        rows.append(
             {
-                "field": "live_price_coverage_pct",
-                "value": (live_resolved / reported_total) if reported_total else None,
-            },
-            {"field": "positions_total", "value": int(len(enriched))},
-            {"field": "positions_live_priced", "value": int(resolved.sum())},
-            {"field": "positions_unresolved", "value": int((~resolved).sum())},
-            {"field": "latest_price_date", "value": latest_price_date},
-        ]
-    )
+                "field": "live_price_status",
+                "value": "No Yahoo prices resolved in current run",
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def build_market_anchor_table(market_snapshot: dict) -> pd.DataFrame:
     """Return the market anchor for Berkshire valuation work."""
     market_cap = _market_cap_from_snapshot(market_snapshot)
-    return pd.DataFrame(
-        [
-            {"field": "primary_valuation_unit", "value": BRK_B_TICKER},
-            {"field": "last_price", "value": market_snapshot.get("last_price")},
-            {"field": "latest_price_date", "value": market_snapshot.get("latest_price_date")},
-            {"field": "shares_outstanding", "value": market_snapshot.get("shares")},
-            {"field": "market_cap_usd", "value": market_cap},
-        ]
-    )
+    rows = [
+        {"field": "primary_valuation_unit", "value": BRK_B_TICKER},
+        {"field": "last_price", "value": market_snapshot.get("last_price")},
+        {"field": "latest_price_date", "value": market_snapshot.get("latest_price_date")},
+        {"field": "shares_outstanding", "value": market_snapshot.get("shares")},
+        {"field": "market_cap_usd", "value": market_cap},
+    ]
+    if all(row["value"] in {None, ""} for row in rows[1:]):
+        rows.append(
+            {
+                "field": "market_snapshot_status",
+                "value": "No Yahoo market snapshot values resolved in current run",
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def build_brk_valuation_assumptions_table(*, period: str) -> pd.DataFrame:

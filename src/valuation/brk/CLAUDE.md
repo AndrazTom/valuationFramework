@@ -22,6 +22,7 @@ Current Berkshire stack:
 - optional live-price revaluation for resolved holdings
 - optional live price-change windows on holdings via `--price-change` / `--price-change-window`
 - BRK-vs-holdings price-change comparison when a change window is selected
+- live-price tables should explain when Yahoo resolved nothing in the current run instead of silently showing blank comparisons
 - liquidity history from SEC filing balance-sheet tables
 - top-level operating segment extraction from filing report tables
 - first Berkshire market-implied SOTP bridge

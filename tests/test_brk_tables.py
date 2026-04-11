@@ -22,6 +22,7 @@ from valuation.brk.tables import (
     build_liquidity_bridge_table,
     build_liquidity_summary_table,
     build_market_implied_sotp_bridge_table,
+    build_market_anchor_table,
     build_top_level_operating_segments_summary_table,
     build_share_class_table,
     build_top_holdings_live_table,
@@ -55,6 +56,14 @@ class FakeYahooClient:
                 }[ticker],
             }
         )
+
+
+class EmptyYahooClient:
+    def fetch_price_snapshot(self, ticker):
+        return {"ticker": ticker, "last_price": None, "latest_price_date": None, "source": "yfinance"}
+
+    def fetch_history(self, ticker, period="1mo", interval="1d"):
+        return pd.DataFrame(columns=["date", "close"])
 
 
 def test_build_share_class_table_derives_implied_brk_a_price():
@@ -395,8 +404,35 @@ def test_build_holdings_vs_brk_price_change_table():
 
     assert frame[frame["field"] == "price_change_window"].iloc[0]["value"] == "1M"
     assert frame[frame["field"] == "brk_b_price_change_pct"].iloc[0]["value"] == pytest.approx((500.0 / 470.0) - 1.0)
-    assert frame[frame["field"] == "top_holdings_limit"].iloc[0]["value"] == 1
-    assert frame[frame["field"] == "top_holdings_weighted_change_pct"].iloc[0]["value"] == pytest.approx((200.0 / 150.0) - 1.0)
+
+
+def test_build_holdings_vs_brk_price_change_table_reports_missing_status():
+    holdings = pd.DataFrame(
+        [
+            {
+                "security_id": "cusip:037833100",
+                "issuer": "APPLE INC",
+                "class_title": "COM",
+                "cusip": "037833100",
+                "value_usd": 1000,
+                "shares_or_principal": 10,
+            }
+        ]
+    )
+    reference = pd.DataFrame(
+        [{"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"}]
+    )
+
+    frame = build_holdings_vs_brk_price_change_table(
+        holdings,
+        reference,
+        price_change_window="1M",
+        yahoo_client=EmptyYahooClient(),
+    )
+
+    assert frame[frame["field"] == "comparison_status"].iloc[0]["value"] == "No BRK or holdings price-change data resolved in current run"
+    assert frame[frame["field"] == "top_holdings_limit"].iloc[0]["value"] == 0
+    assert pd.isna(frame[frame["field"] == "top_holdings_weighted_change_pct"].iloc[0]["value"])
 
 
 def test_build_segment_period_sections_returns_one_table_per_period():
@@ -521,6 +557,39 @@ def test_build_brk_valuation_context_table():
     assert context[context["field"] == "13f_live_coverage_ratio"].iloc[0]["value"] == 1.0
     assert context[context["field"] == "net_liquidity_total_usd"].iloc[0]["value"] == 340.0 * M
     assert context[context["field"] == "segment_period_end"].iloc[0]["value"] == "2025-12-31"
+
+
+def test_build_13f_live_price_summary_table_reports_missing_status():
+    holdings = pd.DataFrame(
+        [
+            {
+                "security_id": "cusip:037833100",
+                "issuer": "APPLE INC",
+                "class_title": "COM",
+                "cusip": "037833100",
+                "value_usd": 1000,
+                "shares_or_principal": 10,
+            }
+        ]
+    )
+    reference = pd.DataFrame(
+        [{"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"}]
+    )
+
+    summary = build_13f_live_price_summary_table(
+        holdings,
+        reference,
+        yahoo_client=EmptyYahooClient(),
+        price_change_window="1M",
+    )
+
+    assert summary[summary["field"] == "live_price_status"].iloc[0]["value"] == "No Yahoo prices resolved in current run"
+
+
+def test_build_market_anchor_table_reports_missing_snapshot_status():
+    anchor = build_market_anchor_table({})
+
+    assert anchor[anchor["field"] == "market_snapshot_status"].iloc[0]["value"] == "No Yahoo market snapshot values resolved in current run"
 
 
 def test_build_market_implied_sotp_bridge_table():
