@@ -6,6 +6,7 @@ Rules:
 
 - run tests against the repo source tree with `PYTHONPATH=src pytest -q`
 - use `. .venv/bin/activate` first in this repo so runtime deps like `tabulate` are available
+- env-loading coverage should verify both local `.env` support and exported-env precedence
 - prefer targeted unit tests for normalization and table contracts before adding broader CLI coverage
 - when adding a new `company` section, test both file outputs and JSON bundle keys
 - CLI tests should stay offline and use monkeypatches or fixtures rather than live providers
