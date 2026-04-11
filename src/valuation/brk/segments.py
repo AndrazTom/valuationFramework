@@ -19,7 +19,9 @@ SEGMENT_REPORT_LABELS = {
 
 TOP_LEVEL_OPERATING_METRICS = (
     "Revenues",
+    "Total revenues",
     "Earnings before income taxes",
+    "Earnings (Loss) Before Income Taxes of Operating Businesses",
     "Interest expense",
     "Capital expenditures",
     "Depreciation and amortization",
@@ -29,9 +31,21 @@ TOP_LEVEL_OPERATING_METRICS = (
     "Assets",
 )
 
+TOP_LEVEL_OPERATING_MEMBER_NAMES = {
+    "BNSF",
+    "BHE",
+    "Manufacturing",
+    "Service and Retailing",
+    "Pilot",
+    "McLane",
+    "Insurance Group",
+}
+
 FLOW_METRIC_RENAMES = {
     "Revenues": "revenues_usd",
+    "Total revenues": "revenues_usd",
     "Earnings before income taxes": "earnings_before_income_taxes_usd",
+    "Earnings (Loss) Before Income Taxes of Operating Businesses": "earnings_before_income_taxes_usd",
     "Interest expense": "interest_expense_usd",
     "Capital expenditures": "capex_usd",
     "Depreciation and amortization": "depreciation_and_amortization_usd",
@@ -47,7 +61,13 @@ STOCK_METRIC_RENAMES = {
 SEGMENT_LABEL_ALIASES = {
     "Business Segments": "Operating Businesses",
     'Berkshire Hathaway Energy ("BHE")': "BHE",
+    "Berkshire Hathaway Energy": "BHE",
     "Manufacturing Businesses": "Manufacturing",
+    'Pilot Travel Centers ("PTC")': "Pilot",
+    'Pilot Travel Centers ("Pilot")': "Pilot",
+    "PTC": "Pilot",
+    "McLane Company": "McLane",
+    "Service and Retailing Businesses": "Service and Retailing",
 }
 
 
@@ -175,9 +195,12 @@ def build_top_level_operating_segments_table(
             **STOCK_METRIC_RENAMES,
         }
     )
+    combined["member_name"] = combined["member_name"].map(
+        lambda value: SEGMENT_LABEL_ALIASES.get(value, value)
+    )
     combined = combined[combined["canonical_metric"].notna()]
     combined = combined.drop_duplicates(
-        subset=["member_path", "member_name", "canonical_metric", "period_end"],
+        subset=["member_name", "canonical_metric", "period_end"],
         keep="first",
     )
     pivoted = (
@@ -196,7 +219,9 @@ def build_top_level_operating_segments_table(
     result = result.rename(columns={"member_name": "segment"})
     result.insert(0, "period_type", period)
     result.insert(0, "period_end", period_end)
-    return result.sort_values(by="revenues_usd", ascending=False, na_position="last").reset_index(drop=True)
+    sort_column = "revenues_usd" if "revenues_usd" in result.columns else "segment"
+    ascending = sort_column != "revenues_usd"
+    return result.sort_values(by=sort_column, ascending=ascending, na_position="last").reset_index(drop=True)
 
 
 def _select_top_level_period_rows(
@@ -237,6 +262,8 @@ def _is_top_level_operating_path(path: object) -> bool:
     if path is None or pd.isna(path):
         return False
     text = str(path)
+    if text in TOP_LEVEL_OPERATING_MEMBER_NAMES:
+        return True
     if not text.startswith("Operating Businesses | "):
         return False
     return text.count(" | ") == 1

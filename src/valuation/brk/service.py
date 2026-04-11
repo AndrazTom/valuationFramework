@@ -17,6 +17,8 @@ BRK_B_TICKER = "BRK-B"
 BRK_A_TICKER = "BRK-A"
 BRK_A_TO_B_CONVERSION = 1500
 BALANCE_SHEET_REPORT_SHORT_NAME = "Consolidated Balance Sheets"
+SEGMENT_REVENUES_REPORT_SHORT_NAME = "Business segment data - Revenues (Detail)"
+SEGMENT_PRETAX_REPORT_SHORT_NAME = "Business segment data - Earnings before income taxes (Detail)"
 
 
 @dataclass
@@ -102,7 +104,11 @@ def fetch_brk_liquidity(
     sec_client: Optional[SecClient] = None,
     *,
     period: str = "annual",
-    limit: int = 1,
+    limit: int | None = 1,
+    start_year: int | None = None,
+    end_year: int | None = None,
+    start_quarter: int | None = None,
+    end_quarter: int | None = None,
 ) -> BrkLiquidityBundle:
     """Fetch Berkshire balance-sheet reports for liquidity analysis."""
     sec = sec_client or SecClient()
@@ -115,8 +121,20 @@ def fetch_brk_liquidity(
     filings = find_recent_filings(
         company_bundle["submissions"],
         forms=_forms_for_period(period),
-        limit=limit,
+        limit=None,
     )
+    filings = _filter_filings_by_period_range(
+        filings,
+        period=period,
+        start_year=start_year,
+        end_year=end_year,
+        start_quarter=start_quarter,
+        end_quarter=end_quarter,
+    )
+    if limit is not None:
+        filings = filings[:limit]
+    if not filings:
+        raise LookupError("No Berkshire filings found for the selected period range")
     liquidity_filings = []
     for filing in filings:
         reports = sec.fetch_filing_summary_reports(
@@ -175,7 +193,11 @@ def fetch_brk_segments(
     sec_client: Optional[SecClient] = None,
     *,
     period: str = "annual",
-    limit: int = 1,
+    limit: int | None = 1,
+    start_year: int | None = None,
+    end_year: int | None = None,
+    start_quarter: int | None = None,
+    end_quarter: int | None = None,
 ) -> BrkSegmentsBundle:
     """Fetch Berkshire segment-report tables across annual or quarterly filings."""
     sec = sec_client or SecClient()
@@ -187,8 +209,20 @@ def fetch_brk_segments(
     filings = find_recent_filings(
         submissions,
         forms=_forms_for_period(period),
-        limit=limit,
+        limit=None,
     )
+    filings = _filter_filings_by_period_range(
+        filings,
+        period=period,
+        start_year=start_year,
+        end_year=end_year,
+        start_quarter=start_quarter,
+        end_quarter=end_quarter,
+    )
+    if limit is not None:
+        filings = filings[:limit]
+    if not filings:
+        raise LookupError("No Berkshire filings found for the selected period range")
     segment_filings = []
     for filing in filings:
         reports = sec.fetch_filing_summary_reports(company.cik, filing["accession_number"])
@@ -206,9 +240,20 @@ def fetch_brk_segments(
         report_set = BrkSegmentReportSet(
             filing_date=filing["filing_date"],
             accession_number=filing["accession_number"],
-            earnings_detail=load_report(SEGMENT_REPORT_LABELS["earnings"]),
-            reconciliation_detail=load_report(SEGMENT_REPORT_LABELS["reconciliations"]),
-            additional_detail=load_report(SEGMENT_REPORT_LABELS["additional"]),
+            earnings_detail=_load_segment_earnings_detail(
+                report_map,
+                load_report,
+            ),
+            reconciliation_detail=_load_optional_segment_report(
+                report_map,
+                load_report,
+                SEGMENT_REPORT_LABELS["reconciliations"],
+            ),
+            additional_detail=_load_optional_segment_report(
+                report_map,
+                load_report,
+                SEGMENT_REPORT_LABELS["additional"],
+            ),
         )
         segment_filings.append(
             BrkSegmentFiling(
@@ -227,7 +272,7 @@ def fetch_brk_segments(
 def find_recent_filings(
     submissions: Mapping[str, Any],
     forms: tuple[str, ...],
-    limit: int = 1,
+    limit: int | None = 1,
 ) -> list[dict[str, str]]:
     """Return recent SEC filing rows filtered by form type."""
     recent = submissions.get("filings", {}).get("recent", {})
@@ -238,12 +283,13 @@ def find_recent_filings(
             matches.append(
                 {
                     "filing_date": recent["filingDate"][index],
+                    "report_date": recent.get("reportDate", [None] * len(form_rows))[index],
                     "accession_number": recent["accessionNumber"][index],
                     "form": form,
                     "primary_document": recent.get("primaryDocument", [None] * len(form_rows))[index],
                 }
             )
-            if len(matches) >= limit:
+            if limit is not None and len(matches) >= limit:
                 break
     if not matches:
         raise LookupError(f"No filing found for forms: {forms}")
@@ -291,3 +337,90 @@ def _find_report(reports: list, short_name: str):
         if report.short_name == short_name:
             return report
     raise LookupError(f"Could not find filing report: {short_name}")
+
+
+def _load_segment_earnings_detail(report_map, load_report) -> pd.DataFrame:
+    if SEGMENT_REPORT_LABELS["earnings"] in report_map:
+        return load_report(SEGMENT_REPORT_LABELS["earnings"])
+    split_tables = []
+    for short_name in (
+        SEGMENT_REVENUES_REPORT_SHORT_NAME,
+        SEGMENT_PRETAX_REPORT_SHORT_NAME,
+    ):
+        if short_name in report_map:
+            split_tables.append(load_report(short_name))
+    if split_tables:
+        return pd.concat(split_tables, ignore_index=True)
+    raise LookupError(f"Could not find filing report: {SEGMENT_REPORT_LABELS['earnings']}")
+
+
+def _load_optional_segment_report(report_map, load_report, short_name: str) -> pd.DataFrame:
+    if short_name not in report_map:
+        return pd.DataFrame()
+    return load_report(short_name)
+
+
+def _filter_filings_by_period_range(
+    filings: list[dict[str, str]],
+    *,
+    period: str,
+    start_year: int | None,
+    end_year: int | None,
+    start_quarter: int | None,
+    end_quarter: int | None,
+) -> list[dict[str, str]]:
+    if not any(
+        value is not None
+        for value in (start_year, end_year, start_quarter, end_quarter)
+    ):
+        return filings
+    filtered = []
+    for filing in filings:
+        period_key = _filing_period_key(filing, period=period)
+        if period_key is None:
+            continue
+        if start_year is not None and period_key < _start_period_key(
+            period=period,
+            year=start_year,
+            quarter=start_quarter,
+        ):
+            continue
+        if end_year is not None and period_key > _end_period_key(
+            period=period,
+            year=end_year,
+            quarter=end_quarter,
+        ):
+            continue
+        filtered.append(filing)
+    return filtered
+
+
+def _filing_period_key(filing: Mapping[str, str], *, period: str) -> tuple[int, int] | None:
+    report_date = filing.get("report_date") or filing.get("filing_date")
+    if not report_date:
+        return None
+    try:
+        year_text, month_text, day_text = report_date.split("-")
+        year = int(year_text)
+        month = int(month_text)
+        day = int(day_text)
+    except (ValueError, AttributeError):
+        return None
+    if period == "annual":
+        return (year, 0)
+    quarter = ((month - 1) // 3) + 1
+    if month == 12 and day == 31 and filing.get("form") == "10-K":
+        quarter = 4
+    return (year, quarter)
+
+
+def _start_period_key(*, period: str, year: int, quarter: int | None) -> tuple[int, int]:
+    if period == "annual":
+        return (year, 0)
+    return (year, quarter or 1)
+
+
+def _end_period_key(*, period: str, year: int, quarter: int | None) -> tuple[int, int]:
+    if period == "annual":
+        return (year, 0)
+    return (year, quarter or 4)

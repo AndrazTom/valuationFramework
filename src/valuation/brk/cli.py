@@ -81,9 +81,13 @@ def register_brk_parser(subparsers) -> None:
     liquidity_parser.add_argument(
         "--limit",
         type=_non_negative_int,
-        default=1,
+        default=None,
         help="Number of filings to include.",
     )
+    liquidity_parser.add_argument("--start-year", type=int)
+    liquidity_parser.add_argument("--end-year", type=int)
+    liquidity_parser.add_argument("--start-quarter", type=_quarter_int)
+    liquidity_parser.add_argument("--end-quarter", type=_quarter_int)
 
     segments_parser = brk_subparsers.add_parser(
         "segments",
@@ -99,9 +103,13 @@ def register_brk_parser(subparsers) -> None:
     segments_parser.add_argument(
         "--limit",
         type=_non_negative_int,
-        default=1,
+        default=None,
         help="Number of filings to include.",
     )
+    segments_parser.add_argument("--start-year", type=int)
+    segments_parser.add_argument("--end-year", type=int)
+    segments_parser.add_argument("--start-quarter", type=_quarter_int)
+    segments_parser.add_argument("--end-quarter", type=_quarter_int)
 
 
 def run_brk_command(args: argparse.Namespace) -> int:
@@ -122,12 +130,20 @@ def run_brk_command(args: argparse.Namespace) -> int:
             outdir=args.outdir,
             period=args.period,
             limit=args.limit,
+            start_year=args.start_year,
+            end_year=args.end_year,
+            start_quarter=args.start_quarter,
+            end_quarter=args.end_quarter,
         )
     if args.brk_command == "segments":
         return run_brk_segments(
             outdir=args.outdir,
             period=args.period,
             limit=args.limit,
+            start_year=args.start_year,
+            end_year=args.end_year,
+            start_quarter=args.start_quarter,
+            end_quarter=args.end_quarter,
         )
     raise ValueError(f"Unknown Berkshire command: {args.brk_command}")
 
@@ -191,9 +207,37 @@ def run_brk_holdings(outdir: str, limit: int, live_prices: bool) -> int:
     return 0
 
 
-def run_brk_liquidity(outdir: str, period: str, limit: int) -> int:
+def run_brk_liquidity(
+    outdir: str,
+    period: str,
+    limit: int | None,
+    start_year: int | None,
+    end_year: int | None,
+    start_quarter: int | None,
+    end_quarter: int | None,
+) -> int:
     """Build Berkshire liquidity tables from filing balance sheets."""
-    bundle = fetch_brk_liquidity(period=period, limit=limit)
+    _validate_period_range(
+        period=period,
+        start_year=start_year,
+        end_year=end_year,
+        start_quarter=start_quarter,
+        end_quarter=end_quarter,
+    )
+    bundle = fetch_brk_liquidity(
+        period=period,
+        limit=_resolve_history_limit(
+            limit=limit,
+            start_year=start_year,
+            end_year=end_year,
+            start_quarter=start_quarter,
+            end_quarter=end_quarter,
+        ),
+        start_year=start_year,
+        end_year=end_year,
+        start_quarter=start_quarter,
+        end_quarter=end_quarter,
+    )
     bridge = build_liquidity_bridge_table(bundle.filings)
     sections = [
         ("Liquidity History", build_liquidity_summary_table(bridge)),
@@ -203,9 +247,37 @@ def run_brk_liquidity(outdir: str, period: str, limit: int) -> int:
     return 0
 
 
-def run_brk_segments(outdir: str, period: str, limit: int) -> int:
+def run_brk_segments(
+    outdir: str,
+    period: str,
+    limit: int | None,
+    start_year: int | None,
+    end_year: int | None,
+    start_quarter: int | None,
+    end_quarter: int | None,
+) -> int:
     """Build Berkshire operating-segment tables from selected filings."""
-    bundle = fetch_brk_segments(period=period, limit=limit)
+    _validate_period_range(
+        period=period,
+        start_year=start_year,
+        end_year=end_year,
+        start_quarter=start_quarter,
+        end_quarter=end_quarter,
+    )
+    bundle = fetch_brk_segments(
+        period=period,
+        limit=_resolve_history_limit(
+            limit=limit,
+            start_year=start_year,
+            end_year=end_year,
+            start_quarter=start_quarter,
+            end_quarter=end_quarter,
+        ),
+        start_year=start_year,
+        end_year=end_year,
+        start_quarter=start_quarter,
+        end_quarter=end_quarter,
+    )
     sections = [
         (
             "Segment Filings",
@@ -246,3 +318,52 @@ def _non_negative_int(value: str) -> int:
     if parsed < 0:
         raise argparse.ArgumentTypeError("value must be non-negative")
     return parsed
+
+
+def _quarter_int(value: str) -> int:
+    parsed = int(value)
+    if parsed not in {1, 2, 3, 4}:
+        raise argparse.ArgumentTypeError("quarter must be one of 1, 2, 3, 4")
+    return parsed
+
+
+def _validate_period_range(
+    *,
+    period: str,
+    start_year: int | None,
+    end_year: int | None,
+    start_quarter: int | None,
+    end_quarter: int | None,
+) -> None:
+    if period != "quarterly" and (start_quarter is not None or end_quarter is not None):
+        raise ValueError("quarter bounds are only valid when --period quarterly is used")
+    if (start_quarter is not None and start_year is None) or (
+        end_quarter is not None and end_year is None
+    ):
+        raise ValueError("quarter bounds require matching year bounds")
+    if start_year is not None and end_year is not None:
+        if start_year > end_year:
+            raise ValueError("start year must be less than or equal to end year")
+        if (
+            period == "quarterly"
+            and start_year == end_year
+            and start_quarter is not None
+            and end_quarter is not None
+            and start_quarter > end_quarter
+        ):
+            raise ValueError("start quarter must be less than or equal to end quarter")
+
+
+def _resolve_history_limit(
+    *,
+    limit: int | None,
+    start_year: int | None,
+    end_year: int | None,
+    start_quarter: int | None,
+    end_quarter: int | None,
+) -> int:
+    if limit is not None:
+        return limit
+    if any(value is not None for value in (start_year, end_year, start_quarter, end_quarter)):
+        return 99
+    return 1

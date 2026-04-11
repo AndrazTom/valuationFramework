@@ -394,9 +394,10 @@ def _extract_liquidity_values(frame: pd.DataFrame) -> tuple[str | None, dict[str
     if frame.empty:
         return None, {}
     labels = frame.iloc[:, 0].astype(str).str.strip()
-    current_column = _latest_date_column(frame.columns)
-    if current_column is None:
+    current_column_index = _latest_date_column_index(frame.columns)
+    if current_column_index is None:
         return None, {}
+    current_column = frame.columns[current_column_index]
     period_end = _parse_report_date(str(current_column))
     if period_end is None:
         return None, {}
@@ -405,19 +406,19 @@ def _extract_liquidity_values(frame: pd.DataFrame) -> tuple[str | None, dict[str
         matched = frame[labels == label]
         if matched.empty:
             continue
-        parsed_value = _parse_balance_sheet_value(matched.iloc[0][current_column])
+        parsed_value = _parse_balance_sheet_value(matched.iloc[0, current_column_index])
         if parsed_value is None:
             continue
         values[metric] = parsed_value
     return period_end, values
 
 
-def _latest_date_column(columns) -> object | None:
+def _latest_date_column_index(columns) -> int | None:
     dated_columns = []
-    for column in columns:
+    for index, column in enumerate(columns):
         parsed = _parse_report_date(str(column))
         if parsed is not None:
-            dated_columns.append((parsed, column))
+            dated_columns.append((parsed, index))
     if not dated_columns:
         return None
     return max(dated_columns, key=lambda item: item[0])[1]

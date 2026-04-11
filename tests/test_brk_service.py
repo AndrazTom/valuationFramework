@@ -26,6 +26,7 @@ class FakeSecClient:
                     "recent": {
                         "form": ["10-K", "10-Q", "13F-HR"],
                         "filingDate": ["2026-03-02", "2025-11-03", "2026-02-14"],
+                        "reportDate": ["2025-12-31", "2025-09-30", "2025-12-31"],
                         "accessionNumber": ["0001", "0003", "0002"],
                         "primaryDocument": ["brka.htm", "brka-q3.htm", "13f.htm"],
                     }
@@ -166,6 +167,7 @@ def test_find_recent_filings_finds_first_matching_form():
             "recent": {
                 "form": ["8-K", "10-K", "10-Q"],
                 "filingDate": ["2026-01-01", "2026-02-14", "2026-02-15"],
+                "reportDate": ["2025-12-15", "2025-12-31", "2025-09-30"],
                 "accessionNumber": ["0001", "0002", "0003"],
                 "primaryDocument": ["a.htm", "b.htm", "c.htm"],
             }
@@ -175,7 +177,23 @@ def test_find_recent_filings_finds_first_matching_form():
     metadata = find_recent_filings(submissions, forms=("10-K",), limit=1)
 
     assert metadata[0]["filing_date"] == "2026-02-14"
+    assert metadata[0]["report_date"] == "2025-12-31"
     assert metadata[0]["accession_number"] == "0002"
+
+
+def test_fetch_brk_liquidity_filters_by_report_date_range():
+    bundle = fetch_brk_liquidity(
+        sec_client=FakeSecClient(),
+        period="quarterly",
+        limit=99,
+        start_year=2025,
+        start_quarter=3,
+        end_year=2025,
+        end_quarter=3,
+    )
+
+    assert len(bundle.filings) == 1
+    assert bundle.filings[0].accession_number == "0003"
 
 
 def test_fetch_brk_segments_assembles_bundle():

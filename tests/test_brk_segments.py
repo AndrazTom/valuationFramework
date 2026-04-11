@@ -108,3 +108,43 @@ def test_build_top_level_operating_segments_table_uses_three_month_quarterly_dat
     assert summary.iloc[0]["revenues_usd"] == 20 * MILLION
     assert summary.iloc[0]["capex_usd"] == 2 * MILLION
     assert summary.iloc[0]["goodwill_usd"] == 100 * MILLION
+
+
+def test_build_top_level_operating_segments_table_handles_missing_revenue_column():
+    report_set = BrkSegmentReportSet(
+        filing_date="2023-11-03",
+        accession_number="0003",
+        earnings_detail=pd.DataFrame(
+            [
+                {"report": "pretax", "member_path": "Operating Businesses | BNSF", "member_name": "BNSF", "metric": "Earnings before income taxes", "duration_months": 3, "period_end": "2023-09-30", "value": 5 * MILLION},
+            ]
+        ),
+        reconciliation_detail=pd.DataFrame(),
+        additional_detail=pd.DataFrame(),
+    )
+
+    summary = build_top_level_operating_segments_table(report_set, period="quarterly")
+
+    assert list(summary["segment"]) == ["BNSF"]
+    assert summary.iloc[0]["earnings_before_income_taxes_usd"] == 5 * MILLION
+
+
+def test_build_top_level_operating_segments_table_supports_older_simple_member_names():
+    report_set = BrkSegmentReportSet(
+        filing_date="2023-11-06",
+        accession_number="0004",
+        earnings_detail=pd.DataFrame(
+            [
+                {"report": "revenues", "member_path": "Pilot", "member_name": "Pilot", "metric": "Total revenues", "duration_months": 3, "period_end": "2023-09-30", "value": 13 * MILLION},
+                {"report": "pretax", "member_path": "BHE", "member_name": "BHE", "metric": "Earnings (Loss) Before Income Taxes of Operating Businesses", "duration_months": 3, "period_end": "2023-09-30", "value": 2 * MILLION},
+            ]
+        ),
+        reconciliation_detail=pd.DataFrame(),
+        additional_detail=pd.DataFrame(),
+    )
+
+    summary = build_top_level_operating_segments_table(report_set, period="quarterly")
+
+    assert set(summary["segment"]) == {"Pilot", "BHE"}
+    assert summary[summary["segment"] == "Pilot"].iloc[0]["revenues_usd"] == 13 * MILLION
+    assert summary[summary["segment"] == "BHE"].iloc[0]["earnings_before_income_taxes_usd"] == 2 * MILLION

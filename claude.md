@@ -16,6 +16,7 @@ Current branch priority:
   - moved Berkshire liquidity from sparse companyfacts to filing balance-sheet tables
   - made Berkshire segments work again without relying on `lxml`
   - added annual/quarterly history controls to Berkshire liquidity and segment commands
+  - added explicit Berkshire start/end period filters, with range filters widening the default history limit
 
 Long-term direction:
 
@@ -188,6 +189,8 @@ As of 2026-04-09, `main` should contain or move toward:
 - `./vf brk liquidity --period quarterly --limit 4`
 - `./vf brk segments --period annual --limit 4`
 - `./vf brk segments --period quarterly --limit 4`
+- `./vf brk liquidity --period quarterly --start-year 2019 --start-quarter 1 --end-year 2023 --end-quarter 3`
+- `./vf brk segments --period quarterly --start-year 2019 --start-quarter 1 --end-year 2023 --end-quarter 3`
 
 ## Next Main Priorities
 
