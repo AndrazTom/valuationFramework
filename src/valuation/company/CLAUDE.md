@@ -68,3 +68,13 @@ Statement rules:
 - diluted EPS / diluted shares should prefer direct-quarter values
 - helper heuristics are acceptable only when they are narrow and defensible
 - Yahoo statement handling should stay explicit and shallow; do not build complex inference layers on vendor-standardized rows
+- Yahoo Europe hardening notes from `fix/european-yahoo-statements`:
+  - several European issuers have real Yahoo quarterly gaps; do not "fix" those with synthetic quarter inference in the Yahoo path
+  - bank/insurance statement shapes differ materially from generic industrials; missing `gross_profit`, `current_assets`, or `current_liabilities` can be real
+  - avoid semantic drift in label fallbacks:
+    - do not map `Cash Cash Equivalents And Short Term Investments` to `short_term_investments`
+    - do not map `Total Debt` to `long_term_debt`
+  - after Yahoo-focused fixes, run targeted unit tests plus live README/basic-flow verification before calling the branch merge-ready
+- Berkshire alias note:
+  - plain `BRK` may resolve from Yahoo search to `BRK-B`
+  - when that happens, retry SEC lookup on the resolved Yahoo symbol so `company` and `statements` stay on the SEC-backed path instead of degrading to Yahoo fallback tables

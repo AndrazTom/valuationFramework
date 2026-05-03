@@ -11,7 +11,7 @@ Current branch priority:
 - `main` should be useful on its own for generic company inspection
 - `brk` is the Berkshire-specific proving ground
 - temporary hardening branches should be merged back quickly, then deleted
-- current hardening branch `feature/overview-provenance` is focused on strengthening overview provenance and completeness before adding more backend surface
+- current hardening branch `fix/european-yahoo-statements` is focused on Yahoo-backed European statement correctness
 
 Long-term direction:
 
@@ -29,6 +29,7 @@ Long-term direction:
 - coding agents should also update relevant subtree `CLAUDE.md` files regularly when module-local contracts or workflow expectations change
 - create a new subtree `CLAUDE.md` when a module has enough local context that future chats would otherwise have to rediscover it
 - add subtree `CLAUDE.md` files only when module-specific context is genuinely useful
+- after implementation work is complete, a separate Codex/Claude review pass should inspect the patch, run tests, and verify the basic README-listed workflows before the branch is considered ready to merge
 
 ## Working Notes
 
@@ -184,6 +185,17 @@ As of 2026-04-09, `main` should contain or move toward:
 - for Europe, prefer:
   - Yahoo fallback for broad coverage
   - then exchange / OAM / issuer-report adapters only where Yahoo coverage is missing or misleading
+- live sweep note for `fix/european-yahoo-statements`:
+  - broad annual Yahoo statement coverage across large-cap European industrial names is mostly healthy
+  - some issuers have genuine Yahoo quarterly gaps, especially quarterly income/cashflow for several UK/Swiss/French names and quarterly cashflow for some banks/insurers
+  - banks and insurers often lack generic rows like `gross_profit`, `current_assets`, and `current_liabilities`; treat that as sector-shape reality, not automatically as a mapper bug
+  - two Yahoo mapping correctness issues were confirmed from live data:
+    - `short_term_investments` must not use `Cash Cash Equivalents And Short Term Investments`, because that double-counts cash
+    - `long_term_debt` must not fall back to `Total Debt`, because that can include current debt and overstate the non-current line
+  - Berkshire ticker-alias note from 2026-05-03:
+    - `BRK` can resolve through Yahoo to `BRK-B`
+    - ticker resolution must still retry SEC lookup on the resolved Yahoo symbol so statement commands stay on the SEC-backed path
+    - as of 2026-05-03, Berkshire's SEC submissions feed did not yet show a Q1 2026 `10-Q`; do not treat the absence of a `2026 Q1` statement on that date as a statement-builder bug
 
 ## Resume Plan
 

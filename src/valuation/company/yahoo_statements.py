@@ -23,11 +23,20 @@ YAHOO_STATEMENT_LABELS = {
     },
     "balance": {
         "cash_and_equivalents": ("Cash And Cash Equivalents",),
-        "short_term_investments": ("Cash Cash Equivalents And Short Term Investments", "Available For Sale Securities"),
+        "short_term_investments": (
+            "Other Short Term Investments",
+            "Short Term Investments",
+            "Marketable Securities",
+            "Available For Sale Securities",
+        ),
         "current_assets": ("Current Assets",),
         "total_assets": ("Total Assets",),
         "current_liabilities": ("Current Liabilities",),
-        "long_term_debt": ("Long Term Debt", "Total Debt"),
+        "long_term_debt": (
+            "Long Term Debt And Capital Lease Obligation",
+            "Long Term Debt",
+            "Long Term Capital Lease Obligation",
+        ),
         "total_liabilities": ("Total Liabilities Net Minority Interest", "Total Liabilities"),
         "stockholders_equity": ("Stockholders Equity", "Total Equity Gross Minority Interest"),
     },
