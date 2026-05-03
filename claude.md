@@ -6,6 +6,14 @@ AI-only repo contract.
 
 Build a practical stock-financials and valuation backbone.
 
+Project posture:
+
+- this is a serious personal investing project first
+- optimize first for your own research edge, workflow quality, and trust in the numbers
+- treat commercial use as optional future upside, not the present objective
+- do not aim to become a generic broad-market terminal competing head-on with Koyfin, TIKR, Fiscal.ai, or BamSEC
+- if the project becomes commercial later, the likely path is through a narrow wedge, specialized workflow, premium research, or an agent/API layer rather than a mass-market terminal
+
 Current branch priority:
 
 - `main` should be useful on its own for generic company inspection
@@ -19,6 +27,7 @@ Long-term direction:
 - more emphasis on statements, balance sheets, and cash flows
 - free-first where practical
 - CLI first, thin API/UI later
+- keep it personal-first until repeated real use proves a sharper product wedge
 
 ## Documentation Rules
 
@@ -196,6 +205,15 @@ As of 2026-04-09, `main` should contain or move toward:
     - `BRK` can resolve through Yahoo to `BRK-B`
     - ticker resolution must still retry SEC lookup on the resolved Yahoo symbol so statement commands stay on the SEC-backed path
     - as of 2026-05-03, Berkshire's SEC submissions feed did not yet show a Q1 2026 `10-Q`; do not treat the absence of a `2026 Q1` statement on that date as a statement-builder bug
+- product strategy note:
+  - default assumption is personal-project utility, not startup theater
+  - the right near-term test is whether the code improves your investing decisions, speed, and confidence
+  - postpone broad commercialization until there is a clear differentiated wedge proven by real repeated use
+  - likely future monetization paths, if they become justified:
+    - niche research workflow
+    - specialized holding-company / SOTP tooling
+    - filing-audit and provenance tooling
+    - agent-ready financial research API
 
 ## Resume Plan
 
