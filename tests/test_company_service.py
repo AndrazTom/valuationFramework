@@ -47,6 +47,17 @@ class FakeSecClient:
 
 class FakeYahooClient:
     def search_quotes(self, query, max_results=10):
+        if query == "BRK":
+            return [
+                YahooSearchQuote(
+                    symbol="BRK-B",
+                    exchange="NYQ",
+                    exchange_display="NYSE",
+                    short_name="Berkshire Hathaway",
+                    long_name="Berkshire Hathaway Inc.",
+                    quote_type="EQUITY",
+                )
+            ]
         if query == "US0846707026":
             return [
                 YahooSearchQuote(
@@ -204,6 +215,31 @@ def test_fetch_company_facts_non_us_uses_yahoo_source():
 
     assert bundle.statement_source == "yahoo"
     assert bundle.company_facts is None
+
+
+def test_resolve_alias_ticker_uses_sec_match_from_yahoo_quote():
+    resolution = resolve_company_identifier(
+        "BRK",
+        identifier_kind="ticker",
+        sec_client=FakeSecClient(),
+        yahoo_client=FakeYahooClient(),
+    )
+
+    assert resolution.ticker == "BRK-B"
+    assert resolution.sec_company is not None
+    assert resolution.security_id == "cik:0001067983"
+
+
+def test_fetch_company_facts_alias_ticker_prefers_sec_source():
+    bundle = fetch_company_facts(
+        "BRK",
+        identifier_kind="ticker",
+        sec_client=FakeSecClient(),
+        yahoo_client=FakeYahooClient(),
+    )
+
+    assert bundle.statement_source == "sec"
+    assert bundle.company_facts == {"facts": {}}
 
 
 def test_resolve_non_us_isin_does_not_require_sec_lookup():

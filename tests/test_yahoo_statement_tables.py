@@ -80,6 +80,91 @@ def test_build_yahoo_key_financials_table_uses_latest_annual_values():
     assert set(table["metric"]) == {"revenue", "net_income", "total_assets", "operating_cash_flow"}
 
 
+def test_build_yahoo_statement_table_avoids_combined_cash_for_short_term_investments():
+    frame = pd.DataFrame(
+        {
+            pd.Timestamp("2025-12-31"): {
+                "Cash And Cash Equivalents": 10.0,
+                "Cash Cash Equivalents And Short Term Investments": 16.0,
+                "Other Short Term Investments": 6.0,
+            },
+        }
+    )
+
+    table = build_yahoo_statement_table(
+        frame,
+        statement="balance",
+        period="annual",
+        limit=1,
+    )
+
+    short_term_row = table[table["metric"] == "short_term_investments"].iloc[0]
+
+    assert short_term_row["FY 2025"] == 6.0
+
+
+def test_build_yahoo_statement_table_uses_available_for_sale_securities_as_short_term_investment_fallback():
+    frame = pd.DataFrame(
+        {
+            pd.Timestamp("2025-12-31"): {
+                "Available For Sale Securities": 25.0,
+            },
+        }
+    )
+
+    table = build_yahoo_statement_table(
+        frame,
+        statement="balance",
+        period="annual",
+        limit=1,
+    )
+
+    short_term_row = table[table["metric"] == "short_term_investments"].iloc[0]
+
+    assert short_term_row["FY 2025"] == 25.0
+
+
+def test_build_yahoo_statement_table_avoids_total_debt_as_long_term_debt_fallback():
+    frame = pd.DataFrame(
+        {
+            pd.Timestamp("2025-12-31"): {
+                "Total Debt": 50.0,
+            },
+        }
+    )
+
+    table = build_yahoo_statement_table(
+        frame,
+        statement="balance",
+        period="annual",
+        limit=1,
+    )
+
+    assert "long_term_debt" not in set(table["metric"])
+
+
+def test_build_yahoo_statement_table_uses_long_term_debt_and_capital_lease_obligation():
+    frame = pd.DataFrame(
+        {
+            pd.Timestamp("2025-12-31"): {
+                "Long Term Debt And Capital Lease Obligation": 42.0,
+                "Total Debt": 50.0,
+            },
+        }
+    )
+
+    table = build_yahoo_statement_table(
+        frame,
+        statement="balance",
+        period="annual",
+        limit=1,
+    )
+
+    long_term_debt_row = table[table["metric"] == "long_term_debt"].iloc[0]
+
+    assert long_term_debt_row["FY 2025"] == 42.0
+
+
 def test_build_yahoo_statement_table_does_not_treat_end_cash_position_as_change_in_cash():
     frame = pd.DataFrame(
         {

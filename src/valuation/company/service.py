@@ -192,11 +192,18 @@ def resolve_company_identifier(
             )
             if yahoo_quote is not None:
                 company_profile = yahoo.fetch_company_profile(yahoo_quote.symbol)
+                sec_company = None
+                normalized_symbol = yahoo_quote.symbol.upper()
+                if "." not in normalized_symbol:
+                    try:
+                        sec_company = sec.lookup_company(normalized_symbol)
+                    except LookupError:
+                        sec_company = None
                 return _build_resolution(
                     input_value=identifier,
                     identifier_kind=kind,
                     query_used=query,
-                    sec_company=None,
+                    sec_company=sec_company,
                     yahoo_quote=yahoo_quote.as_dict(),
                     company_profile=company_profile,
                 )
