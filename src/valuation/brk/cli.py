@@ -21,6 +21,7 @@ from valuation.brk.reference import build_brk_security_reference
 from valuation.brk.tables import (
     build_13f_holdings_history_table,
     build_13f_history_summary_table,
+    build_13f_issuer_change_summary_table,
     build_13f_summary_table,
     build_13f_live_price_summary_table,
     build_brk_valuation_assumptions_table,
@@ -293,6 +294,13 @@ def run_brk_holdings(
                 ),
             ]
         )
+        if len(history_bundle.filings) >= 2:
+            sections.append(
+                (
+                    "Holdings Change Summary",
+                    build_13f_issuer_change_summary_table(history_bundle.filings),
+                )
+            )
     if live_prices:
         reference = build_brk_security_reference()
         enriched_holdings = enrich_holdings_with_market_prices(
@@ -458,7 +466,7 @@ def run_brk_sotp(
 ) -> int:
     """Build a first Berkshire market-implied SOTP bridge."""
     yahoo = YahooFinanceClient()
-    bundle = fetch_brk_valuation_bundle(period=period, yahoo_client=yahoo)
+    bundle = fetch_brk_valuation_bundle(period=period, yahoo_client=yahoo, segment_limit=4 if details else 1)
     reference = build_brk_security_reference()
     enriched_holdings = enrich_holdings_with_market_prices(
         aggregate_13f_holdings(bundle.holdings.holdings),

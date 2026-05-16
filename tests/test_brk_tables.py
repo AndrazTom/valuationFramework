@@ -16,6 +16,7 @@ from valuation.brk.tables import (
     build_13f_summary_table,
     build_13f_history_summary_table,
     build_13f_holdings_history_table,
+    build_13f_issuer_change_summary_table,
     build_13f_live_price_summary_table,
     build_brk_valuation_context_table,
     build_segment_period_sections,
@@ -262,6 +263,108 @@ def test_build_13f_holdings_history_table_tracks_latest_top_holdings():
     assert apple_latest["value_change_from_prior_filing_usd"] == 200.0
     assert apple_latest["shares_change_from_prior_filing"] == 2.0
     assert axp_latest["value_change_from_prior_filing_usd"] == -50.0
+
+
+def _make_filing(filing_date, report_date, accession, holdings_rows):
+    return Brk13FBundle(
+        company=None,
+        filing_date=filing_date,
+        report_date=report_date,
+        accession_number=accession,
+        information_table_filename="info.xml",
+        holdings=pd.DataFrame(holdings_rows),
+    )
+
+
+def test_build_13f_issuer_change_summary_table_classifies_changes():
+    current = _make_filing(
+        "2026-02-14", "2025-12-31", "0002",
+        [
+            # Increased: more shares than prior
+            {"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 1200, "shares_or_principal": 15},
+            # Decreased: fewer shares than prior
+            {"security_id": "cusip:025816109", "issuer": "AMERICAN EXPRESS CO", "class_title": "COM", "cusip": "025816109", "value_usd": 700, "shares_or_principal": 15},
+            # New: only in current
+            {"security_id": "cusip:NEWCUSIP1", "issuer": "NEW CO", "class_title": "COM", "cusip": "NEWCUSIP1", "value_usd": 500, "shares_or_principal": 50},
+        ],
+    )
+    prior = _make_filing(
+        "2025-11-14", "2025-09-30", "0004",
+        [
+            {"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 800, "shares_or_principal": 8},
+            {"security_id": "cusip:025816109", "issuer": "AMERICAN EXPRESS CO", "class_title": "COM", "cusip": "025816109", "value_usd": 950, "shares_or_principal": 22},
+            # Eliminated: only in prior
+            {"security_id": "cusip:OLDCUSIP1", "issuer": "OLD CO", "class_title": "COM", "cusip": "OLDCUSIP1", "value_usd": 300, "shares_or_principal": 10},
+        ],
+    )
+
+    frame = build_13f_issuer_change_summary_table([current, prior])
+
+    assert set(frame["cusip"]) == {"037833100", "025816109", "NEWCUSIP1", "OLDCUSIP1"}
+    assert frame[frame["cusip"] == "037833100"].iloc[0]["change_type"] == "increased"
+    assert frame[frame["cusip"] == "025816109"].iloc[0]["change_type"] == "decreased"
+    assert frame[frame["cusip"] == "NEWCUSIP1"].iloc[0]["change_type"] == "new"
+    assert frame[frame["cusip"] == "OLDCUSIP1"].iloc[0]["change_type"] == "eliminated"
+
+
+def test_build_13f_issuer_change_summary_table_share_and_value_columns():
+    current = _make_filing(
+        "2026-02-14", "2025-12-31", "0002",
+        [{"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 1200, "shares_or_principal": 15}],
+    )
+    prior = _make_filing(
+        "2025-11-14", "2025-09-30", "0004",
+        [{"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 800, "shares_or_principal": 8}],
+    )
+    frame = build_13f_issuer_change_summary_table([current, prior])
+    row = frame.iloc[0]
+
+    assert row["prior_shares"] == pytest.approx(8.0)
+    assert row["current_shares"] == pytest.approx(15.0)
+    assert row["share_change"] == pytest.approx(7.0)
+    assert row["share_change_pct"] == pytest.approx(7.0 / 8.0)
+    assert row["prior_value_usd"] == pytest.approx(800.0)
+    assert row["current_value_usd"] == pytest.approx(1200.0)
+    assert row["value_change_usd"] == pytest.approx(400.0)
+    assert row["value_change_pct"] == pytest.approx(400.0 / 800.0)
+
+
+def test_build_13f_issuer_change_summary_table_sort_order():
+    """New positions appear before increased before decreased before eliminated."""
+    # NEW: C (only in current)
+    # INCREASED: A (5 → 10)
+    # DECREASED: B (100 → 50)
+    # ELIMINATED: D (only in prior)
+    current = _make_filing(
+        "2026-02-14", "2025-12-31", "0002",
+        [
+            {"security_id": "c:A", "issuer": "A", "class_title": "COM", "cusip": "A", "value_usd": 100, "shares_or_principal": 10},
+            {"security_id": "c:B", "issuer": "B", "class_title": "COM", "cusip": "B", "value_usd": 100, "shares_or_principal": 50},
+            {"security_id": "c:C", "issuer": "C", "class_title": "COM", "cusip": "C", "value_usd": 100, "shares_or_principal": 5},
+        ],
+    )
+    prior = _make_filing(
+        "2025-11-14", "2025-09-30", "0004",
+        [
+            {"security_id": "c:A", "issuer": "A", "class_title": "COM", "cusip": "A", "value_usd": 90, "shares_or_principal": 5},
+            {"security_id": "c:B", "issuer": "B", "class_title": "COM", "cusip": "B", "value_usd": 80, "shares_or_principal": 100},
+            {"security_id": "c:D", "issuer": "D", "class_title": "COM", "cusip": "D", "value_usd": 50, "shares_or_principal": 20},
+        ],
+    )
+    frame = build_13f_issuer_change_summary_table([current, prior])
+    types = list(frame["change_type"])
+    assert types.index("new") < types.index("increased")
+    assert types.index("increased") < types.index("decreased")
+    assert types.index("decreased") < types.index("eliminated")
+
+
+def test_build_13f_issuer_change_summary_table_requires_two_filings():
+    single = _make_filing(
+        "2026-02-14", "2025-12-31", "0002",
+        [{"security_id": "c:A", "issuer": "A", "class_title": "COM", "cusip": "A", "value_usd": 100, "shares_or_principal": 10}],
+    )
+    frame = build_13f_issuer_change_summary_table([single])
+    assert frame.empty
 
 
 def test_build_top_holdings_live_table():
