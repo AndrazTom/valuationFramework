@@ -155,6 +155,7 @@ def test_build_sec_overview_table_includes_market_and_financial_rows():
         market_snapshot={
             "last_price": 250.0,
             "market_cap": 4000000000.0,
+            "market_cap_source": "last_price_x_shares",
             "shares": 16000000.0,
             "latest_price_date": "2026-04-10",
         },
@@ -163,6 +164,7 @@ def test_build_sec_overview_table_includes_market_and_financial_rows():
     )
 
     last_price = table[table["metric"] == "last_price"].iloc[0]
+    market_cap = table[table["metric"] == "market_cap"].iloc[0]
     revenue = table[table["metric"] == "revenue"].iloc[0]
     net_income = table[table["metric"] == "net_income"].iloc[0]
 
@@ -171,6 +173,12 @@ def test_build_sec_overview_table_includes_market_and_financial_rows():
     assert last_price["source_table"] == "market_snapshot"
     assert last_price["period_type"] == "market"
     assert last_price["completeness"] == "current"
+    assert last_price["taxonomy"] == "yfinance"
+    assert last_price["concept"] == "last_price"
+    assert last_price["matched_label"] == "last_price"
+    assert market_cap["taxonomy"] == "yfinance"
+    assert market_cap["concept"] == "market_cap"
+    assert market_cap["matched_label"] == "last_price_x_shares"
     assert revenue["status"] == "available"
     assert revenue["source"] == "sec"
     assert revenue["source_table"] == "companyfacts"

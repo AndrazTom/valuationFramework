@@ -397,6 +397,7 @@ def _market_overview_rows(
     as_of = market_snapshot.get("latest_price_date")
     for metric, unit_kind in OVERVIEW_MARKET_METRICS:
         value = market_snapshot.get(metric)
+        matched_label = _market_snapshot_matched_label(market_snapshot, metric=metric)
         rows.append(
             {
                 "metric": metric,
@@ -409,9 +410,9 @@ def _market_overview_rows(
                 "as_of": as_of,
                 "status": "available" if _has_value(value) else "unavailable",
                 "completeness": "current" if _has_value(value) else "missing",
-                "taxonomy": None,
-                "concept": None,
-                "matched_label": None,
+                "taxonomy": source,
+                "concept": metric,
+                "matched_label": matched_label,
                 "form": None,
                 "filed": None,
                 "reason": None if _has_value(value) else "Unavailable in market snapshot",
@@ -424,6 +425,18 @@ def _overview_default_unit(metric: str, *, currency: str) -> str:
     if metric == "shares":
         return "shares"
     return currency
+
+
+def _market_snapshot_matched_label(
+    market_snapshot: Mapping[str, object],
+    *,
+    metric: str,
+) -> str:
+    if metric == "market_cap":
+        source = market_snapshot.get("market_cap_source")
+        if source:
+            return str(source)
+    return metric
 
 
 def _has_value(value: object) -> bool:

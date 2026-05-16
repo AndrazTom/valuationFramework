@@ -42,6 +42,10 @@ Rules:
   - `missing`
 - SEC overview rows should carry real `companyfacts` provenance when available
 - Yahoo overview rows should carry statement + matched-label provenance when available
+- market overview rows should carry yfinance provenance in the existing columns:
+  - `taxonomy=yfinance`
+  - `concept` as the snapshot metric name
+  - `matched_label` as the provider field or market-cap derivation source
 - statement availability rows should distinguish:
   - `available`
   - `partial`

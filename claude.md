@@ -372,6 +372,7 @@ Immediate next implementation target:
     - Yahoo may return `last_price` and `shares` while leaving `market_cap` blank
     - when that happens, the snapshot should derive current `market_cap` as `last_price * shares`
     - keep `market_cap_source` so downstream users can tell direct Yahoo market cap from derived current market cap
+    - overview market rows should carry `taxonomy=yfinance`, `concept=<metric>`, and `matched_label` for the provider field or derived market-cap source
   - `company` should show a statement-availability table with:
     - `statement`
     - `period`
