@@ -98,12 +98,13 @@ def _infer_format_kind(column: str, row: pd.Series) -> Optional[str]:
 
 
 def _infer_kind_from_field(field_name: str) -> Optional[str]:
-    if any(token in field_name for token in ("share", "count", "position")):
+    normalized = field_name.replace(" ", "_").replace("-", "_")
+    if any(token in normalized for token in ("share", "count", "position")):
         return "quantity"
-    if "weight" in field_name:
+    if "weight" in normalized:
         return "percent"
     if any(
-        token in field_name
+        token in normalized
         for token in (
             "price",
             "open",

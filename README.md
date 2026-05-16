@@ -124,6 +124,7 @@ If you pass statement range filters such as `--start-year` / `--end-year`, the c
 The compact `overview` section is intentionally small. It combines:
 
 - market metrics such as `last_price`, `market_cap`, and `shares`
+  - `market_cap` is derived from current price times shares when Yahoo omits a direct market-cap value
 - latest core financial metrics such as `revenue`, `net_income`, `operating_cash_flow`, `cash_and_equivalents`, `total_assets`, `total_liabilities`, and `stockholders_equity`
 
 The goal is to keep one stable, backend-friendly summary layer before the deeper tables.

@@ -47,6 +47,18 @@ class YahooFinanceClient:
                 latest_close = float(latest_row.get("Close"))
                 latest_date = history.tail(1).index[0]
 
+        shares = _coerce_float(info.get("shares"))
+        raw_market_cap = _coerce_float(
+            info.get("market_cap"),
+            fallback=info.get("marketCap"),
+        )
+        market_cap = raw_market_cap
+        if market_cap is None:
+            market_cap = _derive_market_cap(
+                last_price=last_price if last_price is not None else latest_close,
+                shares=shares,
+            )
+
         return {
             "ticker": ticker.upper(),
             "currency": info.get("currency"),
@@ -57,8 +69,15 @@ class YahooFinanceClient:
             "open": _coerce_float(info.get("open")),
             "day_high": _coerce_float(info.get("day_high")),
             "day_low": _coerce_float(info.get("day_low")),
-            "market_cap": _coerce_float(info.get("market_cap")),
-            "shares": _coerce_float(info.get("shares")),
+            "market_cap": market_cap,
+            "market_cap_source": (
+                "yfinance_fast_info"
+                if raw_market_cap is not None
+                else "last_price_x_shares"
+                if market_cap is not None
+                else None
+            ),
+            "shares": shares,
             "fifty_day_average": _coerce_float(info.get("fifty_day_average")),
             "two_hundred_day_average": _coerce_float(
                 info.get("two_hundred_day_average")
@@ -158,6 +177,17 @@ def _coerce_float(primary: Any, fallback: Any = None) -> Any:
         return float(value)
     except (TypeError, ValueError):
         return value
+
+
+def _derive_market_cap(*, last_price: Any, shares: Any) -> float | None:
+    price = _coerce_float(last_price)
+    share_count = _coerce_float(shares)
+    if price is None or share_count is None:
+        return None
+    try:
+        return float(price) * float(share_count)
+    except (TypeError, ValueError):
+        return None
 
 
 def _load_yfinance():

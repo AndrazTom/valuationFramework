@@ -14,3 +14,5 @@ Rules:
   - use Yahoo for quote search, profile fallback, price snapshot convenience, and broad non-US statement coverage
   - accept that Yahoo data can be sparse, stale, or inconsistent by metric
   - do not hide provider gaps with heavy inference in this layer
+  - price snapshots may derive `market_cap` from `last_price * shares` when Yahoo omits direct `market_cap`
+  - keep `market_cap_source` so derived current market cap is visible to backend consumers
