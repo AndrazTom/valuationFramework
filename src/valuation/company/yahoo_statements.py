@@ -303,7 +303,7 @@ def _append_yahoo_owner_earnings_row(table: pd.DataFrame) -> pd.DataFrame:
         metric_meta[metric] = {"unit": row.get("unit", "USD"), "end": row.get("end")}
 
     def _unit(primary: str) -> str:
-        for m in (primary, "net_income", "operating_cash_flow"):
+        for m in (primary, "net_income", "operating_cash_flow", "operating_income"):
             meta = metric_meta.get(m)
             if meta and meta.get("unit"):
                 return str(meta["unit"])
@@ -317,8 +317,21 @@ def _append_yahoo_owner_earnings_row(table: pd.DataFrame) -> pd.DataFrame:
     capex = metric_values.get("capex")
     net_income = metric_values.get("net_income")
     da = metric_values.get("depreciation_amortization")
+    op_income = metric_values.get("operating_income")
 
     new_rows = []
+    if op_income is not None and da is not None:
+        new_rows.append({
+            "metric": "ebitda",
+            "taxonomy": "derived",
+            "concept": "operating_income + depreciation_amortization",
+            "unit": _unit("operating_income"),
+            "value": op_income + da,
+            "end": _end("operating_income"),
+            "filed": None,
+            "form": None,
+            "frame": None,
+        })
     if ocf is not None and capex is not None:
         new_rows.append({
             "metric": "free_cash_flow",

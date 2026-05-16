@@ -753,10 +753,18 @@ def test_build_key_financials_table_includes_derived_rows():
                 "NetCashProvidedByUsedInOperatingActivities": {
                     "units": {"USD": [{"val": 80.0, "fy": 2025, "fp": "FY", "end": "2025-12-31", "filed": "2026-01-31", "form": "10-K"}]}
                 },
+                "OperatingIncomeLoss": {
+                    "units": {"USD": [{"val": 60.0, "fy": 2025, "fp": "FY", "end": "2025-12-31", "filed": "2026-01-31", "form": "10-K"}]}
+                },
             }
         }
     }
     table = build_key_financials_table(facts)
+
+    ebitda_row = table[table["metric"] == "ebitda"]
+    assert not ebitda_row.empty
+    assert ebitda_row.iloc[0]["value"] == pytest.approx(60.0 + 30.0)  # op_income + D&A = 90
+    assert ebitda_row.iloc[0]["taxonomy"] == "derived"
 
     fcf_row = table[table["metric"] == "free_cash_flow"]
     assert not fcf_row.empty
