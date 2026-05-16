@@ -1026,7 +1026,7 @@ def build_operating_business_context_table(
             {"field": "operating_segment_pretax_earnings_usd", "value": pretax_earnings},
             {"field": "residual_operating_and_other_usd", "value": residual},
             {
-                "field": "residual_to_segment_pretax_earnings",
+                "field": "residual_to_pretax_earnings_multiple",
                 "value": _ratio(residual, pretax_earnings),
             },
             {
