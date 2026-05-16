@@ -11,7 +11,7 @@ from valuation.company.tables import (
     build_yahoo_statement_availability_table,
     company_summary_to_table,
 )
-from valuation.company.statements import build_statement_diagnostics_table
+from valuation.company.statements import build_statement_diagnostics_table, build_statement_table_ttm
 from valuation.data.providers.sec import SecCompany
 
 
@@ -654,3 +654,82 @@ def test_build_valuation_ratios_table_omits_ev_when_debt_or_cash_missing():
     financials = {"revenue": 400.0, "long_term_debt": 200.0}  # no cash → no EV
     table = build_valuation_ratios_table(snapshot, financials)
     assert "ev_to_revenue" not in set(table["ratio"])
+
+
+def _make_income_company_facts_sec() -> dict:
+    """Build SEC companyfacts with realistic YTD quarterly + annual Revenues entries.
+
+    Q1=100, Q2_ytd=220 (so Q2=120), Q3_ytd=330 (so Q3=110), FY=460 (so Q4=130).
+    Net income follows the same pattern.
+    """
+    return {
+        "facts": {
+            "us-gaap": {
+                "Revenues": {
+                    "units": {
+                        "USD": [
+                            # Direct Q1
+                            {"val": 100.0, "fy": 2025, "fp": "Q1", "start": "2025-01-01", "end": "2025-03-31", "filed": "2025-04-30", "form": "10-Q"},
+                            # YTD Q2 (cumulative Jan-Jun = 220)
+                            {"val": 220.0, "fy": 2025, "fp": "Q2", "start": "2025-01-01", "end": "2025-06-30", "filed": "2025-07-31", "form": "10-Q"},
+                            # YTD Q3 (cumulative Jan-Sep = 330)
+                            {"val": 330.0, "fy": 2025, "fp": "Q3", "start": "2025-01-01", "end": "2025-09-30", "filed": "2025-10-31", "form": "10-Q"},
+                            # Annual FY (Jan-Dec = 460)
+                            {"val": 460.0, "fy": 2025, "fp": "FY", "start": "2025-01-01", "end": "2025-12-31", "filed": "2026-01-31", "form": "10-K"},
+                        ]
+                    }
+                },
+                "NetIncomeLoss": {
+                    "units": {
+                        "USD": [
+                            {"val": 10.0, "fy": 2025, "fp": "Q1", "start": "2025-01-01", "end": "2025-03-31", "filed": "2025-04-30", "form": "10-Q"},
+                            {"val": 22.0, "fy": 2025, "fp": "Q2", "start": "2025-01-01", "end": "2025-06-30", "filed": "2025-07-31", "form": "10-Q"},
+                            {"val": 33.0, "fy": 2025, "fp": "Q3", "start": "2025-01-01", "end": "2025-09-30", "filed": "2025-10-31", "form": "10-Q"},
+                            {"val": 46.0, "fy": 2025, "fp": "FY", "start": "2025-01-01", "end": "2025-12-31", "filed": "2026-01-31", "form": "10-K"},
+                        ]
+                    }
+                },
+            }
+        }
+    }
+
+
+def test_build_statement_table_ttm_sums_four_quarters():
+    facts = _make_income_company_facts_sec()
+    table = build_statement_table_ttm(facts, statement="income")
+
+    assert "TTM" in table.columns
+    revenue_row = table[table["metric"] == "revenue"].iloc[0]
+    # Q1=100, Q2=120, Q3=110, Q4=130 → TTM=460
+    assert revenue_row["TTM"] == pytest.approx(460.0)
+    net_income_row = table[table["metric"] == "net_income"].iloc[0]
+    # Q1=10, Q2=12, Q3=11, Q4=13 → TTM=46
+    assert net_income_row["TTM"] == pytest.approx(46.0)
+
+
+def test_build_statement_table_ttm_balance_returns_latest_quarterly():
+    facts = {
+        "facts": {
+            "us-gaap": {
+                "Assets": {
+                    "units": {
+                        "USD": [
+                            {"val": 500.0, "fy": 2025, "fp": "Q3", "end": "2025-09-30", "filed": "2025-10-01", "form": "10-Q"},
+                            {"val": 600.0, "fy": 2025, "fp": "Q2", "end": "2025-06-30", "filed": "2025-07-01", "form": "10-Q"},
+                        ]
+                    }
+                }
+            }
+        }
+    }
+    table = build_statement_table_ttm(facts, statement="balance")
+    assert table.columns.tolist()[2] != "TTM"  # balance returns quarterly label, not TTM
+    total_assets = table[table["metric"] == "total_assets"].iloc[0]
+    value_col = [c for c in table.columns if c not in {"metric", "unit"}][0]
+    assert total_assets[value_col] == pytest.approx(500.0)  # latest quarter
+
+
+def test_build_statement_table_ttm_empty_on_no_data():
+    facts = {"facts": {}}
+    table = build_statement_table_ttm(facts, statement="income")
+    assert table.empty or len([c for c in table.columns if c not in {"metric", "unit"}]) == 0

@@ -177,6 +177,48 @@ def build_statement_table(
     return _drop_all_missing_rows(frame)
 
 
+def build_statement_table_ttm(
+    company_facts: dict,
+    *,
+    statement: str,
+) -> pd.DataFrame:
+    """Return a TTM view of a statement.
+
+    Balance sheet: returns the latest quarterly snapshot (TTM is not meaningful
+    for instant-type items).
+    Income / cashflow: sums the last 4 quarterly values per metric; share counts
+    are averaged instead of summed.
+    """
+    if statement == "balance":
+        return build_statement_table(company_facts, statement="balance", period="quarterly", limit=1)
+
+    quarterly = _raw_statement_frame(company_facts, statement=statement, period="quarterly", limit=4)
+    quarterly = _drop_helper_rows(quarterly)
+    if statement == "cashflow":
+        quarterly = _add_free_cash_flow_row(quarterly)
+
+    period_cols = [c for c in quarterly.columns if c not in {"metric", "unit"}]
+    if not period_cols or quarterly.empty:
+        return _drop_all_missing_rows(quarterly)
+
+    _SHARE_METRICS = {"diluted_shares", "_basic_shares"}
+
+    rows = []
+    for _, row in quarterly.iterrows():
+        metric = row["metric"]
+        values = [row[c] for c in period_cols if not pd.isna(row[c])]
+        if not values:
+            ttm_val = None
+        elif metric in _SHARE_METRICS:
+            ttm_val = sum(values) / len(values)
+        else:
+            ttm_val = sum(float(v) for v in values)
+        rows.append({"metric": metric, "unit": row["unit"], "TTM": ttm_val})
+
+    result = pd.DataFrame(rows, columns=["metric", "unit", "TTM"])
+    return _drop_all_missing_rows(result)
+
+
 def build_statement_diagnostics_table(
     company_facts: dict,
     *,

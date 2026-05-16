@@ -135,6 +135,61 @@ def build_yahoo_statement_table(
     return pd.DataFrame(rows)
 
 
+def build_yahoo_statement_table_ttm(
+    frame: pd.DataFrame,
+    *,
+    statement: str,
+    currency: str = "USD",
+) -> pd.DataFrame:
+    """Return a TTM view of a Yahoo statement.
+
+    Balance sheet: returns the latest quarterly snapshot.
+    Income / cashflow: sums the last 4 quarterly values per metric; share counts
+    are averaged instead of summed.
+    """
+    _SHARE_METRICS = {"diluted_shares"}
+
+    if statement == "balance":
+        return build_yahoo_statement_table(
+            frame,
+            statement="balance",
+            period="quarterly",
+            currency=currency,
+            limit=1,
+        )
+
+    quarterly = build_yahoo_statement_table(
+        frame,
+        statement=statement,
+        period="quarterly",
+        currency=currency,
+        limit=4,
+    )
+
+    if quarterly.empty:
+        return pd.DataFrame(columns=["metric", "unit", "TTM"])
+
+    period_cols = [c for c in quarterly.columns if c not in {"metric", "unit"}]
+    if not period_cols:
+        return pd.DataFrame(columns=["metric", "unit", "TTM"])
+
+    rows = []
+    for _, row in quarterly.iterrows():
+        metric = row["metric"]
+        values = [row[c] for c in period_cols if not pd.isna(row[c])]
+        if not values:
+            ttm_val = None
+        elif metric in _SHARE_METRICS:
+            ttm_val = sum(float(v) for v in values) / len(values)
+        else:
+            ttm_val = sum(float(v) for v in values)
+        rows.append({"metric": metric, "unit": row["unit"], "TTM": ttm_val})
+
+    result = pd.DataFrame(rows, columns=["metric", "unit", "TTM"])
+    # Drop rows that ended up with no TTM value
+    return result[result["TTM"].notna()].reset_index(drop=True)
+
+
 def build_yahoo_key_financials_table(
     *,
     income_frame: pd.DataFrame,
