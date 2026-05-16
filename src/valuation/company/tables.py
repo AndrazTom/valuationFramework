@@ -177,7 +177,7 @@ def build_key_financials_table(company_facts: dict) -> pd.DataFrame:
 
 
 def _append_derived_rows(table: pd.DataFrame) -> pd.DataFrame:
-    """Append free_cash_flow and owner_earnings rows when inputs are present."""
+    """Append EBITDA, free_cash_flow, and owner_earnings rows when inputs are present."""
     if table.empty:
         return table
     metric_values = {str(row["metric"]): _to_float(row.get("value")) for _, row in table.iterrows()}
@@ -185,10 +185,11 @@ def _append_derived_rows(table: pd.DataFrame) -> pd.DataFrame:
     capex = metric_values.get("capex")
     net_income = metric_values.get("net_income")
     da = metric_values.get("depreciation_amortization")
+    op_income = metric_values.get("operating_income")
 
     # Infer unit from operating_cash_flow or net_income
     def _unit_for(primary: str, fallback: str = "USD") -> str:
-        for m in (primary, "net_income", "operating_cash_flow"):
+        for m in (primary, "net_income", "operating_cash_flow", "operating_income"):
             rows = table[table["metric"] == m]
             if not rows.empty:
                 u = rows.iloc[0].get("unit")
@@ -197,6 +198,18 @@ def _append_derived_rows(table: pd.DataFrame) -> pd.DataFrame:
         return fallback
 
     new_rows = []
+    if op_income is not None and da is not None:
+        new_rows.append({
+            "metric": "ebitda",
+            "taxonomy": "derived",
+            "concept": "operating_income + depreciation_amortization",
+            "unit": _unit_for("operating_income"),
+            "value": op_income + da,
+            "end": None,
+            "filed": None,
+            "form": None,
+            "frame": None,
+        })
     if ocf is not None and capex is not None:
         new_rows.append({
             "metric": "free_cash_flow",
