@@ -735,7 +735,7 @@ def test_build_statement_table_ttm_empty_on_no_data():
     assert table.empty or len([c for c in table.columns if c not in {"metric", "unit"}]) == 0
 
 
-def test_build_key_financials_table_includes_owner_earnings():
+def test_build_key_financials_table_includes_derived_rows():
     from valuation.company.tables import build_key_financials_table
 
     facts = {
@@ -750,10 +750,19 @@ def test_build_key_financials_table_includes_owner_earnings():
                 "PaymentsToAcquirePropertyPlantAndEquipment": {
                     "units": {"USD": [{"val": 20.0, "fy": 2025, "fp": "FY", "end": "2025-12-31", "filed": "2026-01-31", "form": "10-K"}]}
                 },
+                "NetCashProvidedByUsedInOperatingActivities": {
+                    "units": {"USD": [{"val": 80.0, "fy": 2025, "fp": "FY", "end": "2025-12-31", "filed": "2026-01-31", "form": "10-K"}]}
+                },
             }
         }
     }
     table = build_key_financials_table(facts)
+
+    fcf_row = table[table["metric"] == "free_cash_flow"]
+    assert not fcf_row.empty
+    assert fcf_row.iloc[0]["value"] == pytest.approx(80.0 - 20.0)  # OCF - capex = 60
+    assert fcf_row.iloc[0]["taxonomy"] == "derived"
+
     oe_row = table[table["metric"] == "owner_earnings"]
     assert not oe_row.empty
     assert oe_row.iloc[0]["value"] == pytest.approx(100.0 + 30.0 - 20.0)  # 110.0
