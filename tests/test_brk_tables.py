@@ -17,6 +17,7 @@ from valuation.brk.tables import (
     build_13f_history_summary_table,
     build_13f_holdings_history_table,
     build_13f_issuer_change_summary_table,
+    build_13f_portfolio_change_summary_table,
     build_13f_live_price_summary_table,
     build_brk_valuation_context_table,
     build_segment_period_sections,
@@ -364,6 +365,43 @@ def test_build_13f_issuer_change_summary_table_requires_two_filings():
         [{"security_id": "c:A", "issuer": "A", "class_title": "COM", "cusip": "A", "value_usd": 100, "shares_or_principal": 10}],
     )
     frame = build_13f_issuer_change_summary_table([single])
+    assert frame.empty
+
+
+def test_build_13f_portfolio_change_summary_table_aggregates_filing_totals():
+    current = _make_filing(
+        "2026-02-14", "2025-12-31", "0002",
+        [
+            {"security_id": "c:A", "issuer": "A", "class_title": "COM", "cusip": "A", "value_usd": 1200, "shares_or_principal": 15},
+            {"security_id": "c:NEW", "issuer": "NEW CO", "class_title": "COM", "cusip": "NEW", "value_usd": 500, "shares_or_principal": 5},
+        ],
+    )
+    prior = _make_filing(
+        "2025-11-14", "2025-09-30", "0004",
+        [
+            {"security_id": "c:A", "issuer": "A", "class_title": "COM", "cusip": "A", "value_usd": 800, "shares_or_principal": 8},
+            {"security_id": "c:OLD", "issuer": "OLD CO", "class_title": "COM", "cusip": "OLD", "value_usd": 300, "shares_or_principal": 10},
+        ],
+    )
+    frame = build_13f_portfolio_change_summary_table([current, prior])
+    assert not frame.empty
+    fields = {row["field"]: row["value"] for _, row in frame.iterrows()}
+    assert fields["current_positions"] == 2
+    assert fields["prior_positions"] == 2
+    assert fields["new_positions"] == 1  # NEW CO
+    assert fields["eliminated_positions"] == 1  # OLD CO
+    assert fields["current_reported_value_usd"] == pytest.approx(1700.0)  # 1200 + 500
+    assert fields["prior_reported_value_usd"] == pytest.approx(1100.0)  # 800 + 300
+    assert fields["reported_value_change_usd"] == pytest.approx(600.0)
+    assert fields["reported_value_change_pct"] == pytest.approx(600.0 / 1100.0)
+
+
+def test_build_13f_portfolio_change_summary_table_requires_two_filings():
+    single = _make_filing(
+        "2026-02-14", "2025-12-31", "0002",
+        [{"security_id": "c:A", "issuer": "A", "class_title": "COM", "cusip": "A", "value_usd": 100, "shares_or_principal": 10}],
+    )
+    frame = build_13f_portfolio_change_summary_table([single])
     assert frame.empty
 
 
