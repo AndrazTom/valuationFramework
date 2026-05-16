@@ -12,6 +12,7 @@ Rules:
 - `recent_filings_to_table()` is responsible for:
   - preferred-form filtering
   - filing ordering/prioritization
+  - keeping core company views focused on analysis-relevant filings rather than ownership-form noise
   - normalized filing metadata columns
   - filing URL construction when enough SEC metadata exists
 - when changing normalization behavior, add or update focused tests before changing CLI expectations

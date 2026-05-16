@@ -420,6 +420,15 @@ On `brk`, immediate branch-specific target after sync:
     - `total_assets`
     - `total_liabilities`
     - `stockholders_equity`
+  - market snapshot behavior:
+    - Yahoo may return `last_price` and `shares` while leaving `market_cap` blank
+    - when that happens, the snapshot should derive current `market_cap` as `last_price * shares`
+    - keep `market_cap_source` so downstream users can tell direct Yahoo market cap from derived current market cap
+    - overview market rows should carry `taxonomy=yfinance`, `concept=<metric>`, and `matched_label` for the provider field or derived market-cap source
+    - overview market rows should mark quote completeness as:
+      - `current` when `latest_price_date` is within 7 days
+      - `stale` when older than 7 days
+      - `missing` when a value exists but the quote date is absent
   - `company` should show a statement-availability table with:
     - `statement`
     - `period`
@@ -435,10 +444,17 @@ On `brk`, immediate branch-specific target after sync:
     - `available`: mapped all expected visible metrics for that statement
     - `partial`: statement exists but metric coverage is incomplete
     - `unavailable`: no usable rows after normalization
+  - partial statement-availability reasons should include:
+    - present/expected metric counts
+    - the first few missing metric names
+    - a `+N more` suffix when needed to keep the table compact
   - preferred unavailable reasons currently include:
-    - `No matching concepts found in SEC companyfacts`
+    - `No matching SEC companyfacts concepts: ...`
     - `Yahoo returned no statement frame`
     - `Statement frame present but no mapped metrics`
+  - overview unavailable reasons should be metric-specific where possible:
+    - SEC rows should distinguish absent candidate concepts, present concepts with missing requested units, and present concepts with no usable values
+    - Yahoo rows with a non-empty frame should distinguish absent candidate labels from present-but-blank labels
   - for SEC issuers, recent filings in `company` should prefer analysis-relevant forms like:
     - `10-K`
     - `10-Q`
@@ -464,6 +480,14 @@ On `brk`, immediate branch-specific target after sync:
     - key financials
     - statement availability
     - recent filings
+  - live smoke sweep on 2026-05-16 after overview/availability hardening:
+    - commands checked for `AAPL`, `BRK-B`, `JPM`, `BNP.PA`, and `NESN.SW`
+    - `company`, `statements --statement income --period annual`, and `statements --statement balance --period quarterly` all exited 0
+    - market overview rows showed current `latest_price_date=2026-05-15` for all five names
+    - SEC-backed `AAPL` had full statement availability in company view
+    - `BRK-B` and `JPM` correctly surfaced sector/company-shape partial coverage reasons
+    - Yahoo-backed `BNP.PA` and `NESN.SW` worked through company and statements paths, with provider gaps explicit for missing quarterly frames
+    - observed follow-up: JPM overview `revenue` can be stale while net income and balance rows are current; this may be real companyfacts concept coverage and should not be forced without a better bank-specific overview rule
 
 ## Test Notes
 

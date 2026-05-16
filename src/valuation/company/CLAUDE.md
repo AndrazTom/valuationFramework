@@ -42,11 +42,23 @@ Rules:
   - `missing`
 - SEC overview rows should carry real `companyfacts` provenance when available
 - Yahoo overview rows should carry statement + matched-label provenance when available
+- market overview rows should carry yfinance provenance in the existing columns:
+  - `taxonomy=yfinance`
+  - `concept` as the snapshot metric name
+  - `matched_label` as the provider field or market-cap derivation source
+- market overview completeness uses `latest_price_date`:
+  - `current` within 7 days
+  - `stale` when older
+  - `missing` when values exist without a quote date
+- unavailable overview reasons should stay metric-specific:
+  - SEC missing rows should distinguish absent concepts, missing requested units, and present-but-blank values
+  - Yahoo missing rows with non-empty frames should distinguish missing labels from labels present with blank values
 - statement availability rows should distinguish:
   - `available`
   - `partial`
   - `unavailable`
 - statement availability should expose expected metric counts and coverage, not just raw present counts
+- partial statement-availability reasons should name the available/expected count and the first missing metrics, capped with `+N more` when needed
 
 Module ownership:
 

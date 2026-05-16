@@ -99,7 +99,7 @@ def _infer_format_kind(column: str, row: pd.Series) -> Optional[str]:
 
 
 def _infer_kind_from_field(field_name: str) -> Optional[str]:
-    normalized_field = field_name.strip().lower().replace(" ", "_")
+    normalized_field = field_name.strip().lower().replace(" ", "_").replace("-", "_")
     if normalized_field.endswith("_pct") or normalized_field.endswith("_ratio"):
         return "percent"
     if normalized_field.endswith("_usd"):

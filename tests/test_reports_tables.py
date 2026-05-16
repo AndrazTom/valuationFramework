@@ -89,6 +89,19 @@ def test_render_terminal_table_uses_snapshot_currency_hint():
     assert "EUR 89.49" in rendered
 
 
+def test_render_terminal_table_formats_snapshot_market_cap_after_label_humanizing():
+    frame = pd.DataFrame(
+        [
+            {"field": "currency", "value": "USD"},
+            {"field": "market_cap", "value": 4_409_585_053_240.112},
+        ]
+    )
+
+    rendered = render_terminal_table(frame)
+
+    assert "$4.41T" in rendered
+
+
 def test_frame_to_records_converts_missing_values_to_none():
     frame = pd.DataFrame([{"field": "ticker", "value": "BRK-B", "note": None, "missing_number": float("nan")}])
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Mapping
 
 import pandas as pd
@@ -68,6 +69,8 @@ STATEMENT_AVAILABILITY_REQUESTS = (
     ("cashflow", "quarterly"),
 )
 
+MARKET_SNAPSHOT_STALE_AFTER_DAYS = 7
+
 OVERVIEW_STATEMENT_BY_METRIC = {
     "revenue": "income",
     "net_income": "income",
@@ -77,23 +80,6 @@ OVERVIEW_STATEMENT_BY_METRIC = {
     "total_liabilities": "balance",
     "stockholders_equity": "balance",
 }
-
-EXPECTED_VISIBLE_SEC_METRIC_COUNTS = {
-    statement: len(
-        [
-            query.metric
-            for query in definitions
-            if not str(query.metric).startswith("_")
-        ]
-    )
-    for statement, definitions in STATEMENT_DEFINITIONS.items()
-}
-
-EXPECTED_YAHOO_METRIC_COUNTS = {
-    statement: len(metrics)
-    for statement, metrics in YAHOO_STATEMENT_LABELS.items()
-}
-
 
 def resolution_to_table(resolution: CompanyResolution) -> pd.DataFrame:
     """Return the identifier-resolution step as a table."""
@@ -210,7 +196,10 @@ def build_sec_overview_table(
                 "matched_label": None,
                 "form": None,
                 "filed": None,
-                "reason": "No matching concepts found in SEC companyfacts",
+                "reason": _sec_metric_unavailable_reason(
+                    metric,
+                    company_facts=company_facts,
+                ),
             }
         )
     return pd.DataFrame(rows)
@@ -262,7 +251,11 @@ def build_yahoo_overview_table(
         if frame is None or frame.empty:
             reason = f"Yahoo returned no annual {statement} statement frame"
         else:
-            reason = "Metric unavailable in Yahoo annual statements"
+            reason = _yahoo_metric_unavailable_reason(
+                metric=metric,
+                statement=statement,
+                frame=frame,
+            )
         rows.append(
             {
                 "metric": metric,
@@ -302,7 +295,7 @@ def build_sec_statement_availability_table(company_facts: dict) -> pd.DataFrame:
                 period=period,
                 source="sec",
                 table=table,
-                expected_metric_count=EXPECTED_VISIBLE_SEC_METRIC_COUNTS[statement],
+                expected_metrics=_expected_sec_metrics(statement),
                 empty_reason="No matching concepts found in SEC companyfacts",
             )
         )
@@ -336,7 +329,7 @@ def build_yahoo_statement_availability_table(
                 period=period,
                 source="yahoo",
                 table=table,
-                expected_metric_count=EXPECTED_YAHOO_METRIC_COUNTS[statement],
+                expected_metrics=tuple(YAHOO_STATEMENT_LABELS[statement].keys()),
                 empty_reason=empty_reason,
             )
         )
@@ -349,11 +342,13 @@ def _statement_availability_row(
     period: str,
     source: str,
     table: pd.DataFrame,
-    expected_metric_count: int,
+    expected_metrics: tuple[str, ...],
     empty_reason: str,
 ) -> dict[str, object]:
     period_columns = [column for column in table.columns if column not in {"metric", "unit"}]
+    expected_metric_count = len(expected_metrics)
     if period_columns and not table.empty:
+        present_metrics = tuple(str(metric) for metric in table["metric"].tolist())
         metric_count = int(len(table))
         coverage_ratio = (
             float(metric_count) / float(expected_metric_count)
@@ -371,7 +366,14 @@ def _statement_availability_row(
             "expected_metric_count": expected_metric_count,
             "coverage_ratio": coverage_ratio,
             "latest_period": period_columns[0],
-            "reason": "Statement available with partial metric coverage" if is_partial else None,
+            "reason": (
+                _partial_statement_reason(
+                    present_metrics=present_metrics,
+                    expected_metrics=expected_metrics,
+                )
+                if is_partial
+                else None
+            ),
         }
     return {
         "statement": statement,
@@ -387,6 +389,105 @@ def _statement_availability_row(
     }
 
 
+def _expected_sec_metrics(statement: str) -> tuple[str, ...]:
+    return tuple(
+        str(query.metric)
+        for query in STATEMENT_DEFINITIONS[statement]
+        if not str(query.metric).startswith("_")
+    )
+
+
+def _sec_metric_unavailable_reason(
+    metric: str,
+    *,
+    company_facts: Mapping[str, object],
+) -> str:
+    query = None
+    for query in COMMON_FACT_DEFINITIONS:
+        if query.metric == metric:
+            break
+    else:
+        return "No matching concepts found in SEC companyfacts"
+
+    facts = company_facts.get("facts", {})
+    expected_concepts = [concept for _, concept in query.candidates]
+    concepts_without_unit = []
+    concepts_without_values = []
+    concepts_found = []
+    for taxonomy, concept in query.candidates:
+        concept_payload = facts.get(taxonomy, {}).get(concept)
+        if not concept_payload:
+            continue
+        concepts_found.append(concept)
+        units = concept_payload.get("units", {})
+        selected_unit = query.unit
+        if selected_unit is None:
+            selected_unit = next(iter(units.keys()), None)
+        if selected_unit is None or selected_unit not in units:
+            concepts_without_unit.append(concept)
+            continue
+        values = units.get(selected_unit, [])
+        if not any(_has_value(entry.get("val")) for entry in values):
+            concepts_without_values.append(concept)
+
+    if not concepts_found:
+        return f"No SEC companyfacts concepts found: {_compact_list(expected_concepts)}"
+    if concepts_without_unit and len(concepts_without_unit) == len(concepts_found):
+        return (
+            f"SEC companyfacts concepts found but no {query.unit or 'usable'} units: "
+            f"{_compact_list(concepts_without_unit)}"
+        )
+    if concepts_without_values and len(concepts_without_values) == len(concepts_found):
+        return (
+            f"SEC companyfacts concepts found but no usable {query.unit or 'unit'} values: "
+            f"{_compact_list(concepts_without_values)}"
+        )
+    return f"No usable SEC companyfacts facts for: {_compact_list(concepts_found)}"
+
+
+def _yahoo_metric_unavailable_reason(
+    *,
+    metric: str,
+    statement: str | None,
+    frame: pd.DataFrame,
+) -> str:
+    if statement is None:
+        return "Metric unavailable in Yahoo annual statements"
+    candidates = tuple(YAHOO_STATEMENT_LABELS.get(statement, {}).get(metric, ()))
+    if not candidates:
+        return "Metric unavailable in Yahoo annual statements"
+    present_labels = [label for label in candidates if label in frame.index]
+    if present_labels:
+        return (
+            f"Yahoo annual {statement} labels present but values blank: "
+            f"{_compact_list(present_labels)}"
+        )
+    return (
+        f"No Yahoo annual {statement} labels matched for {metric}; "
+        f"tried {_compact_list(candidates)}"
+    )
+
+
+def _partial_statement_reason(
+    *,
+    present_metrics: tuple[str, ...],
+    expected_metrics: tuple[str, ...],
+) -> str:
+    present = set(present_metrics)
+    missing = [metric for metric in expected_metrics if metric not in present]
+    return (
+        f"Partial metric coverage: {len(present_metrics)}/{len(expected_metrics)} "
+        f"metrics available; missing {_compact_list(missing)}"
+    )
+
+
+def _compact_list(values: list[str] | tuple[str, ...], *, limit: int = 4) -> str:
+    text = ", ".join(values[:limit])
+    if len(values) > limit:
+        text = f"{text}, +{len(values) - limit} more"
+    return text or "unknown"
+
+
 def _market_overview_rows(
     market_snapshot: Mapping[str, object],
     *,
@@ -395,8 +496,11 @@ def _market_overview_rows(
 ) -> list[dict[str, object]]:
     rows = []
     as_of = market_snapshot.get("latest_price_date")
+    completeness = _market_snapshot_completeness(as_of)
     for metric, unit_kind in OVERVIEW_MARKET_METRICS:
         value = market_snapshot.get(metric)
+        matched_label = _market_snapshot_matched_label(market_snapshot, metric=metric)
+        has_value = _has_value(value)
         rows.append(
             {
                 "metric": metric,
@@ -407,23 +511,75 @@ def _market_overview_rows(
                 "statement": None,
                 "period_type": "market",
                 "as_of": as_of,
-                "status": "available" if _has_value(value) else "unavailable",
-                "completeness": "current" if _has_value(value) else "missing",
-                "taxonomy": None,
-                "concept": None,
-                "matched_label": None,
+                "status": "available" if has_value else "unavailable",
+                "completeness": completeness if has_value else "missing",
+                "taxonomy": source,
+                "concept": metric,
+                "matched_label": matched_label,
                 "form": None,
                 "filed": None,
-                "reason": None if _has_value(value) else "Unavailable in market snapshot",
+                "reason": _market_snapshot_reason(
+                    has_value=has_value,
+                    as_of=as_of,
+                    completeness=completeness,
+                ),
             }
         )
     return rows
+
+
+def _market_snapshot_completeness(as_of: object) -> str:
+    quote_date = _parse_date(as_of)
+    if quote_date is None:
+        return "missing"
+    age_days = (date.today() - quote_date).days
+    if age_days > MARKET_SNAPSHOT_STALE_AFTER_DAYS:
+        return "stale"
+    return "current"
+
+
+def _market_snapshot_reason(
+    *,
+    has_value: bool,
+    as_of: object,
+    completeness: str,
+) -> str | None:
+    if not has_value:
+        return "Unavailable in market snapshot"
+    if completeness == "missing":
+        return "Market snapshot date unavailable"
+    if completeness == "stale":
+        return f"Market snapshot date older than {MARKET_SNAPSHOT_STALE_AFTER_DAYS} days: {as_of}"
+    return None
+
+
+def _parse_date(value: object) -> date | None:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value)[:10]).date()
+    except ValueError:
+        return None
 
 
 def _overview_default_unit(metric: str, *, currency: str) -> str:
     if metric == "shares":
         return "shares"
     return currency
+
+
+def _market_snapshot_matched_label(
+    market_snapshot: Mapping[str, object],
+    *,
+    metric: str,
+) -> str:
+    if metric == "market_cap":
+        source = market_snapshot.get("market_cap_source")
+        if source:
+            return str(source)
+    return metric
 
 
 def _has_value(value: object) -> bool:

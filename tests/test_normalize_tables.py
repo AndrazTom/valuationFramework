@@ -2,6 +2,7 @@ import pandas as pd
 
 from valuation.data.normalize.tables import (
     CompanyFactQuery,
+    CORE_COMPANY_FILING_FORMS,
     company_facts_to_table,
     company_facts_to_statement_table,
     recent_filings_to_table,
@@ -100,6 +101,41 @@ def test_recent_filings_to_table_filters_to_preferred_forms():
     assert list(frame["form"]) == ["10-Q", "8-K"]
     assert frame.iloc[0]["form_group"] == "quarterly"
     assert frame.iloc[1]["report_date"] == "2025-12-15"
+
+
+def test_recent_filings_to_table_core_forms_exclude_ownership_noise_but_keep_proxy():
+    submissions = {
+        "filings": {
+            "recent": {
+                "accessionNumber": ["0001", "0002", "0003", "0004"],
+                "filingDate": ["2026-01-04", "2026-01-03", "2026-01-02", "2026-01-01"],
+                "reportDate": ["2026-01-04", "2026-01-03", "2025-12-31", "2025-12-31"],
+                "acceptanceDateTime": [
+                    "20260104100000",
+                    "20260103100000",
+                    "20260102100000",
+                    "20260101100000",
+                ],
+                "form": ["4", "144", "DEF 14A", "10-K"],
+                "primaryDocDescription": [
+                    "Statement of changes in beneficial ownership",
+                    "Proposed sale of securities",
+                    "Definitive proxy statement",
+                    "Annual report",
+                ],
+                "primaryDocument": ["form4.xml", "form144.htm", "proxy.htm", "annual.htm"],
+            }
+        }
+    }
+
+    frame = recent_filings_to_table(
+        submissions,
+        limit=10,
+        preferred_forms=CORE_COMPANY_FILING_FORMS,
+    )
+
+    assert list(frame["form"]) == ["10-K", "DEF 14A"]
+    assert list(frame["form_group"]) == ["annual", "proxy"]
 
 
 def test_recent_filings_to_table_builds_filing_urls_when_cik_present():
