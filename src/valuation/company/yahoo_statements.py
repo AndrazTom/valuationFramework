@@ -249,10 +249,11 @@ def build_yahoo_key_financials_table(
 
 
 def _append_yahoo_owner_earnings_row(table: pd.DataFrame) -> pd.DataFrame:
-    """Append owner_earnings = net_income + D&A - capex when all three are present."""
+    """Append free_cash_flow and owner_earnings derived rows when inputs are present."""
     if table.empty or "metric" not in table.columns:
         return table
     metric_values: dict[str, float | None] = {}
+    metric_meta: dict[str, dict] = {}
     for _, row in table.iterrows():
         metric = str(row["metric"])
         val = row.get("value")
@@ -260,27 +261,52 @@ def _append_yahoo_owner_earnings_row(table: pd.DataFrame) -> pd.DataFrame:
             metric_values[metric] = float(val) if val is not None and not pd.isna(val) else None
         except (TypeError, ValueError):
             metric_values[metric] = None
+        metric_meta[metric] = {"unit": row.get("unit", "USD"), "end": row.get("end")}
+
+    def _unit(primary: str) -> str:
+        for m in (primary, "net_income", "operating_cash_flow"):
+            meta = metric_meta.get(m)
+            if meta and meta.get("unit"):
+                return str(meta["unit"])
+        return "USD"
+
+    def _end(primary: str) -> str | None:
+        meta = metric_meta.get(primary)
+        return str(meta["end"]) if meta and meta.get("end") is not None else None
+
+    ocf = metric_values.get("operating_cash_flow")
+    capex = metric_values.get("capex")
     net_income = metric_values.get("net_income")
     da = metric_values.get("depreciation_amortization")
-    capex = metric_values.get("capex")
-    if net_income is None or da is None or capex is None:
+
+    new_rows = []
+    if ocf is not None and capex is not None:
+        new_rows.append({
+            "metric": "free_cash_flow",
+            "taxonomy": "derived",
+            "concept": "operating_cash_flow - capex",
+            "unit": _unit("operating_cash_flow"),
+            "value": ocf - capex,
+            "end": _end("operating_cash_flow"),
+            "filed": None,
+            "form": None,
+            "frame": None,
+        })
+    if net_income is not None and da is not None and capex is not None:
+        new_rows.append({
+            "metric": "owner_earnings",
+            "taxonomy": "derived",
+            "concept": "net_income + depreciation_amortization - capex",
+            "unit": _unit("net_income"),
+            "value": net_income + da - capex,
+            "end": _end("net_income"),
+            "filed": None,
+            "form": None,
+            "frame": None,
+        })
+    if not new_rows:
         return table
-    unit_row = table[table["metric"] == "net_income"]
-    unit = str(unit_row.iloc[0]["unit"]) if not unit_row.empty else "USD"
-    period_row = table[table["metric"] == "net_income"]
-    end = str(period_row.iloc[0]["end"]) if not period_row.empty else None
-    new_row = {
-        "metric": "owner_earnings",
-        "taxonomy": "derived",
-        "concept": "net_income + depreciation_amortization - capex",
-        "unit": unit,
-        "value": net_income + da - capex,
-        "end": end,
-        "filed": None,
-        "form": None,
-        "frame": None,
-    }
-    return pd.concat([table, pd.DataFrame([new_row])], ignore_index=True)
+    return pd.concat([table, pd.DataFrame(new_rows)], ignore_index=True)
 
 
 def _resolve_yahoo_value(row: pd.Series, *, candidates: Sequence[str]) -> float | None:

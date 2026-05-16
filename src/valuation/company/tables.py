@@ -171,37 +171,59 @@ def company_summary_to_table(
 
 
 def build_key_financials_table(company_facts: dict) -> pd.DataFrame:
-    """Return selected generic SEC facts for one company, with derived owner earnings row."""
+    """Return selected generic SEC facts for one company, with derived FCF and owner earnings rows."""
     table = company_facts_to_table(company_facts, COMMON_FACT_DEFINITIONS)
-    return _append_owner_earnings_row(table)
+    return _append_derived_rows(table)
 
 
-def _append_owner_earnings_row(table: pd.DataFrame) -> pd.DataFrame:
-    """Append owner_earnings = net_income + D&A - capex when all three are present."""
+def _append_derived_rows(table: pd.DataFrame) -> pd.DataFrame:
+    """Append free_cash_flow and owner_earnings rows when inputs are present."""
     if table.empty:
         return table
     metric_values = {str(row["metric"]): _to_float(row.get("value")) for _, row in table.iterrows()}
+    ocf = metric_values.get("operating_cash_flow")
+    capex = metric_values.get("capex")
     net_income = metric_values.get("net_income")
     da = metric_values.get("depreciation_amortization")
-    capex = metric_values.get("capex")
-    if net_income is None or da is None or capex is None:
+
+    # Infer unit from operating_cash_flow or net_income
+    def _unit_for(primary: str, fallback: str = "USD") -> str:
+        for m in (primary, "net_income", "operating_cash_flow"):
+            rows = table[table["metric"] == m]
+            if not rows.empty:
+                u = rows.iloc[0].get("unit")
+                if u is not None:
+                    return str(u)
+        return fallback
+
+    new_rows = []
+    if ocf is not None and capex is not None:
+        new_rows.append({
+            "metric": "free_cash_flow",
+            "taxonomy": "derived",
+            "concept": "operating_cash_flow - capex",
+            "unit": _unit_for("operating_cash_flow"),
+            "value": ocf - capex,
+            "end": None,
+            "filed": None,
+            "form": None,
+            "frame": None,
+        })
+    if net_income is not None and da is not None and capex is not None:
+        new_rows.append({
+            "metric": "owner_earnings",
+            "taxonomy": "derived",
+            "concept": "net_income + depreciation_amortization - capex",
+            "unit": _unit_for("net_income"),
+            "value": net_income + da - capex,
+            "end": None,
+            "filed": None,
+            "form": None,
+            "frame": None,
+        })
+    if not new_rows:
         return table
-    owner_earnings = net_income + da - capex
-    # Inherit unit from net_income row
-    unit_row = table[table["metric"] == "net_income"]
-    unit = str(unit_row.iloc[0].get("unit")) if not unit_row.empty and unit_row.iloc[0].get("unit") is not None else "USD"
-    new_row = {
-        "metric": "owner_earnings",
-        "taxonomy": "derived",
-        "concept": "net_income + depreciation_amortization - capex",
-        "unit": unit,
-        "value": owner_earnings,
-        "end": None,
-        "filed": None,
-        "form": None,
-        "frame": None,
-    }
-    return pd.concat([table, pd.DataFrame([new_row])], ignore_index=True)
+    return pd.concat([table, pd.DataFrame(new_rows)], ignore_index=True)
 
 
 def build_sec_overview_table(
