@@ -91,7 +91,10 @@ def test_build_sec_statement_availability_table_marks_missing_rows_with_reason()
     assert income_annual["metric_count"] == 1
     assert income_annual["expected_metric_count"] == 7
     assert income_annual["coverage_ratio"] == pytest.approx(1 / 7)
-    assert income_annual["reason"] == "Statement available with partial metric coverage"
+    assert income_annual["reason"] == (
+        "Partial metric coverage: 1/7 metrics available; "
+        "missing gross_profit, operating_income, pretax_income, net_income, +2 more"
+    )
     assert cashflow_quarterly["status"] == "unavailable"
     assert cashflow_quarterly["expected_metric_count"] == 5
     assert cashflow_quarterly["coverage_ratio"] == 0.0
@@ -122,7 +125,10 @@ def test_build_yahoo_statement_availability_table_reports_empty_frame_reason():
     assert income_annual["metric_count"] == 2
     assert income_annual["expected_metric_count"] == 7
     assert income_annual["coverage_ratio"] == pytest.approx(2 / 7)
-    assert income_annual["reason"] == "Statement available with partial metric coverage"
+    assert income_annual["reason"] == (
+        "Partial metric coverage: 2/7 metrics available; "
+        "missing gross_profit, operating_income, pretax_income, diluted_eps, +1 more"
+    )
     assert income_quarterly["status"] == "unavailable"
     assert income_quarterly["expected_metric_count"] == 7
     assert income_quarterly["coverage_ratio"] == 0.0

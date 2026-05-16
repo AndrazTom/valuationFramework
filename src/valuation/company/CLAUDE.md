@@ -51,6 +51,7 @@ Rules:
   - `partial`
   - `unavailable`
 - statement availability should expose expected metric counts and coverage, not just raw present counts
+- partial statement-availability reasons should name the available/expected count and the first missing metrics, capped with `+N more` when needed
 
 Module ownership:
 

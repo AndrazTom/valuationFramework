@@ -388,6 +388,10 @@ Immediate next implementation target:
     - `available`: mapped all expected visible metrics for that statement
     - `partial`: statement exists but metric coverage is incomplete
     - `unavailable`: no usable rows after normalization
+  - partial statement-availability reasons should include:
+    - present/expected metric counts
+    - the first few missing metric names
+    - a `+N more` suffix when needed to keep the table compact
   - preferred unavailable reasons currently include:
     - `No matching concepts found in SEC companyfacts`
     - `Yahoo returned no statement frame`

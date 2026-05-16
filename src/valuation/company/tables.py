@@ -78,23 +78,6 @@ OVERVIEW_STATEMENT_BY_METRIC = {
     "stockholders_equity": "balance",
 }
 
-EXPECTED_VISIBLE_SEC_METRIC_COUNTS = {
-    statement: len(
-        [
-            query.metric
-            for query in definitions
-            if not str(query.metric).startswith("_")
-        ]
-    )
-    for statement, definitions in STATEMENT_DEFINITIONS.items()
-}
-
-EXPECTED_YAHOO_METRIC_COUNTS = {
-    statement: len(metrics)
-    for statement, metrics in YAHOO_STATEMENT_LABELS.items()
-}
-
-
 def resolution_to_table(resolution: CompanyResolution) -> pd.DataFrame:
     """Return the identifier-resolution step as a table."""
     return pd.DataFrame(
@@ -302,7 +285,7 @@ def build_sec_statement_availability_table(company_facts: dict) -> pd.DataFrame:
                 period=period,
                 source="sec",
                 table=table,
-                expected_metric_count=EXPECTED_VISIBLE_SEC_METRIC_COUNTS[statement],
+                expected_metrics=_expected_sec_metrics(statement),
                 empty_reason="No matching concepts found in SEC companyfacts",
             )
         )
@@ -336,7 +319,7 @@ def build_yahoo_statement_availability_table(
                 period=period,
                 source="yahoo",
                 table=table,
-                expected_metric_count=EXPECTED_YAHOO_METRIC_COUNTS[statement],
+                expected_metrics=tuple(YAHOO_STATEMENT_LABELS[statement].keys()),
                 empty_reason=empty_reason,
             )
         )
@@ -349,11 +332,13 @@ def _statement_availability_row(
     period: str,
     source: str,
     table: pd.DataFrame,
-    expected_metric_count: int,
+    expected_metrics: tuple[str, ...],
     empty_reason: str,
 ) -> dict[str, object]:
     period_columns = [column for column in table.columns if column not in {"metric", "unit"}]
+    expected_metric_count = len(expected_metrics)
     if period_columns and not table.empty:
+        present_metrics = tuple(str(metric) for metric in table["metric"].tolist())
         metric_count = int(len(table))
         coverage_ratio = (
             float(metric_count) / float(expected_metric_count)
@@ -371,7 +356,14 @@ def _statement_availability_row(
             "expected_metric_count": expected_metric_count,
             "coverage_ratio": coverage_ratio,
             "latest_period": period_columns[0],
-            "reason": "Statement available with partial metric coverage" if is_partial else None,
+            "reason": (
+                _partial_statement_reason(
+                    present_metrics=present_metrics,
+                    expected_metrics=expected_metrics,
+                )
+                if is_partial
+                else None
+            ),
         }
     return {
         "statement": statement,
@@ -385,6 +377,32 @@ def _statement_availability_row(
         "latest_period": None,
         "reason": empty_reason,
     }
+
+
+def _expected_sec_metrics(statement: str) -> tuple[str, ...]:
+    return tuple(
+        str(query.metric)
+        for query in STATEMENT_DEFINITIONS[statement]
+        if not str(query.metric).startswith("_")
+    )
+
+
+def _partial_statement_reason(
+    *,
+    present_metrics: tuple[str, ...],
+    expected_metrics: tuple[str, ...],
+) -> str:
+    present = set(present_metrics)
+    missing = [metric for metric in expected_metrics if metric not in present]
+    missing_text = ", ".join(missing[:4])
+    if len(missing) > 4:
+        missing_text = f"{missing_text}, +{len(missing) - 4} more"
+    if not missing_text:
+        missing_text = "unknown"
+    return (
+        f"Partial metric coverage: {len(present_metrics)}/{len(expected_metrics)} "
+        f"metrics available; missing {missing_text}"
+    )
 
 
 def _market_overview_rows(
