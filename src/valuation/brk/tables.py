@@ -506,6 +506,62 @@ def build_13f_issuer_change_summary_table(
     return frame
 
 
+def build_13f_portfolio_change_summary_table(
+    filings: Sequence[Brk13FBundle],
+) -> pd.DataFrame:
+    """Return a portfolio-level filing-over-filing change summary for the two most recent 13F filings.
+
+    Aggregates reported value, position count, and new/eliminated/changed counts.
+    """
+    if len(filings) < 2:
+        return pd.DataFrame(columns=["field", "value"])
+    current_agg = _history_aggregate_for_filing(filings[0])
+    prior_agg = _history_aggregate_for_filing(filings[1])
+    if current_agg.empty and prior_agg.empty:
+        return pd.DataFrame(columns=["field", "value"])
+
+    current_map = _agg_by_cusip(current_agg)
+    prior_map = _agg_by_cusip(prior_agg)
+    all_cusips = set(current_map) | set(prior_map)
+
+    current_value_total = sum(
+        _none_if_nan_float(row.get("value_usd")) or 0.0
+        for row in current_map.values()
+    )
+    prior_value_total = sum(
+        _none_if_nan_float(row.get("value_usd")) or 0.0
+        for row in prior_map.values()
+    )
+    value_change = current_value_total - prior_value_total
+    value_change_pct = (value_change / prior_value_total) if prior_value_total else None
+
+    new_count = sum(1 for cusip in all_cusips if cusip not in prior_map and cusip in current_map)
+    eliminated_count = sum(1 for cusip in all_cusips if cusip in prior_map and cusip not in current_map)
+    changed_count = sum(
+        1 for cusip in all_cusips
+        if cusip in current_map and cusip in prior_map
+        and current_map[cusip].get("shares_or_principal") != prior_map[cusip].get("shares_or_principal")
+    )
+
+    filing_date_current = filings[0].filing_date
+    filing_date_prior = filings[1].filing_date
+
+    rows = [
+        {"field": "current_filing_date", "value": filing_date_current},
+        {"field": "prior_filing_date", "value": filing_date_prior},
+        {"field": "current_positions", "value": len(current_map)},
+        {"field": "prior_positions", "value": len(prior_map)},
+        {"field": "new_positions", "value": new_count},
+        {"field": "eliminated_positions", "value": eliminated_count},
+        {"field": "changed_positions", "value": changed_count},
+        {"field": "current_reported_value_usd", "value": current_value_total},
+        {"field": "prior_reported_value_usd", "value": prior_value_total},
+        {"field": "reported_value_change_usd", "value": value_change},
+        {"field": "reported_value_change_pct", "value": value_change_pct},
+    ]
+    return pd.DataFrame(rows)
+
+
 def build_top_holdings_live_table(
     holdings: pd.DataFrame,
     reference: pd.DataFrame,

@@ -22,6 +22,7 @@ from valuation.brk.tables import (
     build_13f_holdings_history_table,
     build_13f_history_summary_table,
     build_13f_issuer_change_summary_table,
+    build_13f_portfolio_change_summary_table,
     build_13f_summary_table,
     build_13f_live_price_summary_table,
     build_brk_valuation_assumptions_table,
@@ -295,6 +296,12 @@ def run_brk_holdings(
             ]
         )
         if len(history_bundle.filings) >= 2:
+            sections.append(
+                (
+                    "Portfolio Change Summary",
+                    build_13f_portfolio_change_summary_table(history_bundle.filings),
+                )
+            )
             sections.append(
                 (
                     "Holdings Change Summary",
