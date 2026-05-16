@@ -173,6 +173,9 @@ def build_yahoo_statement_table_ttm(
     if not period_cols:
         return pd.DataFrame(columns=["metric", "unit", "TTM"])
 
+    num_quarters = len(period_cols)
+    ttm_label = "TTM" if num_quarters == 4 else f"{num_quarters}Q TTM"
+
     rows = []
     for _, row in quarterly.iterrows():
         metric = row["metric"]
@@ -183,11 +186,11 @@ def build_yahoo_statement_table_ttm(
             ttm_val = sum(float(v) for v in values) / len(values)
         else:
             ttm_val = sum(float(v) for v in values)
-        rows.append({"metric": metric, "unit": row["unit"], "TTM": ttm_val})
+        rows.append({"metric": metric, "unit": row["unit"], ttm_label: ttm_val})
 
-    result = pd.DataFrame(rows, columns=["metric", "unit", "TTM"])
+    result = pd.DataFrame(rows, columns=["metric", "unit", ttm_label])
     # Drop rows that ended up with no TTM value
-    return result[result["TTM"].notna()].reset_index(drop=True)
+    return result[result[ttm_label].notna()].reset_index(drop=True)
 
 
 def build_yahoo_key_financials_table(

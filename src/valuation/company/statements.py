@@ -202,6 +202,9 @@ def build_statement_table_ttm(
         return _drop_all_missing_rows(quarterly)
 
     _SHARE_METRICS = {"diluted_shares", "_basic_shares"}
+    num_quarters = len(period_cols)
+    # Label the column to reflect partial coverage when fewer than 4 quarters are available
+    ttm_label = "TTM" if num_quarters == 4 else f"{num_quarters}Q TTM"
 
     rows = []
     for _, row in quarterly.iterrows():
@@ -213,9 +216,9 @@ def build_statement_table_ttm(
             ttm_val = sum(values) / len(values)
         else:
             ttm_val = sum(float(v) for v in values)
-        rows.append({"metric": metric, "unit": row["unit"], "TTM": ttm_val})
+        rows.append({"metric": metric, "unit": row["unit"], ttm_label: ttm_val})
 
-    result = pd.DataFrame(rows, columns=["metric", "unit", "TTM"])
+    result = pd.DataFrame(rows, columns=["metric", "unit", ttm_label])
     return _drop_all_missing_rows(result)
 
 
