@@ -802,17 +802,42 @@ def build_brk_component_bridge_table(
     public_equity_summary: pd.DataFrame,
     latest_liquidity_snapshot: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Return a first explicit Berkshire component bridge."""
+    """Return an explicit Berkshire SOTP component bridge.
+
+    Splits the net liquidity into fixed maturity securities and net cash/T-bills
+    so the residual more closely approximates the operating business value.
+    """
     market_cap = _market_cap_from_snapshot(market_snapshot)
     shares = market_snapshot.get("shares")
     public_equities = _field_value(public_equity_summary, "blended_13f_value_usd")
-    net_liquid = _frame_row_value(latest_liquidity_snapshot, "net_liquid_investments_usd")
+
+    # Pull individual liquidity components for explicit breakdown
+    fixed_maturity = _frame_row_value(latest_liquidity_snapshot, "fixed_maturity_securities_usd")
+    cash = _frame_row_value(latest_liquidity_snapshot, "cash_and_equivalents_usd")
+    tbills = _frame_row_value(latest_liquidity_snapshot, "short_term_us_treasury_bills_usd")
+    tbill_payable = _frame_row_value(latest_liquidity_snapshot, "payable_for_purchase_of_us_treasury_bills_usd")
+
+    # Net cash and T-bills = cash + T-bills - T-bill purchase payable
+    net_cash_and_tbills: float | None = None
+    if cash is not None or tbills is not None:
+        base = _sum_defined(cash, tbills)
+        if tbill_payable is not None:
+            net_cash_and_tbills = _sum_defined(base, -float(tbill_payable))
+        else:
+            net_cash_and_tbills = base
+
+    # Residual after all explicit components
     implied_other = None
     if market_cap is not None:
         implied_other = float(market_cap)
-        for value in (public_equities, net_liquid):
+        for value in (public_equities, fixed_maturity, net_cash_and_tbills):
             if value is not None and pd.notna(value):
                 implied_other -= float(value)
+
+    def _share(value: float | None) -> float | None:
+        if value is None or market_cap is None or market_cap == 0:
+            return None
+        return value / market_cap
 
     rows = [
         {
@@ -826,22 +851,29 @@ def build_brk_component_bridge_table(
             "component": "public_equities_13f_blended",
             "value_usd": public_equities,
             "per_brk_b_share_usd": _per_share_value(public_equities, shares),
-            "share_of_market_cap_pct": (public_equities / market_cap) if market_cap and public_equities is not None else None,
+            "share_of_market_cap_pct": _share(public_equities),
             "method": "Latest 13F using live prices where resolved and reported values otherwise",
         },
         {
-            "component": "net_liquid_investments",
-            "value_usd": net_liquid,
-            "per_brk_b_share_usd": _per_share_value(net_liquid, shares),
-            "share_of_market_cap_pct": (net_liquid / market_cap) if market_cap and net_liquid is not None else None,
-            "method": "Latest filing liquid investments net of Treasury Bill purchase payable",
+            "component": "fixed_maturity_securities",
+            "value_usd": fixed_maturity,
+            "per_brk_b_share_usd": _per_share_value(fixed_maturity, shares),
+            "share_of_market_cap_pct": _share(fixed_maturity),
+            "method": "Insurance portfolio fixed maturity bonds (filing balance sheet)",
         },
         {
-            "component": "implied_operating_businesses_and_non_13f_assets",
+            "component": "net_cash_and_treasury_bills",
+            "value_usd": net_cash_and_tbills,
+            "per_brk_b_share_usd": _per_share_value(net_cash_and_tbills, shares),
+            "share_of_market_cap_pct": _share(net_cash_and_tbills),
+            "method": "Cash + T-bills net of T-bill purchase payable (filing balance sheet)",
+        },
+        {
+            "component": "implied_operating_businesses",
             "value_usd": implied_other,
             "per_brk_b_share_usd": _per_share_value(implied_other, shares),
-            "share_of_market_cap_pct": (implied_other / market_cap) if market_cap and implied_other is not None else None,
-            "method": "Residual after subtracting blended 13F public equities and net liquid investments",
+            "share_of_market_cap_pct": _share(implied_other),
+            "method": "Residual: market cap minus 13F equities, fixed maturity, and net cash/T-bills",
         },
     ]
     return pd.DataFrame(rows)
