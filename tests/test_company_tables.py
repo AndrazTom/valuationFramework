@@ -6,6 +6,7 @@ import pandas as pd
 from valuation.company.tables import (
     build_sec_overview_table,
     build_sec_statement_availability_table,
+    build_valuation_ratios_table,
     build_yahoo_overview_table,
     build_yahoo_statement_availability_table,
     company_summary_to_table,
@@ -595,3 +596,37 @@ def test_build_yahoo_overview_table_marks_stale_metric_when_only_older_annual_pe
     assert revenue["as_of"] == "FY 2024"
     assert revenue["matched_label"] == "Total Revenue"
     assert revenue["completeness"] == "stale"
+
+
+def test_build_valuation_ratios_table_computes_pe_pb_ps_pfcf():
+    snapshot = {"market_cap": 1_000.0, "last_price": 100.0, "shares": 10.0, "latest_price_date": "2026-05-01"}
+    financials = {
+        "net_income": 50.0,
+        "revenue": 200.0,
+        "stockholders_equity": 250.0,
+        "operating_cash_flow": 80.0,
+        "capex": 20.0,
+    }
+    table = build_valuation_ratios_table(snapshot, financials)
+    ratios = {row["ratio"]: row["value"] for _, row in table.iterrows()}
+
+    assert ratios["pe_ratio"] == pytest.approx(1_000.0 / 50.0)
+    assert ratios["ps_ratio"] == pytest.approx(1_000.0 / 200.0)
+    assert ratios["pb_ratio"] == pytest.approx(1_000.0 / 250.0)
+    assert ratios["price_to_fcf"] == pytest.approx(1_000.0 / 60.0)
+
+
+def test_build_valuation_ratios_table_omits_ratio_when_denominator_unavailable():
+    snapshot = {"market_cap": 1_000.0}
+    financials = {"net_income": 50.0}  # no equity, revenue, or fcf inputs
+    table = build_valuation_ratios_table(snapshot, financials)
+    assert set(table["ratio"]) == {"pe_ratio"}
+
+
+def test_build_valuation_ratios_table_derives_market_cap_from_price_and_shares():
+    snapshot = {"last_price": 100.0, "shares": 10.0}
+    financials = {"net_income": 50.0}
+    table = build_valuation_ratios_table(snapshot, financials)
+    assert not table.empty
+    assert table.iloc[0]["ratio"] == "pe_ratio"
+    assert table.iloc[0]["value"] == pytest.approx(1_000.0 / 50.0)

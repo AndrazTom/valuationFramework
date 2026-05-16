@@ -991,3 +991,49 @@ def test_statement_matrix_income_does_not_use_basic_share_fallback_when_eps_diff
     diluted_eps_row = frame[frame["metric"] == "diluted_eps"].iloc[0]
     assert "diluted_shares" not in set(frame["metric"])
     assert pd.isna(diluted_eps_row["2025 Q4"])
+
+
+def _cashflow_facts(ocf_val: float | None, capex_val: float | None) -> dict:
+    facts: dict = {"facts": {"us-gaap": {}}}
+    if ocf_val is not None:
+        facts["facts"]["us-gaap"]["NetCashProvidedByUsedInOperatingActivities"] = {
+            "units": {
+                "USD": [{
+                    "val": ocf_val, "fy": 2025, "fp": "FY",
+                    "start": "2025-01-01", "end": "2025-12-31",
+                    "filed": "2026-02-01", "form": "10-K", "frame": "CY2025",
+                }]
+            }
+        }
+    if capex_val is not None:
+        facts["facts"]["us-gaap"]["PaymentsToAcquirePropertyPlantAndEquipment"] = {
+            "units": {
+                "USD": [{
+                    "val": capex_val, "fy": 2025, "fp": "FY",
+                    "start": "2025-01-01", "end": "2025-12-31",
+                    "filed": "2026-02-01", "form": "10-K", "frame": "CY2025",
+                }]
+            }
+        }
+    return facts
+
+
+def test_cashflow_statement_includes_free_cash_flow_row():
+    facts = _cashflow_facts(ocf_val=100.0, capex_val=30.0)
+    frame = build_statement_table(facts, statement="cashflow", period="annual", limit=1)
+    assert "free_cash_flow" in set(frame["metric"])
+    fcf_row = frame[frame["metric"] == "free_cash_flow"].iloc[0]
+    period_col = [c for c in frame.columns if c not in {"metric", "unit"}][0]
+    assert fcf_row[period_col] == 70.0
+
+
+def test_cashflow_statement_omits_free_cash_flow_when_capex_missing():
+    facts = _cashflow_facts(ocf_val=100.0, capex_val=None)
+    frame = build_statement_table(facts, statement="cashflow", period="annual", limit=1)
+    assert "free_cash_flow" not in set(frame["metric"])
+
+
+def test_cashflow_statement_omits_free_cash_flow_when_ocf_missing():
+    facts = _cashflow_facts(ocf_val=None, capex_val=30.0)
+    frame = build_statement_table(facts, statement="cashflow", period="annual", limit=1)
+    assert "free_cash_flow" not in set(frame["metric"])

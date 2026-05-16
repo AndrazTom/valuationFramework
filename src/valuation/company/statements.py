@@ -172,6 +172,8 @@ def build_statement_table(
         end_quarter=end_quarter,
     )
     frame = _drop_helper_rows(frame)
+    if statement == "cashflow":
+        frame = _add_free_cash_flow_row(frame)
     return _drop_all_missing_rows(frame)
 
 
@@ -410,6 +412,40 @@ def _drop_helper_rows(frame: pd.DataFrame) -> pd.DataFrame:
     if frame.empty or "metric" not in frame.columns:
         return frame
     return frame[~frame["metric"].astype(str).str.startswith("_")].reset_index(drop=True)
+
+
+def _add_free_cash_flow_row(frame: pd.DataFrame) -> pd.DataFrame:
+    """Append free_cash_flow = operating_cash_flow - capex for periods where both are present.
+
+    Capex is PaymentsToAcquirePropertyPlantAndEquipment, reported as a positive outflow,
+    so FCF = operating_cash_flow - capex.
+    """
+    if frame.empty or "metric" not in frame.columns:
+        return frame
+    period_columns = [col for col in frame.columns if col not in {"metric", "unit"}]
+    if not period_columns:
+        return frame
+    ocf_rows = frame[frame["metric"] == "operating_cash_flow"]
+    capex_rows = frame[frame["metric"] == "capex"]
+    if ocf_rows.empty or capex_rows.empty:
+        return frame
+    ocf_row = ocf_rows.iloc[0]
+    capex_row = capex_rows.iloc[0]
+    fcf_values: dict[str, object] = {}
+    any_value = False
+    for col in period_columns:
+        ocf = ocf_row[col]
+        capex = capex_row[col]
+        if _is_positive_number(ocf) and _is_positive_number(capex):
+            fcf_values[col] = float(ocf) - float(capex)
+            any_value = True
+        else:
+            fcf_values[col] = None
+    if not any_value:
+        return frame
+    unit = ocf_row.get("unit", "USD")
+    new_row = {"metric": "free_cash_flow", "unit": unit, **fcf_values}
+    return pd.concat([frame, pd.DataFrame([new_row])], ignore_index=True)
 
 
 def _can_use_basic_share_fallback(
