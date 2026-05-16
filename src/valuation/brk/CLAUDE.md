@@ -57,6 +57,11 @@ Recent completed output:
 Next major output:
 
 - improve Berkshire SOTP by separating more non-13F assets/liabilities and making segment earnings history more valuation-ready
+- next concrete Berkshire tasks:
+  - add segment earnings history/multiple context to `./vf brk sotp`
+  - split fixed maturity securities and other non-13F assets more explicitly if filing tables support it
+  - add issuer-level 13F change summaries that separate share-count changes from value changes
+  - include `./vf brk sotp --price-change 1M` in the next live QA sweep
 
 Rules:
 

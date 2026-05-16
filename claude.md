@@ -271,6 +271,22 @@ Latest Berkshire live check on 2026-05-16:
   - latest segment pre-tax earnings around $51.7B
   - residual-to-segment-pre-tax-earnings around 7.2x
 
+Next concrete tasks:
+
+1. Berkshire SOTP:
+   - separate more non-13F assets/liabilities from the residual where filing tables support it
+   - add a segment earnings history/multiple table so the current 7.2x residual context can be compared across years
+   - decide whether fixed maturity securities should remain in net liquidity or be shown as a separate investment bucket
+2. Generic company workflow:
+   - investigate JPM stale revenue in overview; likely bank-specific companyfacts concept freshness, but confirm before adding rules
+   - consider extracting reusable market-snapshot freshness/provenance helpers if another module starts duplicating them
+3. Berkshire 13F history:
+   - add optional export-friendly change summaries by issuer across filings
+   - consider distinguishing share-count changes from price-driven value changes in history output
+4. QA:
+   - run one more live sweep before merging `brk` back toward `main`
+   - include `./vf brk sotp --price-change 1M` in that sweep because it exercises the most Yahoo live-price paths
+
 ## Resume Plan
 
 When resuming work after the current overview hardening, keep the next steps in this order:
