@@ -428,6 +428,14 @@ Immediate next implementation target:
     - key financials
     - statement availability
     - recent filings
+  - live smoke sweep on 2026-05-16 after overview/availability hardening:
+    - commands checked for `AAPL`, `BRK-B`, `JPM`, `BNP.PA`, and `NESN.SW`
+    - `company`, `statements --statement income --period annual`, and `statements --statement balance --period quarterly` all exited 0
+    - market overview rows showed current `latest_price_date=2026-05-15` for all five names
+    - SEC-backed `AAPL` had full statement availability in company view
+    - `BRK-B` and `JPM` correctly surfaced sector/company-shape partial coverage reasons
+    - Yahoo-backed `BNP.PA` and `NESN.SW` worked through company and statements paths, with provider gaps explicit for missing quarterly frames
+    - observed follow-up: JPM overview `revenue` can be stale while net income and balance rows are current; this may be real companyfacts concept coverage and should not be forced without a better bank-specific overview rule
 
 ## Test Notes
 
