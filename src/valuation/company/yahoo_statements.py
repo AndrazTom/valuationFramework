@@ -132,7 +132,43 @@ def build_yahoo_statement_table(
 
     if not rows:
         return pd.DataFrame(columns=["metric", "unit", *[period_info["label"] for period_info in periods]])
-    return pd.DataFrame(rows)
+    result = pd.DataFrame(rows)
+    if statement == "cashflow":
+        result = _add_yahoo_free_cash_flow_row(result)
+    return result
+
+
+def _add_yahoo_free_cash_flow_row(frame: pd.DataFrame) -> pd.DataFrame:
+    """Append free_cash_flow = operating_cash_flow - capex for each period."""
+    if frame.empty or "metric" not in frame.columns:
+        return frame
+    period_cols = [c for c in frame.columns if c not in {"metric", "unit"}]
+    if not period_cols:
+        return frame
+    ocf_rows = frame[frame["metric"] == "operating_cash_flow"]
+    capex_rows = frame[frame["metric"] == "capex"]
+    if ocf_rows.empty or capex_rows.empty:
+        return frame
+    ocf_row = ocf_rows.iloc[0]
+    capex_row = capex_rows.iloc[0]
+    fcf_values: dict[str, object] = {}
+    any_value = False
+    for col in period_cols:
+        ocf = ocf_row[col]
+        capex = capex_row[col]
+        if not pd.isna(ocf) and not pd.isna(capex):
+            try:
+                fcf_values[col] = float(ocf) - float(capex)
+                any_value = True
+            except (TypeError, ValueError):
+                fcf_values[col] = None
+        else:
+            fcf_values[col] = None
+    if not any_value:
+        return frame
+    unit = ocf_row.get("unit", "USD")
+    new_row = {"metric": "free_cash_flow", "unit": unit, **fcf_values}
+    return pd.concat([frame, pd.DataFrame([new_row])], ignore_index=True)
 
 
 def build_yahoo_statement_table_ttm(
