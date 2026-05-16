@@ -41,15 +41,33 @@ COMMON_FACT_DEFINITIONS = (
     ),
     CompanyFactQuery("total_assets", (("us-gaap", "Assets"),)),
     CompanyFactQuery("total_liabilities", (("us-gaap", "Liabilities"),)),
-    CompanyFactQuery("stockholders_equity", (("us-gaap", "StockholdersEquity"),)),
+    CompanyFactQuery(
+        "stockholders_equity",
+        (
+            ("us-gaap", "StockholdersEquity"),
+            ("us-gaap", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"),
+        ),
+    ),
     CompanyFactQuery(
         "revenue",
         (
             ("us-gaap", "Revenues"),
             ("us-gaap", "RevenueFromContractWithCustomerExcludingAssessedTax"),
+            ("us-gaap", "RevenuesNetOfInterestExpense"),
+            ("us-gaap", "InterestIncomeOperating"),
+            ("us-gaap", "InterestIncomeExpenseNet"),
+            ("us-gaap", "NoninterestIncome"),
         ),
     ),
-    CompanyFactQuery("net_income", (("us-gaap", "NetIncomeLoss"),)),
+    CompanyFactQuery(
+        "net_income",
+        (
+            ("us-gaap", "NetIncomeLoss"),
+            ("us-gaap", "NetIncomeLossAvailableToCommonStockholdersDiluted"),
+            ("us-gaap", "NetIncomeLossAvailableToCommonStockholdersBasic"),
+            ("us-gaap", "ProfitLoss"),
+        ),
+    ),
     CompanyFactQuery(
         "operating_cash_flow",
         (("us-gaap", "NetCashProvidedByUsedInOperatingActivities"),),
