@@ -373,6 +373,10 @@ Immediate next implementation target:
     - when that happens, the snapshot should derive current `market_cap` as `last_price * shares`
     - keep `market_cap_source` so downstream users can tell direct Yahoo market cap from derived current market cap
     - overview market rows should carry `taxonomy=yfinance`, `concept=<metric>`, and `matched_label` for the provider field or derived market-cap source
+    - overview market rows should mark quote completeness as:
+      - `current` when `latest_price_date` is within 7 days
+      - `stale` when older than 7 days
+      - `missing` when a value exists but the quote date is absent
   - `company` should show a statement-availability table with:
     - `statement`
     - `period`
@@ -397,7 +401,7 @@ Immediate next implementation target:
     - `Yahoo returned no statement frame`
     - `Statement frame present but no mapped metrics`
   - overview unavailable reasons should be metric-specific where possible:
-    - SEC rows should list the candidate concepts attempted
+    - SEC rows should distinguish absent candidate concepts, present concepts with missing requested units, and present concepts with no usable values
     - Yahoo rows with a non-empty frame should distinguish absent candidate labels from present-but-blank labels
   - for SEC issuers, recent filings in `company` should prefer analysis-relevant forms like:
     - `10-K`

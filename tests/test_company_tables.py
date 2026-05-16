@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 import pandas as pd
 
@@ -163,7 +165,7 @@ def test_build_sec_overview_table_includes_market_and_financial_rows():
             "market_cap": 4000000000.0,
             "market_cap_source": "last_price_x_shares",
             "shares": 16000000.0,
-            "latest_price_date": "2026-04-10",
+            "latest_price_date": date.today().isoformat(),
         },
         company_facts=company_facts,
         currency="USD",
@@ -196,7 +198,116 @@ def test_build_sec_overview_table_includes_market_and_financial_rows():
     assert revenue["form"] == "10-K"
     assert net_income["status"] == "unavailable"
     assert net_income["completeness"] == "missing"
-    assert net_income["reason"] == "No matching SEC companyfacts concepts: NetIncomeLoss"
+    assert net_income["reason"] == "No SEC companyfacts concepts found: NetIncomeLoss"
+
+
+def test_build_sec_overview_table_marks_market_snapshot_stale_when_quote_date_is_old():
+    table = build_sec_overview_table(
+        market_snapshot={
+            "last_price": 250.0,
+            "market_cap": 4000000000.0,
+            "shares": 16000000.0,
+            "latest_price_date": "2000-01-01",
+        },
+        company_facts={"facts": {}},
+        currency="USD",
+    )
+
+    last_price = table[table["metric"] == "last_price"].iloc[0]
+
+    assert last_price["status"] == "available"
+    assert last_price["completeness"] == "stale"
+    assert last_price["reason"] == "Market snapshot date older than 7 days: 2000-01-01"
+
+
+def test_build_sec_overview_table_marks_market_snapshot_missing_when_quote_date_is_absent():
+    table = build_sec_overview_table(
+        market_snapshot={
+            "last_price": 250.0,
+            "market_cap": 4000000000.0,
+            "shares": 16000000.0,
+        },
+        company_facts={"facts": {}},
+        currency="USD",
+    )
+
+    last_price = table[table["metric"] == "last_price"].iloc[0]
+
+    assert last_price["status"] == "available"
+    assert last_price["completeness"] == "missing"
+    assert last_price["reason"] == "Market snapshot date unavailable"
+
+
+def test_build_sec_overview_table_distinguishes_sec_concept_with_wrong_unit():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "NetIncomeLoss": {
+                    "units": {
+                        "EUR": [
+                            {
+                                "val": 100.0,
+                                "fy": 2025,
+                                "fp": "FY",
+                                "end": "2025-12-31",
+                                "filed": "2026-01-31",
+                                "form": "10-K",
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+
+    table = build_sec_overview_table(
+        market_snapshot={},
+        company_facts=company_facts,
+        currency="USD",
+    )
+
+    net_income = table[table["metric"] == "net_income"].iloc[0]
+
+    assert net_income["status"] == "unavailable"
+    assert net_income["reason"] == (
+        "SEC companyfacts concepts found but no USD units: NetIncomeLoss"
+    )
+
+
+def test_build_sec_overview_table_distinguishes_sec_concept_with_blank_values():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "NetIncomeLoss": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": None,
+                                "fy": 2025,
+                                "fp": "FY",
+                                "end": "2025-12-31",
+                                "filed": "2026-01-31",
+                                "form": "10-K",
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+
+    table = build_sec_overview_table(
+        market_snapshot={},
+        company_facts=company_facts,
+        currency="USD",
+    )
+
+    net_income = table[table["metric"] == "net_income"].iloc[0]
+
+    assert net_income["status"] == "unavailable"
+    assert net_income["reason"] == (
+        "SEC companyfacts concepts found but no usable USD values: NetIncomeLoss"
+    )
 
 
 def test_build_yahoo_overview_table_marks_missing_financial_metrics():

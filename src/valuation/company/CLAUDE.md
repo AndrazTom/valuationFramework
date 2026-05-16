@@ -46,8 +46,12 @@ Rules:
   - `taxonomy=yfinance`
   - `concept` as the snapshot metric name
   - `matched_label` as the provider field or market-cap derivation source
+- market overview completeness uses `latest_price_date`:
+  - `current` within 7 days
+  - `stale` when older
+  - `missing` when values exist without a quote date
 - unavailable overview reasons should stay metric-specific:
-  - SEC missing rows should list the candidate companyfacts concepts tried
+  - SEC missing rows should distinguish absent concepts, missing requested units, and present-but-blank values
   - Yahoo missing rows with non-empty frames should distinguish missing labels from labels present with blank values
 - statement availability rows should distinguish:
   - `available`
