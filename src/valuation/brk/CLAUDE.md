@@ -64,6 +64,8 @@ Next major output:
 
 - improve Berkshire SOTP by separating more non-13F assets/liabilities and making segment earnings history more valuation-ready
 - next concrete Berkshire tasks:
+  - inspect BRK filing statement tables for EPS and weighted-average share rows missing from current SEC companyfacts statements
+  - keep any BRK-specific statement fallback in this subtree unless it proves generic
   - add segment earnings history/multiple context to detailed SOTP output without bloating the default view
   - split fixed maturity securities and other non-13F assets more explicitly if filing tables support it
   - add issuer-level 13F change summaries that separate share-count changes from value changes
