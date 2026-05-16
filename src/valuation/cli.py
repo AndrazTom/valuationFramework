@@ -16,10 +16,13 @@ from valuation.company.tables import (
     build_key_financials_table,
     build_sec_overview_table,
     build_sec_statement_availability_table,
+    build_valuation_ratios_table,
     build_yahoo_overview_table,
     build_yahoo_snapshot_key_financials_table,
     build_yahoo_statement_availability_table,
     company_summary_to_table,
+    extract_financials_from_company_facts,
+    extract_financials_from_yahoo_frames,
     resolution_to_table,
 )
 from valuation.company.yahoo_statements import build_yahoo_statement_table
@@ -177,6 +180,15 @@ def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limi
             )
         )
         sections.append(("Key Financials", build_key_financials_table(bundle.company_facts)))
+        sections.append(
+            (
+                "Valuation Ratios",
+                build_valuation_ratios_table(
+                    bundle.market_snapshot,
+                    extract_financials_from_company_facts(bundle.company_facts),
+                ),
+            )
+        )
         sections.append(("Statement Availability", build_sec_statement_availability_table(bundle.company_facts)))
     elif bundle.company_profile:
         yahoo = YahooFinanceClient()
@@ -219,6 +231,19 @@ def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limi
                     balance_frame=frames[("balance", "annual")],
                     cashflow_frame=frames[("cashflow", "annual")],
                     currency=company_currency,
+                ),
+            )
+        )
+        sections.append(
+            (
+                "Valuation Ratios",
+                build_valuation_ratios_table(
+                    bundle.market_snapshot,
+                    extract_financials_from_yahoo_frames(
+                        income_frame=frames[("income", "annual")],
+                        balance_frame=frames[("balance", "annual")],
+                        cashflow_frame=frames[("cashflow", "annual")],
+                    ),
                 ),
             )
         )

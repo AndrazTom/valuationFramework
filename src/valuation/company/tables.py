@@ -297,6 +297,99 @@ def build_yahoo_overview_table(
     return pd.DataFrame(rows)
 
 
+def build_valuation_ratios_table(
+    market_snapshot: Mapping[str, object],
+    financials: Mapping[str, float | None],
+) -> pd.DataFrame:
+    """Return standard market valuation ratios from market snapshot + financial metric values.
+
+    ``financials`` should map metric names (e.g. ``net_income``, ``revenue``,
+    ``stockholders_equity``, ``operating_cash_flow``, ``capex``) to their latest
+    annual values in the reporting currency.  Missing or zero denominators produce
+    no row for that ratio.
+    """
+    market_cap = _to_float(market_snapshot.get("market_cap"))
+    if market_cap is None:
+        price = _to_float(market_snapshot.get("last_price"))
+        shares = _to_float(market_snapshot.get("shares"))
+        if price and shares:
+            market_cap = price * shares
+
+    net_income = _to_float(financials.get("net_income"))
+    revenue = _to_float(financials.get("revenue"))
+    equity = _to_float(financials.get("stockholders_equity"))
+    ocf = _to_float(financials.get("operating_cash_flow"))
+    capex = _to_float(financials.get("capex"))
+    fcf = (ocf - capex) if ocf is not None and capex is not None else None
+
+    def _ratio(denominator: float | None) -> float | None:
+        if market_cap is None or denominator is None or denominator == 0.0:
+            return None
+        return market_cap / denominator
+
+    candidates = [
+        ("pe_ratio", _ratio(net_income), "Market cap / Net income (LTM)"),
+        ("ps_ratio", _ratio(revenue), "Market cap / Revenue (LTM)"),
+        ("pb_ratio", _ratio(equity), "Market cap / Stockholders equity"),
+        ("price_to_fcf", _ratio(fcf), "Market cap / (Operating cash flow - Capex)"),
+    ]
+    rows = [
+        {"ratio": name, "value": value, "note": note}
+        for name, value, note in candidates
+        if value is not None
+    ]
+    return pd.DataFrame(rows)
+
+
+def extract_financials_from_company_facts(company_facts: Mapping[str, object]) -> dict[str, float | None]:
+    """Extract a flat metric→value dict from SEC companyfacts for ratio calculation."""
+    facts_table = company_facts_to_table(company_facts, COMMON_FACT_DEFINITIONS)
+    return {
+        str(row["metric"]): _to_float(row.get("value"))
+        for row in facts_table.to_dict(orient="records")
+    }
+
+
+def extract_financials_from_yahoo_frames(
+    income_frame: pd.DataFrame,
+    balance_frame: pd.DataFrame,
+    cashflow_frame: pd.DataFrame,
+) -> dict[str, float | None]:
+    """Extract a flat metric→value dict from Yahoo annual statement frames for ratio calculation."""
+    result: dict[str, float | None] = {}
+    frames = {
+        "income": income_frame,
+        "balance": balance_frame,
+        "cashflow": cashflow_frame,
+    }
+    for statement, frame in frames.items():
+        if frame is None or frame.empty:
+            continue
+        transposed = frame.transpose().copy()
+        transposed.index = pd.to_datetime(transposed.index, errors="coerce")
+        transposed = transposed.sort_index(ascending=False)
+        for metric, candidates in YAHOO_STATEMENT_LABELS[statement].items():
+            if metric in result:
+                continue
+            for timestamp, row in transposed.iterrows():
+                _, value = _resolve_yahoo_value_with_label(row, candidates=candidates)
+                if value is not None:
+                    result[metric] = value
+                    break
+    return result
+
+
+def _to_float(value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, float) and pd.isna(value):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def build_sec_statement_availability_table(company_facts: dict) -> pd.DataFrame:
     """Summarize generic statement availability from SEC companyfacts."""
     rows = []
