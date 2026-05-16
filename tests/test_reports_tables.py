@@ -191,7 +191,7 @@ def test_render_terminal_table_splits_period_columns_to_fit_width():
 def test_render_terminal_table_uses_compact_value_aliases():
     frame = pd.DataFrame(
         [
-            {"field": "residual_to_segment_pretax_earnings", "value": 7.2},
+            {"field": "residual_to_pretax_earnings_multiple", "value": 7.2},
             {"field": "short_term_us_treasury_bills", "value": 286_000_000_000.0},
         ]
     )

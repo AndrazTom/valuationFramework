@@ -911,7 +911,7 @@ def test_build_operating_business_context_table_compares_residual_to_segment_ear
 
     residual = context[context["field"] == "residual_operating_and_other_usd"].iloc[0]["value"]
     pretax = context[context["field"] == "operating_segment_pretax_earnings_usd"].iloc[0]["value"]
-    multiple = context[context["field"] == "residual_to_segment_pretax_earnings"].iloc[0]["value"]
+    multiple = context[context["field"] == "residual_to_pretax_earnings_multiple"].iloc[0]["value"]
 
     assert context[context["field"] == "operating_segment_count"].iloc[0]["value"] == 2
     assert pretax == 50 * M

@@ -60,6 +60,8 @@ def _format_value_for_display(value: Any, column: str, row: pd.Series, table_cur
         return format_percent(value)
     if kind == "quantity":
         return format_quantity(value)
+    if kind == "multiple":
+        return f"{float(value):.1f}x" if _is_number(value) else value
     return value
 
 
@@ -87,7 +89,7 @@ def _infer_format_kind(column: str, row: pd.Series) -> Optional[str]:
         "voting_sole",
         "voting_shared",
         "voting_none",
-    } or "shares" in column_name:
+    } or "share" in column_name:
         return "quantity"
     if "metric" in row and column_name not in {"metric", "unit"}:
         return _infer_kind_from_field(str(row["metric"]).lower())
@@ -102,6 +104,8 @@ def _infer_kind_from_field(field_name: str) -> Optional[str]:
     normalized_field = field_name.strip().lower().replace(" ", "_").replace("-", "_")
     if normalized_field.endswith("_pct") or normalized_field.endswith("_ratio"):
         return "percent"
+    if normalized_field.endswith("_multiple"):
+        return "multiple"
     if normalized_field.endswith("_usd"):
         return "currency"
     if "weight" in normalized_field:
