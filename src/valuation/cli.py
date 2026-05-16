@@ -23,6 +23,7 @@ from valuation.company.tables import (
     company_summary_to_table,
     extract_financials_from_company_facts,
     extract_financials_from_yahoo_frames,
+    extract_financials_ttm_from_company_facts,
     extract_period_label_from_company_facts,
     resolution_to_table,
 )
@@ -181,13 +182,14 @@ def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limi
             )
         )
         sections.append(("Key Financials", build_key_financials_table(bundle.company_facts)))
+        _ttm_financials, _ttm_label = extract_financials_ttm_from_company_facts(bundle.company_facts)
         sections.append(
             (
                 "Valuation Ratios",
                 build_valuation_ratios_table(
                     bundle.market_snapshot,
-                    extract_financials_from_company_facts(bundle.company_facts),
-                    period_label=extract_period_label_from_company_facts(bundle.company_facts),
+                    _ttm_financials,
+                    period_label=_ttm_label or extract_period_label_from_company_facts(bundle.company_facts),
                 ),
             )
         )

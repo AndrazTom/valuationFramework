@@ -444,6 +444,54 @@ def extract_financials_from_company_facts(company_facts: Mapping[str, object]) -
     }
 
 
+def extract_financials_ttm_from_company_facts(company_facts: Mapping[str, object]) -> tuple[dict[str, float | None], str | None]:
+    """Extract TTM financials from SEC companyfacts by summing 4 quarters.
+
+    Returns (financials_dict, ttm_label) where ttm_label is e.g. 'TTM' or '3Q TTM'
+    if fewer than 4 quarters were available. Balance-sheet metrics come from the
+    latest quarterly snapshot.
+
+    Falls back to annual values when quarterly data is unavailable.
+    """
+    from valuation.company.statements import build_statement_table_ttm, build_statement_table
+
+    result: dict[str, float | None] = {}
+
+    # Income statement: TTM from quarterly reconstruction
+    income_ttm = build_statement_table_ttm(company_facts, statement="income")
+    _ttm_col = next((c for c in income_ttm.columns if c not in {"metric", "unit"}), None)
+    ttm_label: str | None = _ttm_col  # e.g. "TTM" or "3Q TTM"
+    if _ttm_col:
+        for _, row in income_ttm.iterrows():
+            result[str(row["metric"])] = _to_float(row.get(_ttm_col))
+
+    # Cashflow: TTM
+    cashflow_ttm = build_statement_table_ttm(company_facts, statement="cashflow")
+    cf_col = next((c for c in cashflow_ttm.columns if c not in {"metric", "unit"}), None)
+    if cf_col:
+        for _, row in cashflow_ttm.iterrows():
+            m = str(row["metric"])
+            if m not in result:
+                result[m] = _to_float(row.get(cf_col))
+
+    # Balance sheet: latest quarterly snapshot (instant, TTM doesn't apply)
+    balance_latest = build_statement_table(company_facts, statement="balance", period="quarterly", limit=1)
+    bal_cols = [c for c in balance_latest.columns if c not in {"metric", "unit"}]
+    if bal_cols:
+        for _, row in balance_latest.iterrows():
+            m = str(row["metric"])
+            if m not in result:
+                result[m] = _to_float(row.get(bal_cols[0]))
+
+    # Fall back to annual for any metric that's still missing
+    annual = extract_financials_from_company_facts(company_facts)
+    for metric, value in annual.items():
+        if metric not in result or result[metric] is None:
+            result[metric] = value
+
+    return result, ttm_label
+
+
 def extract_period_label_from_company_facts(company_facts: Mapping[str, object]) -> str | None:
     """Return a human-readable label for the latest annual period in the company facts (e.g. 'FY 2024')."""
     facts_table = company_facts_to_table(company_facts, COMMON_FACT_DEFINITIONS)
