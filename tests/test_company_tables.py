@@ -797,3 +797,36 @@ def test_build_valuation_ratios_table_includes_price_to_owner_earnings():
     ratios = {row["ratio"]: row["value"] for _, row in table.iterrows()}
     assert "price_to_owner_earnings" in ratios
     assert ratios["price_to_owner_earnings"] == pytest.approx(1_000.0 / 60.0)
+
+
+def test_extract_financials_ttm_from_company_facts_sums_quarterly_income():
+    from valuation.company.tables import extract_financials_ttm_from_company_facts
+
+    facts = _make_income_company_facts_sec()
+    financials, ttm_label = extract_financials_ttm_from_company_facts(facts)
+
+    assert ttm_label == "TTM"  # all 4 quarters available
+    # Revenue TTM = Q1(100) + Q2(120) + Q3(110) + Q4(130) = 460
+    assert financials.get("revenue") == pytest.approx(460.0)
+    # Net income TTM = Q1(10) + Q2(12) + Q3(11) + Q4(13) = 46
+    assert financials.get("net_income") == pytest.approx(46.0)
+
+
+def test_extract_financials_ttm_from_company_facts_falls_back_to_annual():
+    from valuation.company.tables import extract_financials_ttm_from_company_facts
+
+    # No quarterly data → should fall back to annual
+    facts = {
+        "facts": {
+            "us-gaap": {
+                "Revenues": {
+                    "units": {
+                        "USD": [{"val": 200.0, "fy": 2024, "fp": "FY", "end": "2024-12-31", "filed": "2025-01-31", "form": "10-K"}]
+                    }
+                }
+            }
+        }
+    }
+    financials, ttm_label = extract_financials_ttm_from_company_facts(facts)
+    # No quarterly quarters → label would be e.g. "0Q TTM" or None; falls back to annual
+    assert financials.get("revenue") == pytest.approx(200.0)
