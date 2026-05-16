@@ -23,6 +23,7 @@ from valuation.company.tables import (
     company_summary_to_table,
     extract_financials_from_company_facts,
     extract_financials_from_yahoo_frames,
+    extract_period_label_from_company_facts,
     resolution_to_table,
 )
 from valuation.company.yahoo_statements import build_yahoo_statement_table
@@ -186,6 +187,7 @@ def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limi
                 build_valuation_ratios_table(
                     bundle.market_snapshot,
                     extract_financials_from_company_facts(bundle.company_facts),
+                    period_label=extract_period_label_from_company_facts(bundle.company_facts),
                 ),
             )
         )
@@ -234,16 +236,18 @@ def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limi
                 ),
             )
         )
+        yahoo_financials = extract_financials_from_yahoo_frames(
+            income_frame=frames[("income", "annual")],
+            balance_frame=frames[("balance", "annual")],
+            cashflow_frame=frames[("cashflow", "annual")],
+        )
         sections.append(
             (
                 "Valuation Ratios",
                 build_valuation_ratios_table(
                     bundle.market_snapshot,
-                    extract_financials_from_yahoo_frames(
-                        income_frame=frames[("income", "annual")],
-                        balance_frame=frames[("balance", "annual")],
-                        cashflow_frame=frames[("cashflow", "annual")],
-                    ),
+                    yahoo_financials,
+                    period_label=_yahoo_period_label(frames[("income", "annual")]),
                 ),
             )
         )
@@ -537,6 +541,22 @@ def _require_statement_rows(
     if period_columns and not frame.empty:
         return
     raise ValueError(f"No {period} {statement} statement data available for {identifier}")
+
+
+def _yahoo_period_label(income_frame) -> str | None:
+    """Extract a period label like 'FY 2024' from the most recent Yahoo annual income frame column."""
+    import pandas as pd
+
+    if income_frame is None or income_frame.empty:
+        return None
+    try:
+        timestamps = sorted(pd.to_datetime(income_frame.columns, errors="coerce"), reverse=True)
+        for ts in timestamps:
+            if not pd.isna(ts):
+                return f"FY {ts.year}"
+    except Exception:
+        pass
+    return None
 
 
 if __name__ == "__main__":

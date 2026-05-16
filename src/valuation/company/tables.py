@@ -350,6 +350,8 @@ def build_yahoo_overview_table(
 def build_valuation_ratios_table(
     market_snapshot: Mapping[str, object],
     financials: Mapping[str, float | None],
+    *,
+    period_label: str | None = None,
 ) -> pd.DataFrame:
     """Return standard market valuation ratios from market snapshot + financial metric values.
 
@@ -357,6 +359,7 @@ def build_valuation_ratios_table(
     ``stockholders_equity``, ``operating_cash_flow``, ``capex``, ``long_term_debt``,
     ``operating_income``, ``depreciation_amortization``) to their latest annual values
     in the reporting currency.  Missing or zero denominators produce no row for that ratio.
+    ``period_label`` is displayed in the ``as_of`` column when provided (e.g. ``"FY 2024"``).
     """
     market_cap = _to_float(market_snapshot.get("market_cap"))
     if market_cap is None:
@@ -403,7 +406,7 @@ def build_valuation_ratios_table(
         ("ev_to_ebitda", _ratio(ev, ebitda), "EV / EBITDA (EBITDA = op income + D&A)"),
     ]
     rows = [
-        {"ratio": name, "value": value, "note": note}
+        {"ratio": name, "value": value, "as_of": period_label, "note": note}
         for name, value, note in candidates
         if value is not None
     ]
@@ -417,6 +420,26 @@ def extract_financials_from_company_facts(company_facts: Mapping[str, object]) -
         str(row["metric"]): _to_float(row.get("value"))
         for row in facts_table.to_dict(orient="records")
     }
+
+
+def extract_period_label_from_company_facts(company_facts: Mapping[str, object]) -> str | None:
+    """Return a human-readable label for the latest annual period in the company facts (e.g. 'FY 2024')."""
+    facts_table = company_facts_to_table(company_facts, COMMON_FACT_DEFINITIONS)
+    # Use net_income end date as the representative period marker
+    for metric in ("net_income", "revenue", "operating_cash_flow"):
+        rows = facts_table[facts_table["metric"] == metric]
+        if rows.empty:
+            continue
+        end_val = rows.iloc[0].get("end")
+        if end_val is None:
+            continue
+        try:
+            end_str = str(end_val)
+            year = end_str[:4]
+            return f"FY {year}"
+        except Exception:
+            continue
+    return None
 
 
 def extract_financials_from_yahoo_frames(
