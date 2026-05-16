@@ -18,6 +18,7 @@ Current Berkshire stack:
   - `./vf brk liquidity`
 - `./vf brk segments`
 - `./vf brk sotp`
+- `./vf brk sotp --details`
 - latest 13F holdings
 - recent 13F holdings history via `./vf brk holdings --history`
 - optional live-price revaluation for resolved holdings
@@ -28,6 +29,7 @@ Current Berkshire stack:
 - top-level operating segment extraction from filing report tables
 - first Berkshire market-implied SOTP bridge
 - SOTP now includes operating-business context that compares the residual to latest reported segment pre-tax earnings
+- default SOTP output should stay compact; keep supporting assumptions, quoted-holdings, liquidity, and segment-period tables behind `--details`
 - liquidity and segments both support:
   - `--period annual|quarterly`
   - `--limit`
@@ -48,6 +50,10 @@ Recent completed output:
   - emits an `Operating Business Context` table from `./vf brk sotp`
   - compares residual operating-and-other value to latest top-level segment pre-tax earnings
   - treats the residual as a market-implied context bridge, not a standalone appraisal
+- SOTP output reduction:
+  - default `./vf brk sotp` now emits only the market-implied bridge, operating-business context, and explicit price-change comparison when requested
+  - use `./vf brk sotp --details` for assumptions, market anchor, quoted holdings, liquidity, and segment-period support tables
+  - 2026-05-16 live checks at `COLUMNS=100` kept both compact and detailed SOTP terminal output within width
 - live branch check on 2026-05-16:
   - `./vf brk holdings --history --filings-limit 2 --limit 5` exited 0
   - latest parsed 13F filings were 2026-05-15 / 2026-03-31 and 2026-02-17 / 2025-12-31
@@ -58,7 +64,7 @@ Next major output:
 
 - improve Berkshire SOTP by separating more non-13F assets/liabilities and making segment earnings history more valuation-ready
 - next concrete Berkshire tasks:
-  - add segment earnings history/multiple context to `./vf brk sotp`
+  - add segment earnings history/multiple context to detailed SOTP output without bloating the default view
   - split fixed maturity securities and other non-13F assets more explicitly if filing tables support it
   - add issuer-level 13F change summaries that separate share-count changes from value changes
   - include `./vf brk sotp --price-change 1M` in the next live QA sweep

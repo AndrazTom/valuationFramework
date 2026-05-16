@@ -9,6 +9,7 @@ Rules:
 - render from stable backend tables or objects; do not invent business logic here
 - keep exact raw values intact in JSON output
 - apply display aliases and human-readable formatting only for terminal / markdown / csv presentation
+- terminal rendering is allowed to drop low-value metadata columns and older period columns to fit normal terminal widths; Markdown/CSV/JSON should remain complete
 - when adding a new `company` section, keep JSON bundle naming stable and make the section export alongside the table outputs
 - prefer small generic helpers over command-specific formatting branches
 - current export pattern is one `bundle.json` plus one file per section slug

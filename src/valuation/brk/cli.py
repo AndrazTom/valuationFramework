@@ -173,6 +173,11 @@ def register_brk_parser(subparsers) -> None:
         type=_price_change_window,
         help="Optional comparison window for BRK.B versus resolved holdings basket.",
     )
+    sotp_parser.add_argument(
+        "--details",
+        action="store_true",
+        help="Include supporting assumptions, market anchor, liquidity, holdings, and segment tables.",
+    )
 
 
 def run_brk_command(args: argparse.Namespace) -> int:
@@ -216,6 +221,7 @@ def run_brk_command(args: argparse.Namespace) -> int:
             outdir=args.outdir,
             period=args.period,
             price_change_window=args.price_change_window,
+            details=args.details,
         )
     raise ValueError(f"Unknown Berkshire command: {args.brk_command}")
 
@@ -448,6 +454,7 @@ def run_brk_sotp(
     outdir: str,
     period: str,
     price_change_window: str | None,
+    details: bool = False,
 ) -> int:
     """Build a first Berkshire market-implied SOTP bridge."""
     yahoo = YahooFinanceClient()
@@ -468,30 +475,7 @@ def run_brk_sotp(
         if price_change_window is not None
         else None
     )
-    liquidity_bridge = build_liquidity_bridge_table(bundle.liquidity.filings)
-    liquidity_summary = build_liquidity_summary_table(liquidity_bridge)
     sections = [
-        (
-            "Valuation Assumptions",
-            build_brk_valuation_assumptions_table(period=period),
-        ),
-        (
-            "Market Anchor",
-            build_market_anchor_table(bundle.overview.market_snapshot),
-        ),
-        (
-            "Public Equity Portfolio Summary",
-            build_public_equity_portfolio_summary_table(
-                bundle.holdings.holdings,
-                reference,
-                yahoo_client=yahoo,
-                enriched_holdings=enriched_holdings,
-            ),
-        ),
-        (
-            "Liquidity Snapshot",
-            build_latest_liquidity_snapshot_table(liquidity_bridge),
-        ),
         (
             "Market-Implied SOTP Bridge",
             build_market_implied_sotp_bridge_table(
@@ -512,20 +496,32 @@ def run_brk_sotp(
             ),
         ),
     ]
-    if price_change_window is not None:
-        sections.insert(
-            3,
+    if details:
+        liquidity_bridge = build_liquidity_bridge_table(bundle.liquidity.filings)
+        sections[0:0] = [
             (
-                "Quoted Holdings Summary",
-                build_13f_live_price_summary_table(
+                "Valuation Assumptions",
+                build_brk_valuation_assumptions_table(period=period),
+            ),
+            (
+                "Market Anchor",
+                build_market_anchor_table(bundle.overview.market_snapshot),
+            ),
+            (
+                "Public Equity Portfolio Summary",
+                build_public_equity_portfolio_summary_table(
                     bundle.holdings.holdings,
                     reference,
                     yahoo_client=yahoo,
-                    price_change_window=price_change_window,
                     enriched_holdings=enriched_holdings,
                 ),
             ),
-        )
+            (
+                "Liquidity Snapshot",
+                build_latest_liquidity_snapshot_table(liquidity_bridge),
+            ),
+        ]
+    if price_change_window is not None:
         sections.append(
             (
                 f"BRK vs Holdings Price Change ({price_change_window})",
@@ -539,20 +535,36 @@ def run_brk_sotp(
                 ),
             )
         )
-    else:
-        sections.insert(
-            3,
-            (
-                "Quoted Holdings Summary",
-                build_13f_live_price_summary_table(
-                    bundle.holdings.holdings,
-                    reference,
-                    yahoo_client=yahoo,
-                    enriched_holdings=enriched_holdings,
+    if details:
+        insert_at = 3
+        if price_change_window is not None:
+            sections.insert(
+                insert_at,
+                (
+                    "Quoted Holdings Summary",
+                    build_13f_live_price_summary_table(
+                        bundle.holdings.holdings,
+                        reference,
+                        yahoo_client=yahoo,
+                        price_change_window=price_change_window,
+                        enriched_holdings=enriched_holdings,
+                    ),
                 ),
-            ),
-        )
-    sections.extend(build_segment_period_sections(bundle.segments.filings, period=period))
+            )
+        else:
+            sections.insert(
+                insert_at,
+                (
+                    "Quoted Holdings Summary",
+                    build_13f_live_price_summary_table(
+                        bundle.holdings.holdings,
+                        reference,
+                        yahoo_client=yahoo,
+                        enriched_holdings=enriched_holdings,
+                    ),
+                ),
+            )
+        sections.extend(build_segment_period_sections(bundle.segments.filings, period=period))
     _emit_sections(sections, Path(outdir) / "BRK_SOTP")
     return 0
 

@@ -594,6 +594,11 @@ def test_brk_sotp_cli_writes_expected_sections(monkeypatch, tmp_path: Path):
         "build_holdings_vs_brk_price_change_table",
         lambda holdings, reference, yahoo_client=None, price_change_window=None, enriched_holdings=None, brk_snapshot=None: pd.DataFrame(),
     )
+    monkeypatch.setattr(
+        brk_cli,
+        "fetch_price_change_snapshot",
+        lambda ticker, price_change_window=None, yahoo_client=None: {"ticker": ticker},
+    )
     monkeypatch.setattr(brk_cli, "build_segment_period_sections", lambda filings, period="annual": [])
     monkeypatch.setattr(
         brk_cli,
@@ -614,6 +619,26 @@ def test_brk_sotp_cli_writes_expected_sections(monkeypatch, tmp_path: Path):
 
     assert result == 0
     assert captured["sections"] == [
+        "Market-Implied SOTP Bridge",
+        "Operating Business Context",
+        "BRK vs Holdings Price Change (1M)",
+    ]
+    assert "BRK vs Holdings Price Change (1M)" in captured["sections"]
+
+    result = cli.main(
+        [
+            "brk",
+            "sotp",
+            "--details",
+            "--price-change",
+            "1M",
+            "--outdir",
+            str(tmp_path),
+        ]
+    )
+
+    assert result == 0
+    assert captured["sections"] == [
         "Valuation Assumptions",
         "Market Anchor",
         "Public Equity Portfolio Summary",
@@ -623,7 +648,6 @@ def test_brk_sotp_cli_writes_expected_sections(monkeypatch, tmp_path: Path):
         "Operating Business Context",
         "BRK vs Holdings Price Change (1M)",
     ]
-    assert "BRK vs Holdings Price Change (1M)" in captured["sections"]
 
 
 def test_brk_segments_cli_rejects_invalid_range(tmp_path: Path):

@@ -55,7 +55,7 @@ def test_render_terminal_table_formats_statement_period_values():
         ]
     )
 
-    rendered = render_terminal_table(frame)
+    rendered = render_terminal_table(frame, max_width=120)
 
     assert "1.5B" in rendered
 
@@ -71,7 +71,7 @@ def test_render_terminal_table_uses_statement_unit_for_non_us_currency():
         ]
     )
 
-    rendered = render_terminal_table(frame)
+    rendered = render_terminal_table(frame, max_width=120)
 
     assert "EUR 1.5B" in rendered
 
@@ -130,3 +130,70 @@ def test_render_terminal_table_uses_new_filing_and_availability_aliases():
     assert "category" in rendered
     assert "periods" in rendered
     assert "metrics" in rendered
+
+
+def test_render_terminal_table_drops_secondary_columns_to_fit_width():
+    frame = pd.DataFrame(
+        [
+            {
+                "metric": "revenue",
+                "value": 100.0,
+                "status": "available",
+                "source_table": "companyfacts",
+                "concept": "RevenueFromContractWithCustomerExcludingAssessedTax",
+            }
+        ]
+    )
+
+    rendered = render_terminal_table(frame, max_width=80)
+
+    assert "revenue" in rendered
+    assert "available" in rendered
+    assert "source table" not in rendered
+    assert "concept" not in rendered
+
+    markdown = render_markdown_table(frame)
+
+    assert "source table" in markdown
+    assert "concept" in markdown
+
+
+def test_render_terminal_table_drops_old_period_columns_to_fit_width():
+    frame = pd.DataFrame(
+        [
+            {
+                "metric": "revenue",
+                "unit": "USD",
+                "FY 2025": 100.0,
+                "FY 2024": 90.0,
+                "FY 2023": 80.0,
+                "FY 2022": 70.0,
+                "FY 2021": 60.0,
+            }
+        ]
+    )
+
+    rendered = render_terminal_table(frame, max_width=72)
+
+    assert "FY 2025" in rendered
+    assert "FY 2024" in rendered
+    assert "FY 2021" not in rendered
+    assert max(len(line) for line in rendered.splitlines()) <= 72
+
+    markdown = render_markdown_table(frame)
+
+    assert "FY 2021" in markdown
+
+
+def test_render_terminal_table_uses_compact_value_aliases():
+    frame = pd.DataFrame(
+        [
+            {"field": "residual_to_segment_pretax_earnings", "value": 7.2},
+            {"field": "short_term_us_treasury_bills", "value": 286_000_000_000.0},
+        ]
+    )
+
+    rendered = render_terminal_table(frame)
+
+    assert "residual / pretax earnings" in rendered
+    assert "T-bills" in rendered

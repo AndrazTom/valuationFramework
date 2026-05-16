@@ -271,11 +271,22 @@ Latest Berkshire live check on 2026-05-16:
   - latest segment pre-tax earnings around $51.7B
   - residual-to-segment-pre-tax-earnings around 7.2x
 
+Current CLI hardening pass:
+
+- default `./vf brk sotp` should stay compact: market-implied bridge, operating-business context, and optional price-change comparison only
+- use `./vf brk sotp --details` for assumptions, market anchor, quoted holdings, liquidity snapshot, and segment-period support tables
+- terminal rendering now fits normal terminal widths by dropping secondary metadata columns and older period columns only in terminal output; CSV/Markdown/JSON exports remain complete
+- live checks at `COLUMNS=100` stayed within width for:
+  - `./vf brk sotp`
+  - `./vf brk sotp --details`
+  - `./vf statements AAPL --statement income --period quarterly --start-year 2024 --end-year 2025`
+  - `./vf company AAPL`
+
 Next concrete tasks:
 
 1. Berkshire SOTP:
    - separate more non-13F assets/liabilities from the residual where filing tables support it
-   - add a segment earnings history/multiple table so the current 7.2x residual context can be compared across years
+   - add a segment earnings history/multiple table to detailed SOTP output so the current 7.2x residual context can be compared across years
    - decide whether fixed maturity securities should remain in net liquidity or be shown as a separate investment bucket
 2. Generic company workflow:
    - investigate JPM stale revenue in overview; likely bank-specific companyfacts concept freshness, but confirm before adding rules

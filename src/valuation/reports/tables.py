@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
+import shutil
 import textwrap
 
 import pandas as pd
@@ -15,31 +17,84 @@ DISPLAY_COLUMN_ALIASES = {
     "accession_number": "accession",
     "accepted_at": "accepted at",
     "as_of": "as of",
+    "cash_and_equivalents_usd": "cash",
     "coverage_ratio": "coverage",
     "earnings_before_income_taxes_usd": "pre-tax earnings",
     "expected_metric_count": "expected metrics",
+    "filing_date": "filed",
     "filing_url": "filing url",
+    "fixed_maturity_securities_usd": "fixed maturities",
     "form_group": "category",
     "goodwill_usd": "goodwill",
     "identifiable_assets_usd": "assets",
     "depreciation_and_amortization_usd": "depr & amort",
     "interest_expense_usd": "interest expense",
     "latest_price_date": "price date",
+    "liquid_investments_total_usd": "gross liquidity",
     "metric_count": "metrics",
+    "net_liquid_investments_usd": "net liquidity",
+    "payable_for_purchase_of_us_treasury_bills_usd": "T-bill payable",
     "period_count": "periods",
+    "period_end": "as of",
     "price_change_pct": "price change",
+    "per_brk_b_share_usd": "/BRK.B",
+    "market_cap_weight": "% mkt cap",
+    "share_of_market_cap_pct": "% mkt cap",
     "report_date": "report date",
     "security_id": "security id",
     "identifier_kind": "id kind",
     "query_used": "query",
+    "short_term_us_treasury_bills_usd": "T-bills",
 }
 
+DISPLAY_VALUE_ALIASES = {
+    "operating_segment_pretax_earnings_usd": "segment pretax earnings",
+    "residual_operating_and_other_usd": "residual opco + other",
+    "residual_to_segment_pretax_earnings": "residual / pretax earnings",
+    "residual_market_cap_weight": "residual % mkt cap",
+    "public_equity_holdings_blended": "13F equities",
+    "quoted_holdings_plus_net_liquidity": "13F + net liquidity",
+    "residual_operating_and_other": "residual opco + other",
+    "payable_for_purchase_of_us_treasury_bills": "T-bill payable",
+    "short_term_us_treasury_bills": "T-bills",
+    "fixed_maturity_securities": "fixed maturities",
+    "cash_and_equivalents": "cash",
+}
 
-def render_terminal_table(frame: pd.DataFrame) -> str:
+TERMINAL_SECONDARY_COLUMNS = [
+    "filing url",
+    "primary document",
+    "description",
+    "is inline xbrl",
+    "source table",
+    "taxonomy",
+    "concept",
+    "matched label",
+    "form",
+    "filed",
+    "accession",
+    "report date",
+    "accepted at",
+    "reason",
+    "expected metrics",
+    "metrics",
+    "as of",
+    "period type",
+    "gross liquidity",
+    "goodwill",
+    "assets",
+    "interest expense",
+]
+
+TERMINAL_PERIOD_COLUMN_PATTERN = re.compile(r"^(FY \d{4}|\d{4} Q[1-4]|\d{4})$")
+
+
+def render_terminal_table(frame: pd.DataFrame, *, max_width: int | None = None) -> str:
     if frame.empty:
         return "(no rows)"
     display = _prepare_display_frame(frame, target="terminal")
-    return tabulate(display.fillna(""), headers="keys", tablefmt="github", showindex=False)
+    display = _fit_terminal_frame(display, max_width=max_width)
+    return _tabulate_terminal(display)
 
 
 def render_markdown_table(frame: pd.DataFrame) -> str:
@@ -77,17 +132,73 @@ def _prepare_display_frame(frame: pd.DataFrame, *, target: str) -> pd.DataFrame:
     display = humanize_frame(frame)
     display = display.rename(columns={column: _display_column_name(str(column), target=target) for column in display.columns})
     for column in display.columns:
-        if target == "terminal":
-            display[column] = [
-                _wrap_terminal_cell(value, column=column)
-                for value in display[column]
-            ]
         if str(column).lower() in {"field", "metric"}:
             display[column] = [
                 _humanize_label(value)
                 for value in display[column]
             ]
+        if target == "terminal":
+            display[column] = [
+                _wrap_terminal_cell(value, column=column)
+                for value in display[column]
+            ]
     return display
+
+
+def _fit_terminal_frame(frame: pd.DataFrame, *, max_width: int | None) -> pd.DataFrame:
+    width = max_width or _terminal_width()
+    if width <= 0:
+        return frame
+    fitted = frame.copy()
+    if _rendered_width(fitted) <= width:
+        return fitted
+    for column in TERMINAL_SECONDARY_COLUMNS:
+        if column not in fitted.columns:
+            continue
+        if len(fitted.columns) <= 3:
+            break
+        candidate = fitted.drop(columns=[column])
+        fitted = candidate
+        if _rendered_width(fitted) <= width:
+            return fitted
+    return _fit_terminal_period_columns(fitted, max_width=width)
+
+
+def _fit_terminal_period_columns(frame: pd.DataFrame, *, max_width: int) -> pd.DataFrame:
+    period_columns = [
+        column
+        for column in frame.columns
+        if _is_terminal_period_column(column)
+    ]
+    if len(period_columns) <= 2:
+        return frame
+    fitted = frame.copy()
+    retained_period_columns = len(period_columns)
+    for column in reversed(period_columns):
+        if retained_period_columns <= 2:
+            break
+        fitted = fitted.drop(columns=[column])
+        retained_period_columns -= 1
+        if _rendered_width(fitted) <= max_width:
+            return fitted
+    return fitted
+
+
+def _tabulate_terminal(frame: pd.DataFrame) -> str:
+    return tabulate(frame.fillna(""), headers="keys", tablefmt="github", showindex=False)
+
+
+def _rendered_width(frame: pd.DataFrame) -> int:
+    rendered = _tabulate_terminal(frame)
+    return max((len(line) for line in rendered.splitlines()), default=0)
+
+
+def _terminal_width() -> int:
+    return shutil.get_terminal_size(fallback=(120, 24)).columns
+
+
+def _is_terminal_period_column(column: object) -> bool:
+    return bool(TERMINAL_PERIOD_COLUMN_PATTERN.match(str(column)))
 
 
 def _display_column_name(column: str, *, target: str) -> str:
@@ -100,12 +211,12 @@ def _wrap_terminal_cell(value, *, column: str):
     text = str(value)
     column_name = str(column).lower()
     width = 24
-    if column_name in {"value", "segment"}:
-        width = 30
+    if column_name in {"value", "segment", "note", "method", "context note"}:
+        width = 26
     elif column_name in {"field", "metric"}:
-        width = 36
+        width = 26
     elif column_name in {"concept", "primary document", "description", "filing url", "reason", "website"}:
-        width = 36
+        width = 30
     elif column_name == "accession":
         width = 24
     if len(text) <= width or "\n" in text:
@@ -116,7 +227,12 @@ def _wrap_terminal_cell(value, *, column: str):
 def _humanize_label(value):
     if value is None:
         return value
-    text = str(value).replace("_", " ").strip()
+    raw = str(value).strip()
+    text = (
+        DISPLAY_VALUE_ALIASES.get(raw)
+        or DISPLAY_VALUE_ALIASES.get(raw.replace(" ", "_"))
+        or raw
+    ).replace("_", " ").strip()
     return text
 
 
