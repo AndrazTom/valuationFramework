@@ -11,7 +11,7 @@ from typing import Iterable, Optional, Sequence
 
 from valuation.brk.cli import register_brk_parser, run_brk_command
 from valuation.company.service import fetch_company_facts, fetch_company_snapshot
-from valuation.company.statements import build_statement_diagnostics_table, build_statement_table
+from valuation.company.statements import build_statement_diagnostics_table, build_statement_table, build_statement_table_ttm
 from valuation.company.tables import (
     build_key_financials_table,
     build_sec_overview_table,
@@ -98,7 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     statements_parser.add_argument(
         "--period",
-        choices=("annual", "quarterly"),
+        choices=("annual", "quarterly", "ttm"),
         default="annual",
     )
     statements_parser.add_argument(
@@ -311,17 +311,23 @@ def run_statements(
     )
     diagnostics_table = None
     if bundle.statement_source == "sec":
-        statement_table = build_statement_table(
-            bundle.company_facts,
-            statement=statement,
-            period=period,
-            limit=limit,
-            start_year=start_year,
-            end_year=end_year,
-            start_quarter=start_quarter,
-            end_quarter=end_quarter,
-        )
-        if diagnostics:
+        if period == "ttm":
+            statement_table = build_statement_table_ttm(
+                bundle.company_facts,
+                statement=statement,
+            )
+        else:
+            statement_table = build_statement_table(
+                bundle.company_facts,
+                statement=statement,
+                period=period,
+                limit=limit,
+                start_year=start_year,
+                end_year=end_year,
+                start_quarter=start_quarter,
+                end_quarter=end_quarter,
+            )
+        if diagnostics and period != "ttm":
             diagnostics_table = build_statement_diagnostics_table(
                 bundle.company_facts,
                 statement=statement,
@@ -334,24 +340,34 @@ def run_statements(
             )
     else:
         yahoo = YahooFinanceClient()
-        statement_table = build_yahoo_statement_table(
-            yahoo.fetch_statement_frame(bundle.resolution.ticker, statement=statement, period=period),
-            statement=statement,
-            period=period,
-            currency=str(bundle.resolution.currency or "USD"),
-            limit=limit,
-            start_year=start_year,
-            end_year=end_year,
-            start_quarter=start_quarter,
-            end_quarter=end_quarter,
-        )
+        yahoo_period = "quarterly" if period == "ttm" else period
+        raw_frame = yahoo.fetch_statement_frame(bundle.resolution.ticker, statement=statement, period=yahoo_period)
+        if period == "ttm":
+            from valuation.company.yahoo_statements import build_yahoo_statement_table_ttm
+            statement_table = build_yahoo_statement_table_ttm(
+                raw_frame,
+                statement=statement,
+                currency=str(bundle.resolution.currency or "USD"),
+            )
+        else:
+            statement_table = build_yahoo_statement_table(
+                raw_frame,
+                statement=statement,
+                period=period,
+                currency=str(bundle.resolution.currency or "USD"),
+                limit=limit,
+                start_year=start_year,
+                end_year=end_year,
+                start_quarter=start_quarter,
+                end_quarter=end_quarter,
+            )
     _require_statement_rows(
         statement_table,
         identifier=bundle.resolution.ticker,
         statement=statement,
         period=period,
     )
-    title = f"{statement.title()} Statement {period.title()}"
+    title = f"{statement.title()} Statement {'TTM' if period == 'ttm' else period.title()}"
     sections = [
         ("Resolution", resolution_to_table(bundle.resolution)),
         ("Company", company_summary_to_table(bundle.resolution)),
@@ -474,6 +490,8 @@ def _validate_statement_range(
     start_quarter: int | None,
     end_quarter: int | None,
 ) -> None:
+    if period == "ttm" and any(v is not None for v in (start_year, end_year, start_quarter, end_quarter)):
+        raise ValueError("year/quarter bounds are not supported for --period ttm")
     if period != "quarterly" and (start_quarter is not None or end_quarter is not None):
         raise ValueError("quarter bounds are only valid when --period quarterly is used")
     if (start_quarter is not None and start_year is None) or (
