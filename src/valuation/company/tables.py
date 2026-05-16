@@ -193,7 +193,7 @@ def build_sec_overview_table(
                 "matched_label": None,
                 "form": None,
                 "filed": None,
-                "reason": "No matching concepts found in SEC companyfacts",
+                "reason": _sec_metric_unavailable_reason(metric),
             }
         )
     return pd.DataFrame(rows)
@@ -245,7 +245,11 @@ def build_yahoo_overview_table(
         if frame is None or frame.empty:
             reason = f"Yahoo returned no annual {statement} statement frame"
         else:
-            reason = "Metric unavailable in Yahoo annual statements"
+            reason = _yahoo_metric_unavailable_reason(
+                metric=metric,
+                statement=statement,
+                frame=frame,
+            )
         rows.append(
             {
                 "metric": metric,
@@ -387,6 +391,40 @@ def _expected_sec_metrics(statement: str) -> tuple[str, ...]:
     )
 
 
+def _sec_metric_unavailable_reason(metric: str) -> str:
+    candidates = []
+    for query in COMMON_FACT_DEFINITIONS:
+        if query.metric == metric:
+            candidates = [concept for _, concept in query.candidates]
+            break
+    if not candidates:
+        return "No matching concepts found in SEC companyfacts"
+    return f"No matching SEC companyfacts concepts: {_compact_list(candidates)}"
+
+
+def _yahoo_metric_unavailable_reason(
+    *,
+    metric: str,
+    statement: str | None,
+    frame: pd.DataFrame,
+) -> str:
+    if statement is None:
+        return "Metric unavailable in Yahoo annual statements"
+    candidates = tuple(YAHOO_STATEMENT_LABELS.get(statement, {}).get(metric, ()))
+    if not candidates:
+        return "Metric unavailable in Yahoo annual statements"
+    present_labels = [label for label in candidates if label in frame.index]
+    if present_labels:
+        return (
+            f"Yahoo annual {statement} labels present but values blank: "
+            f"{_compact_list(present_labels)}"
+        )
+    return (
+        f"No Yahoo annual {statement} labels matched for {metric}; "
+        f"tried {_compact_list(candidates)}"
+    )
+
+
 def _partial_statement_reason(
     *,
     present_metrics: tuple[str, ...],
@@ -394,15 +432,17 @@ def _partial_statement_reason(
 ) -> str:
     present = set(present_metrics)
     missing = [metric for metric in expected_metrics if metric not in present]
-    missing_text = ", ".join(missing[:4])
-    if len(missing) > 4:
-        missing_text = f"{missing_text}, +{len(missing) - 4} more"
-    if not missing_text:
-        missing_text = "unknown"
     return (
         f"Partial metric coverage: {len(present_metrics)}/{len(expected_metrics)} "
-        f"metrics available; missing {missing_text}"
+        f"metrics available; missing {_compact_list(missing)}"
     )
+
+
+def _compact_list(values: list[str] | tuple[str, ...], *, limit: int = 4) -> str:
+    text = ", ".join(values[:limit])
+    if len(values) > limit:
+        text = f"{text}, +{len(values) - limit} more"
+    return text or "unknown"
 
 
 def _market_overview_rows(

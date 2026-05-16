@@ -46,6 +46,9 @@ Rules:
   - `taxonomy=yfinance`
   - `concept` as the snapshot metric name
   - `matched_label` as the provider field or market-cap derivation source
+- unavailable overview reasons should stay metric-specific:
+  - SEC missing rows should list the candidate companyfacts concepts tried
+  - Yahoo missing rows with non-empty frames should distinguish missing labels from labels present with blank values
 - statement availability rows should distinguish:
   - `available`
   - `partial`

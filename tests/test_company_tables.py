@@ -196,7 +196,7 @@ def test_build_sec_overview_table_includes_market_and_financial_rows():
     assert revenue["form"] == "10-K"
     assert net_income["status"] == "unavailable"
     assert net_income["completeness"] == "missing"
-    assert net_income["reason"] == "No matching concepts found in SEC companyfacts"
+    assert net_income["reason"] == "No matching SEC companyfacts concepts: NetIncomeLoss"
 
 
 def test_build_yahoo_overview_table_marks_missing_financial_metrics():
@@ -219,6 +219,7 @@ def test_build_yahoo_overview_table_marks_missing_financial_metrics():
 
     market_cap = table[table["metric"] == "market_cap"].iloc[0]
     revenue = table[table["metric"] == "revenue"].iloc[0]
+    net_income = table[table["metric"] == "net_income"].iloc[0]
     total_assets = table[table["metric"] == "total_assets"].iloc[0]
 
     assert market_cap["status"] == "unavailable"
@@ -231,9 +232,40 @@ def test_build_yahoo_overview_table_marks_missing_financial_metrics():
     assert revenue["period_type"] == "annual"
     assert revenue["completeness"] == "current"
     assert revenue["matched_label"] == "Total Revenue"
+    assert net_income["reason"] == (
+        "No Yahoo annual income labels matched for net_income; "
+        "tried Net Income Common Stockholders, Net Income, "
+        "Net Income From Continuing Operation Net Minority Interest"
+    )
     assert total_assets["status"] == "unavailable"
     assert total_assets["completeness"] == "missing"
     assert total_assets["reason"] == "Yahoo returned no annual balance statement frame"
+
+
+def test_build_yahoo_overview_table_distinguishes_blank_candidate_labels():
+    income = pd.DataFrame(
+        {
+            pd.Timestamp("2025-12-31"): {
+                "Total Revenue": 100.0,
+                "Net Income": float("nan"),
+            }
+        }
+    )
+
+    table = build_yahoo_overview_table(
+        market_snapshot={},
+        income_frame=income,
+        balance_frame=pd.DataFrame(),
+        cashflow_frame=pd.DataFrame(),
+        currency="EUR",
+    )
+
+    net_income = table[table["metric"] == "net_income"].iloc[0]
+
+    assert net_income["status"] == "unavailable"
+    assert net_income["reason"] == (
+        "Yahoo annual income labels present but values blank: Net Income"
+    )
 
 
 def test_build_sec_overview_table_marks_stale_metric_when_older_than_latest_statement_period():

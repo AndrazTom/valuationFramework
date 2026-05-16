@@ -393,9 +393,12 @@ Immediate next implementation target:
     - the first few missing metric names
     - a `+N more` suffix when needed to keep the table compact
   - preferred unavailable reasons currently include:
-    - `No matching concepts found in SEC companyfacts`
+    - `No matching SEC companyfacts concepts: ...`
     - `Yahoo returned no statement frame`
     - `Statement frame present but no mapped metrics`
+  - overview unavailable reasons should be metric-specific where possible:
+    - SEC rows should list the candidate concepts attempted
+    - Yahoo rows with a non-empty frame should distinguish absent candidate labels from present-but-blank labels
   - for SEC issuers, recent filings in `company` should prefer analysis-relevant forms like:
     - `10-K`
     - `10-Q`
