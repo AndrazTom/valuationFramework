@@ -630,3 +630,27 @@ def test_build_valuation_ratios_table_derives_market_cap_from_price_and_shares()
     assert not table.empty
     assert table.iloc[0]["ratio"] == "pe_ratio"
     assert table.iloc[0]["value"] == pytest.approx(1_000.0 / 50.0)
+
+
+def test_build_valuation_ratios_table_computes_ev_and_ev_to_revenue():
+    snapshot = {"market_cap": 1_000.0}
+    financials = {
+        "long_term_debt": 200.0,
+        "cash_and_equivalents": 50.0,
+        "revenue": 400.0,
+        "operating_income": 80.0,
+        "depreciation_amortization": 20.0,
+    }
+    table = build_valuation_ratios_table(snapshot, financials)
+    ratios = {row["ratio"]: row["value"] for _, row in table.iterrows()}
+    # EV = 1000 + 200 - 50 = 1150
+    assert ratios["ev_to_revenue"] == pytest.approx(1_150.0 / 400.0)
+    # EBITDA = 80 + 20 = 100
+    assert ratios["ev_to_ebitda"] == pytest.approx(1_150.0 / 100.0)
+
+
+def test_build_valuation_ratios_table_omits_ev_when_debt_or_cash_missing():
+    snapshot = {"market_cap": 1_000.0}
+    financials = {"revenue": 400.0, "long_term_debt": 200.0}  # no cash → no EV
+    table = build_valuation_ratios_table(snapshot, financials)
+    assert "ev_to_revenue" not in set(table["ratio"])

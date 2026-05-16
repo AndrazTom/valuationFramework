@@ -43,6 +43,11 @@ YAHOO_STATEMENT_LABELS = {
     "cashflow": {
         "operating_cash_flow": ("Operating Cash Flow", "Cash Flow From Continuing Operating Activities"),
         "capex": ("Capital Expenditure",),
+        "depreciation_amortization": (
+            "Depreciation Amortization Depletion",
+            "Depreciation And Amortization",
+            "Depreciation",
+        ),
         "investing_cash_flow": ("Investing Cash Flow", "Cash Flow From Continuing Investing Activities"),
         "financing_cash_flow": ("Financing Cash Flow", "Cash Flow From Continuing Financing Activities"),
         "change_in_cash": ("Changes In Cash",),
@@ -67,6 +72,7 @@ YAHOO_STATEMENT_UNITS = {
     "stockholders_equity": "USD",
     "operating_cash_flow": "USD",
     "capex": "USD",
+    "depreciation_amortization": "USD",
     "investing_cash_flow": "USD",
     "financing_cash_flow": "USD",
     "change_in_cash": "USD",
