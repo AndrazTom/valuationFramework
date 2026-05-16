@@ -733,3 +733,58 @@ def test_build_statement_table_ttm_empty_on_no_data():
     facts = {"facts": {}}
     table = build_statement_table_ttm(facts, statement="income")
     assert table.empty or len([c for c in table.columns if c not in {"metric", "unit"}]) == 0
+
+
+def test_build_key_financials_table_includes_owner_earnings():
+    from valuation.company.tables import build_key_financials_table
+
+    facts = {
+        "facts": {
+            "us-gaap": {
+                "NetIncomeLoss": {
+                    "units": {"USD": [{"val": 100.0, "fy": 2025, "fp": "FY", "end": "2025-12-31", "filed": "2026-01-31", "form": "10-K"}]}
+                },
+                "DepreciationDepletionAndAmortization": {
+                    "units": {"USD": [{"val": 30.0, "fy": 2025, "fp": "FY", "end": "2025-12-31", "filed": "2026-01-31", "form": "10-K"}]}
+                },
+                "PaymentsToAcquirePropertyPlantAndEquipment": {
+                    "units": {"USD": [{"val": 20.0, "fy": 2025, "fp": "FY", "end": "2025-12-31", "filed": "2026-01-31", "form": "10-K"}]}
+                },
+            }
+        }
+    }
+    table = build_key_financials_table(facts)
+    oe_row = table[table["metric"] == "owner_earnings"]
+    assert not oe_row.empty
+    assert oe_row.iloc[0]["value"] == pytest.approx(100.0 + 30.0 - 20.0)  # 110.0
+    assert oe_row.iloc[0]["taxonomy"] == "derived"
+
+
+def test_build_key_financials_table_omits_owner_earnings_when_inputs_missing():
+    from valuation.company.tables import build_key_financials_table
+
+    facts = {
+        "facts": {
+            "us-gaap": {
+                "NetIncomeLoss": {
+                    "units": {"USD": [{"val": 100.0, "fy": 2025, "fp": "FY", "end": "2025-12-31", "filed": "2026-01-31", "form": "10-K"}]}
+                },
+                # D&A absent, capex absent → owner earnings should not appear
+            }
+        }
+    }
+    table = build_key_financials_table(facts)
+    assert table[table["metric"] == "owner_earnings"].empty
+
+
+def test_build_valuation_ratios_table_includes_price_to_owner_earnings():
+    snapshot = {"market_cap": 1_000.0}
+    financials = {
+        "net_income": 50.0,
+        "depreciation_amortization": 20.0,
+        "capex": 10.0,  # owner earnings = 50 + 20 - 10 = 60
+    }
+    table = build_valuation_ratios_table(snapshot, financials)
+    ratios = {row["ratio"]: row["value"] for _, row in table.iterrows()}
+    assert "price_to_owner_earnings" in ratios
+    assert ratios["price_to_owner_earnings"] == pytest.approx(1_000.0 / 60.0)

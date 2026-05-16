@@ -171,8 +171,37 @@ def company_summary_to_table(
 
 
 def build_key_financials_table(company_facts: dict) -> pd.DataFrame:
-    """Return selected generic SEC facts for one company."""
-    return company_facts_to_table(company_facts, COMMON_FACT_DEFINITIONS)
+    """Return selected generic SEC facts for one company, with derived owner earnings row."""
+    table = company_facts_to_table(company_facts, COMMON_FACT_DEFINITIONS)
+    return _append_owner_earnings_row(table)
+
+
+def _append_owner_earnings_row(table: pd.DataFrame) -> pd.DataFrame:
+    """Append owner_earnings = net_income + D&A - capex when all three are present."""
+    if table.empty:
+        return table
+    metric_values = {str(row["metric"]): _to_float(row.get("value")) for _, row in table.iterrows()}
+    net_income = metric_values.get("net_income")
+    da = metric_values.get("depreciation_amortization")
+    capex = metric_values.get("capex")
+    if net_income is None or da is None or capex is None:
+        return table
+    owner_earnings = net_income + da - capex
+    # Inherit unit from net_income row
+    unit_row = table[table["metric"] == "net_income"]
+    unit = str(unit_row.iloc[0].get("unit")) if not unit_row.empty and unit_row.iloc[0].get("unit") is not None else "USD"
+    new_row = {
+        "metric": "owner_earnings",
+        "taxonomy": "derived",
+        "concept": "net_income + depreciation_amortization - capex",
+        "unit": unit,
+        "value": owner_earnings,
+        "end": None,
+        "filed": None,
+        "form": None,
+        "frame": None,
+    }
+    return pd.concat([table, pd.DataFrame([new_row])], ignore_index=True)
 
 
 def build_sec_overview_table(
@@ -346,6 +375,11 @@ def build_valuation_ratios_table(
     long_term_debt = _to_float(financials.get("long_term_debt"))
     op_income = _to_float(financials.get("operating_income"))
     da = _to_float(financials.get("depreciation_amortization"))
+    owner_earnings = (
+        (net_income + da - capex)
+        if net_income is not None and da is not None and capex is not None
+        else None
+    )
 
     ev: float | None = None
     if market_cap is not None and long_term_debt is not None and cash is not None:
@@ -364,6 +398,7 @@ def build_valuation_ratios_table(
         ("ps_ratio", _ratio(market_cap, revenue), "Market cap / Revenue (LTM)"),
         ("pb_ratio", _ratio(market_cap, equity), "Market cap / Stockholders equity"),
         ("price_to_fcf", _ratio(market_cap, fcf), "Market cap / (OCF - Capex)"),
+        ("price_to_owner_earnings", _ratio(market_cap, owner_earnings), "Market cap / (Net income + D&A - Capex)"),
         ("ev_to_revenue", _ratio(ev, revenue), "EV / Revenue (EV = mkt cap + LT debt - cash)"),
         ("ev_to_ebitda", _ratio(ev, ebitda), "EV / EBITDA (EBITDA = op income + D&A)"),
     ]
