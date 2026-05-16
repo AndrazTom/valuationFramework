@@ -28,6 +28,7 @@ This branch, `brk`, inherits the current generic company/statement backend from 
 ./vf company US0846707026
 ./vf brk overview
 ./vf brk holdings --limit 10
+./vf brk holdings --history --filings-limit 4 --limit 10
 ```
 
 `./vf` runs the current source tree through the local virtualenv.
@@ -117,6 +118,7 @@ On `brk`, there is also a Berkshire-only command group:
 
 - `./vf brk overview`
 - `./vf brk holdings`
+- `./vf brk holdings --history --filings-limit 4 --limit 10`
 - `./vf brk holdings --live-prices --limit 10`
 - `./vf brk holdings --price-change 1M --limit 10`
 - `./vf brk sotp`
@@ -213,13 +215,15 @@ Current Berkshire workflows include:
   - filtered core filings
 - `holdings`
   - latest 13F holdings
+  - optional recent 13F filing history via `--history`
   - optional live-price enrichment where ticker mappings exist
   - optional `--price-change` / `--price-change-window` column for windows such as `1D`, `1M`, `YTD`, and `1Y`
   - Berkshire-vs-holdings change comparison when a price-change window is selected
   - if Yahoo rate-limits live pricing, the command now degrades to partial/empty live coverage instead of crashing
 - `sotp`
   - first Berkshire market-implied SOTP bridge
-  - explicit valuation assumptions, market anchor, public-equity summary, liquidity snapshot, and residual operating-and-other bridge
+  - explicit valuation assumptions, market anchor, public-equity summary, liquidity snapshot, residual operating-and-other bridge, and operating-business context
+  - compares the residual to latest top-level segment pre-tax earnings so the plug is easier to sanity-check
   - optional `--price-change` comparison between BRK and the resolved holdings basket
 - `liquidity`
   - Berkshire liquidity history from filing balance sheets, not just companyfacts

@@ -89,6 +89,21 @@ def test_humanize_frame_keeps_position_counts_as_quantities():
     assert display.iloc[1]["value"] == "$269.77B"
 
 
+def test_humanize_frame_formats_share_change_columns_as_quantities():
+    frame = pd.DataFrame(
+        [
+            {
+                "issuer": "APPLE INC",
+                "shares_change_from_prior_filing": -10_295_000,
+            }
+        ]
+    )
+
+    display = humanize_frame(frame)
+
+    assert display.iloc[0]["shares_change_from_prior_filing"] == "-10.29M"
+
+
 def test_humanize_frame_formats_field_pct_ratio_and_usd_suffixes():
     frame = pd.DataFrame(
         [

@@ -40,6 +40,15 @@ class Brk13FBundle:
     accession_number: str
     information_table_filename: str
     holdings: pd.DataFrame
+    report_date: str | None = None
+
+
+@dataclass
+class Brk13FHistoryBundle:
+    """Berkshire 13F filings with parsed holdings tables across time."""
+
+    company: SecCompany
+    filings: list[Brk13FBundle]
 
 
 @dataclass
@@ -177,6 +186,33 @@ def fetch_latest_brk_13f(sec_client: Optional[SecClient] = None) -> Brk13FBundle
     company = company_bundle["company"]
     submissions = company_bundle["submissions"]
     filing = find_brk_13f_filings(submissions, limit=1)[0]
+    return _fetch_brk_13f_filing(sec, company, filing)
+
+
+def fetch_brk_13f_history(
+    sec_client: Optional[SecClient] = None,
+    *,
+    limit: int = 4,
+) -> Brk13FHistoryBundle:
+    """Fetch Berkshire 13F holdings for multiple recent filings."""
+    sec = sec_client or SecClient()
+    company_bundle = sec.fetch_company_bundle(BRK_B_TICKER)
+    company = company_bundle["company"]
+    if limit == 0:
+        return Brk13FHistoryBundle(company=company, filings=[])
+    filings = find_brk_13f_filings(company_bundle["submissions"], limit=max(0, limit))
+    return Brk13FHistoryBundle(
+        company=company,
+        filings=[_fetch_brk_13f_filing(sec, company, filing) for filing in filings],
+    )
+
+
+def _fetch_brk_13f_filing(
+    sec: SecClient,
+    company: SecCompany,
+    filing: Mapping[str, str],
+) -> Brk13FBundle:
+    """Fetch and parse one Berkshire 13F filing."""
     filing_index = sec.fetch_filing_index(company.cik, filing["accession_number"])
     information_table_filename = _find_information_table_filename(
         sec,
@@ -196,6 +232,7 @@ def fetch_latest_brk_13f(sec_client: Optional[SecClient] = None) -> Brk13FBundle
         accession_number=filing["accession_number"],
         information_table_filename=information_table_filename,
         holdings=holdings,
+        report_date=filing.get("report_date"),
     )
 
 

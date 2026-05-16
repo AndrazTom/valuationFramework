@@ -8,11 +8,19 @@ import re
 from typing import Iterable
 
 from valuation.brk.holdings import aggregate_13f_holdings
-from valuation.brk.service import BRK_B_TICKER, fetch_brk_liquidity, fetch_brk_overview, fetch_brk_segments
+from valuation.brk.service import (
+    BRK_B_TICKER,
+    fetch_brk_13f_history,
+    fetch_brk_liquidity,
+    fetch_brk_overview,
+    fetch_brk_segments,
+)
 from valuation.brk.service import fetch_latest_brk_13f
 from valuation.brk.service import fetch_brk_valuation_bundle
 from valuation.brk.reference import build_brk_security_reference
 from valuation.brk.tables import (
+    build_13f_holdings_history_table,
+    build_13f_history_summary_table,
     build_13f_summary_table,
     build_13f_live_price_summary_table,
     build_brk_valuation_assumptions_table,
@@ -23,6 +31,7 @@ from valuation.brk.tables import (
     build_latest_liquidity_snapshot_table,
     build_market_anchor_table,
     build_market_implied_sotp_bridge_table,
+    build_operating_business_context_table,
     build_public_equity_portfolio_summary_table,
     build_segment_period_sections,
     build_segment_report_summary_table,
@@ -76,6 +85,17 @@ def register_brk_parser(subparsers) -> None:
         type=_non_negative_int,
         default=20,
         help="Number of top holdings rows to show.",
+    )
+    holdings_parser.add_argument(
+        "--history",
+        action="store_true",
+        help="Also fetch recent 13F filings and show holdings history tables.",
+    )
+    holdings_parser.add_argument(
+        "--filings-limit",
+        type=_non_negative_int,
+        default=4,
+        help="Number of 13F filings to include when --history is used.",
     )
     holdings_parser.add_argument(
         "--live-prices",
@@ -168,6 +188,8 @@ def run_brk_command(args: argparse.Namespace) -> int:
             limit=args.limit,
             live_prices=args.live_prices,
             price_change_window=args.price_change_window,
+            history=args.history,
+            filings_limit=args.filings_limit,
         )
     if args.brk_command == "liquidity":
         return run_brk_liquidity(
@@ -225,9 +247,15 @@ def run_brk_holdings(
     limit: int,
     live_prices: bool,
     price_change_window: str | None,
+    history: bool = False,
+    filings_limit: int = 4,
 ) -> int:
     """Build table outputs for Berkshire's latest 13F holdings."""
-    bundle = fetch_latest_brk_13f()
+    history_bundle = fetch_brk_13f_history(limit=filings_limit) if history else None
+    if history_bundle is not None and history_bundle.filings:
+        bundle = history_bundle.filings[0]
+    else:
+        bundle = fetch_latest_brk_13f()
     yahoo = YahooFinanceClient()
     if price_change_window is not None:
         live_prices = True
@@ -243,6 +271,22 @@ def run_brk_holdings(
         ),
         ("Top Holdings", build_top_holdings_table(bundle.holdings, limit=limit)),
     ]
+    if history and history_bundle is not None:
+        sections.extend(
+            [
+                (
+                    "13F Filing History",
+                    build_13f_history_summary_table(history_bundle.filings),
+                ),
+                (
+                    "Top Holdings History",
+                    build_13f_holdings_history_table(
+                        history_bundle.filings,
+                        limit=limit,
+                    ),
+                ),
+            ]
+        )
     if live_prices:
         reference = build_brk_security_reference()
         enriched_holdings = enrich_holdings_with_market_prices(
@@ -453,6 +497,16 @@ def run_brk_sotp(
             build_market_implied_sotp_bridge_table(
                 bundle,
                 reference,
+                yahoo_client=yahoo,
+                enriched_holdings=enriched_holdings,
+            ),
+        ),
+        (
+            "Operating Business Context",
+            build_operating_business_context_table(
+                bundle,
+                reference,
+                period=period,
                 yahoo_client=yahoo,
                 enriched_holdings=enriched_holdings,
             ),

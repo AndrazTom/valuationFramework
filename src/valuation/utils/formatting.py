@@ -87,7 +87,7 @@ def _infer_format_kind(column: str, row: pd.Series) -> Optional[str]:
         "voting_sole",
         "voting_shared",
         "voting_none",
-    }:
+    } or "shares" in column_name:
         return "quantity"
     if "metric" in row and column_name not in {"metric", "unit"}:
         return _infer_kind_from_field(str(row["metric"]).lower())

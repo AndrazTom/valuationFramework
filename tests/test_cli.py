@@ -485,6 +485,67 @@ def test_brk_holdings_cli_price_change_enables_live_table(monkeypatch, tmp_path:
     assert "BRK vs Holdings Price Change (1M)" in captured["sections"]
 
 
+def test_brk_holdings_cli_history_fetches_multiple_filings(monkeypatch, tmp_path: Path):
+    captured = {"sections": []}
+
+    def fake_history(limit=4):
+        captured["filings_limit"] = limit
+        return type(
+            "HistoryBundle",
+            (),
+            {
+                "filings": [
+                    type(
+                        "Filing",
+                        (),
+                        {
+                            "filing_date": "2026-02-14",
+                            "accession_number": "0002",
+                            "information_table_filename": "info.xml",
+                            "holdings": pd.DataFrame([{"issuer": "APPLE INC", "value_usd": 1000}]),
+                        },
+                    )()
+                ],
+            },
+        )()
+
+    monkeypatch.setattr(brk_cli, "fetch_brk_13f_history", fake_history)
+    monkeypatch.setattr(brk_cli, "build_13f_summary_table", lambda **kwargs: pd.DataFrame())
+    monkeypatch.setattr(brk_cli, "build_top_holdings_table", lambda holdings, limit=20: pd.DataFrame())
+    monkeypatch.setattr(brk_cli, "build_13f_history_summary_table", lambda filings: pd.DataFrame())
+    monkeypatch.setattr(
+        brk_cli,
+        "build_13f_holdings_history_table",
+        lambda filings, limit=20: pd.DataFrame(),
+    )
+    monkeypatch.setattr(
+        brk_cli,
+        "_emit_sections",
+        lambda sections, output_dir: captured.update({"sections": [title for title, _ in sections]}),
+    )
+
+    result = cli.main(
+        [
+            "brk",
+            "holdings",
+            "--history",
+            "--filings-limit",
+            "6",
+            "--outdir",
+            str(tmp_path),
+        ]
+    )
+
+    assert result == 0
+    assert captured["filings_limit"] == 6
+    assert captured["sections"] == [
+        "13F Summary",
+        "Top Holdings",
+        "13F Filing History",
+        "Top Holdings History",
+    ]
+
+
 def test_brk_sotp_cli_writes_expected_sections(monkeypatch, tmp_path: Path):
     captured = {"sections": []}
 
@@ -525,6 +586,11 @@ def test_brk_sotp_cli_writes_expected_sections(monkeypatch, tmp_path: Path):
     )
     monkeypatch.setattr(
         brk_cli,
+        "build_operating_business_context_table",
+        lambda bundle, reference, period="annual", yahoo_client=None, enriched_holdings=None: pd.DataFrame(),
+    )
+    monkeypatch.setattr(
+        brk_cli,
         "build_holdings_vs_brk_price_change_table",
         lambda holdings, reference, yahoo_client=None, price_change_window=None, enriched_holdings=None, brk_snapshot=None: pd.DataFrame(),
     )
@@ -554,6 +620,7 @@ def test_brk_sotp_cli_writes_expected_sections(monkeypatch, tmp_path: Path):
         "Quoted Holdings Summary",
         "Liquidity Snapshot",
         "Market-Implied SOTP Bridge",
+        "Operating Business Context",
         "BRK vs Holdings Price Change (1M)",
     ]
     assert "BRK vs Holdings Price Change (1M)" in captured["sections"]

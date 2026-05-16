@@ -3,6 +3,7 @@ import pandas as pd
 from valuation.brk.service import (
     BRK_B_TICKER,
     fetch_brk_segments,
+    fetch_brk_13f_history,
     fetch_brk_liquidity,
     fetch_brk_overview,
     fetch_brk_valuation_bundle,
@@ -25,11 +26,11 @@ class FakeSecClient:
             "submissions": {
                 "filings": {
                     "recent": {
-                        "form": ["10-K", "10-Q", "13F-HR"],
-                        "filingDate": ["2026-03-02", "2025-11-03", "2026-02-14"],
-                        "reportDate": ["2025-12-31", "2025-09-30", "2025-12-31"],
-                        "accessionNumber": ["0001", "0003", "0002"],
-                        "primaryDocument": ["brka.htm", "brka-q3.htm", "13f.htm"],
+                        "form": ["10-K", "10-Q", "13F-HR", "13F-HR"],
+                        "filingDate": ["2026-03-02", "2025-11-03", "2026-02-14", "2025-11-14"],
+                        "reportDate": ["2025-12-31", "2025-09-30", "2025-12-31", "2025-09-30"],
+                        "accessionNumber": ["0001", "0003", "0002", "0004"],
+                        "primaryDocument": ["brka.htm", "brka-q3.htm", "13f.htm", "13f-q3.htm"],
                     }
                 }
             },
@@ -111,22 +112,24 @@ class FakeSecClient:
 
     def fetch_filing_index(self, cik, accession_number):
         assert cik == "0001067983"
-        assert accession_number == "0002"
+        assert accession_number in {"0002", "0004"}
         return {"directory": {"item": [{"name": "info.xml"}]}}
 
     def fetch_filing_text(self, cik, accession_number, filename):
         assert cik == "0001067983"
-        assert accession_number == "0002"
+        assert accession_number in {"0002", "0004"}
         assert filename == "info.xml"
-        return """
+        value = "100" if accession_number == "0002" else "80"
+        shares = "10" if accession_number == "0002" else "9"
+        return f"""
 <informationTable xmlns="http://www.sec.gov/edgar/document/thirteenf/informationtable">
   <infoTable>
     <nameOfIssuer>APPLE INC</nameOfIssuer>
     <titleOfClass>COM</titleOfClass>
     <cusip>037833100</cusip>
-    <value>100</value>
+    <value>{value}</value>
     <shrsOrPrnAmt>
-      <sshPrnamt>10</sshPrnamt>
+      <sshPrnamt>{shares}</sshPrnamt>
       <sshPrnamtType>SH</sshPrnamtType>
     </shrsOrPrnAmt>
     <investmentDiscretion>SOLE</investmentDiscretion>
@@ -190,6 +193,15 @@ def test_find_brk_13f_filings_finds_first_matching_form():
 
     assert metadata[0]["filing_date"] == "2026-02-14"
     assert metadata[0]["accession_number"] == "0002"
+
+
+def test_fetch_brk_13f_history_fetches_multiple_filings():
+    bundle = fetch_brk_13f_history(sec_client=FakeSecClient(), limit=2)
+
+    assert bundle.company.ticker == "BRK-B"
+    assert [filing.accession_number for filing in bundle.filings] == ["0002", "0004"]
+    assert [filing.report_date for filing in bundle.filings] == ["2025-12-31", "2025-09-30"]
+    assert [filing.holdings.iloc[0]["value_usd"] for filing in bundle.filings] == [100, 80]
 
 
 def test_find_recent_filings_finds_first_matching_form():

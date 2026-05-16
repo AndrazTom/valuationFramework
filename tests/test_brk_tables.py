@@ -14,6 +14,8 @@ from valuation.brk.service import (
 from valuation.brk.segments import BrkSegmentReportSet
 from valuation.brk.tables import (
     build_13f_summary_table,
+    build_13f_history_summary_table,
+    build_13f_holdings_history_table,
     build_13f_live_price_summary_table,
     build_brk_valuation_context_table,
     build_segment_period_sections,
@@ -23,6 +25,7 @@ from valuation.brk.tables import (
     build_liquidity_summary_table,
     build_market_implied_sotp_bridge_table,
     build_market_anchor_table,
+    build_operating_business_context_table,
     build_top_level_operating_segments_summary_table,
     build_share_class_table,
     build_top_holdings_live_table,
@@ -181,6 +184,84 @@ def test_build_top_holdings_table():
     frame = build_top_holdings_table(holdings, limit=2)
 
     assert list(frame["issuer"]) == ["A", "B"]
+
+
+def test_build_13f_history_summary_table():
+    filings = [
+        Brk13FBundle(
+            company=None,
+            filing_date="2026-02-14",
+            report_date="2025-12-31",
+            accession_number="0002",
+            information_table_filename="info.xml",
+            holdings=pd.DataFrame(
+                [
+                    {"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 1000, "shares_or_principal": 10},
+                    {"security_id": "cusip:025816109", "issuer": "AMERICAN EXPRESS CO", "class_title": "COM", "cusip": "025816109", "value_usd": 900, "shares_or_principal": 20},
+                ]
+            ),
+        ),
+        Brk13FBundle(
+            company=None,
+            filing_date="2025-11-14",
+            report_date="2025-09-30",
+            accession_number="0004",
+            information_table_filename="info.xml",
+            holdings=pd.DataFrame(
+                [
+                    {"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 800, "shares_or_principal": 8},
+                ]
+            ),
+        ),
+    ]
+
+    frame = build_13f_history_summary_table(filings)
+
+    assert list(frame["accession_number"]) == ["0002", "0004"]
+    assert list(frame["holding_count"]) == [2, 1]
+    assert frame.iloc[0]["reported_value_usd"] == 1900
+    assert frame.iloc[0]["top_holding"] == "APPLE INC"
+    assert frame.iloc[0]["top_holding_weight"] == pytest.approx(1000 / 1900)
+
+
+def test_build_13f_holdings_history_table_tracks_latest_top_holdings():
+    filings = [
+        Brk13FBundle(
+            company=None,
+            filing_date="2026-02-14",
+            report_date="2025-12-31",
+            accession_number="0002",
+            information_table_filename="info.xml",
+            holdings=pd.DataFrame(
+                [
+                    {"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 1000, "shares_or_principal": 10},
+                    {"security_id": "cusip:025816109", "issuer": "AMERICAN EXPRESS CO", "class_title": "COM", "cusip": "025816109", "value_usd": 900, "shares_or_principal": 20},
+                ]
+            ),
+        ),
+        Brk13FBundle(
+            company=None,
+            filing_date="2025-11-14",
+            report_date="2025-09-30",
+            accession_number="0004",
+            information_table_filename="info.xml",
+            holdings=pd.DataFrame(
+                [
+                    {"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 800, "shares_or_principal": 8},
+                    {"security_id": "cusip:025816109", "issuer": "AMERICAN EXPRESS CO", "class_title": "COM", "cusip": "025816109", "value_usd": 950, "shares_or_principal": 22},
+                ]
+            ),
+        ),
+    ]
+
+    frame = build_13f_holdings_history_table(filings, limit=2)
+    apple_latest = frame[(frame["issuer"] == "APPLE INC") & (frame["filing_date"] == "2026-02-14")].iloc[0]
+    axp_latest = frame[(frame["issuer"] == "AMERICAN EXPRESS CO") & (frame["filing_date"] == "2026-02-14")].iloc[0]
+
+    assert list(frame["latest_rank"].drop_duplicates()) == [1, 2]
+    assert apple_latest["value_change_from_prior_filing_usd"] == 200.0
+    assert apple_latest["shares_change_from_prior_filing"] == 2.0
+    assert axp_latest["value_change_from_prior_filing_usd"] == -50.0
 
 
 def test_build_top_holdings_live_table():
@@ -650,3 +731,86 @@ def test_build_market_implied_sotp_bridge_table():
     assert bridge[bridge["metric"] == "public_equity_holdings_blended"].iloc[0]["value_usd"] == 70.0
     assert bridge[bridge["metric"] == "net_liquidity_total"].iloc[0]["value_usd"] == 340.0 * M
     assert bridge[bridge["metric"] == "residual_operating_and_other"].iloc[0]["value_usd"] == pytest.approx((1000.0 * M) - (340.0 * M) - 70.0)
+
+
+def test_build_operating_business_context_table_compares_residual_to_segment_earnings():
+    reference = pd.DataFrame(
+        [{"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"}]
+    )
+    bundle = BrkValuationBundle(
+        overview=BrkOverviewBundle(
+            company=None,
+            market_snapshot={"ticker": "BRK-B", "last_price": 500.0, "market_cap": 1000.0 * M},
+            submissions={},
+            company_facts={},
+        ),
+        holdings=Brk13FBundle(
+            company=None,
+            filing_date="2026-02-17",
+            accession_number="0001",
+            information_table_filename="info.xml",
+            holdings=pd.DataFrame(
+                [
+                    {"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 100.0, "shares_or_principal": 0.2},
+                ]
+            ),
+        ),
+        liquidity=BrkLiquidityBundle(
+            company=None,
+            filings=[
+                BrkLiquidityFiling(
+                    filing_date="2026-03-02",
+                    accession_number="0002",
+                    form="10-K",
+                    balance_sheet=pd.DataFrame(
+                        [
+                            ["Cash and cash equivalents", "", "100"],
+                            ["Short-term investments in U.S. Treasury Bills", "", "200"],
+                        ],
+                        columns=[
+                            "Consolidated Balance Sheets",
+                            "Consolidated Balance Sheets",
+                            "Dec. 31, 2025",
+                        ],
+                    ),
+                )
+            ],
+        ),
+        segments=BrkSegmentsBundle(
+            company=None,
+            filings=[
+                BrkSegmentFiling(
+                    filing_date="2026-03-02",
+                    accession_number="0003",
+                    form="10-K",
+                    reports=BrkSegmentReportSet(
+                        filing_date="2026-03-02",
+                        accession_number="0003",
+                        earnings_detail=pd.DataFrame(
+                            [
+                                {"report": "earnings", "member_path": "Operating Businesses | BNSF", "member_name": "BNSF", "metric": "Earnings before income taxes", "duration_months": 12, "period_end": "2025-12-31", "value": 30 * M},
+                                {"report": "earnings", "member_path": "Operating Businesses | BHE", "member_name": "BHE", "metric": "Earnings before income taxes", "duration_months": 12, "period_end": "2025-12-31", "value": 20 * M},
+                            ]
+                        ),
+                        reconciliation_detail=pd.DataFrame(),
+                        additional_detail=pd.DataFrame(),
+                    ),
+                )
+            ],
+        ),
+    )
+
+    context = build_operating_business_context_table(
+        bundle,
+        reference,
+        yahoo_client=FakeYahooClient(),
+    )
+
+    residual = context[context["field"] == "residual_operating_and_other_usd"].iloc[0]["value"]
+    pretax = context[context["field"] == "operating_segment_pretax_earnings_usd"].iloc[0]["value"]
+    multiple = context[context["field"] == "residual_to_segment_pretax_earnings"].iloc[0]["value"]
+
+    assert context[context["field"] == "operating_segment_count"].iloc[0]["value"] == 2
+    assert pretax == 50 * M
+    assert residual == pytest.approx((1000.0 * M) - (300.0 * M) - 40.0)
+    assert multiple == pytest.approx(residual / pretax)

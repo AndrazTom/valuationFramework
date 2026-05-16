@@ -19,6 +19,7 @@ Current Berkshire stack:
 - `./vf brk segments`
 - `./vf brk sotp`
 - latest 13F holdings
+- recent 13F holdings history via `./vf brk holdings --history`
 - optional live-price revaluation for resolved holdings
 - optional live price-change windows on holdings via `--price-change` / `--price-change-window`
 - BRK-vs-holdings price-change comparison when a change window is selected
@@ -26,6 +27,7 @@ Current Berkshire stack:
 - liquidity history from SEC filing balance-sheet tables
 - top-level operating segment extraction from filing report tables
 - first Berkshire market-implied SOTP bridge
+- SOTP now includes operating-business context that compares the residual to latest reported segment pre-tax earnings
 - liquidity and segments both support:
   - `--period annual|quarterly`
   - `--limit`
@@ -36,9 +38,25 @@ Current Berkshire stack:
   - exported env vars, which should override `.env`
 - Yahoo live-price paths should degrade to partial coverage instead of crashing when quote/history fetches are rate-limited
 
+Recent completed output:
+
+- Berkshire holdings history across filings:
+  - `./vf brk holdings --history --filings-limit N`
+  - emits filing-level 13F history plus a latest-top-holdings history table
+  - keeps live-price enrichment scoped to the latest filing path
+- Berkshire SOTP operating-business context:
+  - emits an `Operating Business Context` table from `./vf brk sotp`
+  - compares residual operating-and-other value to latest top-level segment pre-tax earnings
+  - treats the residual as a market-implied context bridge, not a standalone appraisal
+- live branch check on 2026-05-16:
+  - `./vf brk holdings --history --filings-limit 2 --limit 5` exited 0
+  - latest parsed 13F filings were 2026-05-15 / 2026-03-31 and 2026-02-17 / 2025-12-31
+  - `./vf brk sotp` exited 0 and emitted `Operating Business Context`
+  - live SOTP context showed residual operating-and-other of about $371.3B versus $51.7B latest segment pre-tax earnings, or about 7.2x
+
 Next major output:
 
-- Berkshire holdings history across filings
+- improve Berkshire SOTP by separating more non-13F assets/liabilities and making segment earnings history more valuation-ready
 
 Rules:
 

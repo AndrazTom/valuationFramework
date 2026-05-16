@@ -30,6 +30,8 @@ Current branch priority:
   - added optional Berkshire holdings price-change windows on live-priced holdings output
   - added Berkshire-vs-holdings price-change comparison tables
   - added a first Berkshire market-implied SOTP bridge command
+  - added Berkshire 13F holdings history across recent filings via `./vf brk holdings --history`
+  - added Berkshire SOTP operating-business context comparing residual value to latest segment pre-tax earnings
   - hardened Yahoo live-price paths so Berkshire pricing commands degrade to partial coverage instead of crashing on rate limits
   - confirmed that some remaining blank cells in older annual Berkshire segment tables are real SEC report-table coverage gaps, not renderer bugs
 - recent mainline hardening merged into this branch:
@@ -143,6 +145,7 @@ Keep `main` generic. Do not leak Berkshire assumptions into generic modules.
 `brk` is for:
 
 - latest 13F holdings
+- 13F holdings history across recent filings
 - optional live-price revaluation
 - liquidity bridge
 - operating segment extraction
@@ -204,6 +207,7 @@ As of 2026-04-09, `main` should contain or move toward:
 - `./vf statements AAPL --statement balance --period quarterly`
 - `./vf brk overview`
 - `./vf brk holdings --limit 10`
+- `./vf brk holdings --history --filings-limit 4 --limit 10`
 - `./vf brk holdings --live-prices --limit 10`
 - `./vf brk holdings --price-change 1M --limit 10`
 - `./vf brk sotp`
@@ -254,9 +258,18 @@ As of 2026-04-09, `main` should contain or move toward:
 After the current mainline sync, the next Berkshire branch steps should be:
 
 1. keep the `./vf brk ...` workflows healthy on top of the inherited generic stack
-2. add the first Berkshire sum-of-the-parts bridge table
+2. improve Berkshire SOTP by separating more non-13F assets/liabilities and making segment earnings history more valuation-ready
 3. tighten Berkshire-specific filing/report extraction quality
 4. keep pushing reusable pieces back into `main` when they are genuinely generic
+
+Latest Berkshire live check on 2026-05-16:
+
+- `./vf brk holdings --history --filings-limit 2 --limit 5` exited 0 and emitted filing history plus top-holdings history
+- `./vf brk sotp` exited 0 and emitted the new `Operating Business Context` table
+- latest live SOTP context showed:
+  - residual operating-and-other value around $371.3B
+  - latest segment pre-tax earnings around $51.7B
+  - residual-to-segment-pre-tax-earnings around 7.2x
 
 ## Resume Plan
 

@@ -7,7 +7,12 @@ from typing import Sequence
 
 import pandas as pd
 
-from valuation.brk.service import BrkLiquidityFiling, BrkSegmentFiling, BrkValuationBundle
+from valuation.brk.service import (
+    Brk13FBundle,
+    BrkLiquidityFiling,
+    BrkSegmentFiling,
+    BrkValuationBundle,
+)
 from valuation.brk.service import BRK_A_TICKER, BRK_A_TO_B_CONVERSION, BRK_B_TICKER
 from valuation.brk.segments import build_top_level_operating_segments_table
 from valuation.data.normalize.tables import CompanyFactQuery, company_facts_to_table
@@ -97,6 +102,33 @@ BRK_LIQUIDITY_REPORT_LABELS = {
 }
 
 CORE_BRK_FORMS = ("10-K", "10-Q", "8-K", "DEF 14A", "13F-HR", "13F-HR/A")
+
+BRK_13F_HISTORY_SUMMARY_COLUMNS = [
+    "filing_date",
+    "report_date",
+    "accession_number",
+    "information_table_filename",
+    "holding_count",
+    "reported_value_usd",
+    "top_holding",
+    "top_holding_value_usd",
+    "top_holding_weight",
+]
+
+BRK_13F_HOLDINGS_HISTORY_COLUMNS = [
+    "latest_rank",
+    "filing_date",
+    "report_date",
+    "accession_number",
+    "issuer",
+    "class_title",
+    "cusip",
+    "value_usd",
+    "value_change_from_prior_filing_usd",
+    "shares_or_principal",
+    "shares_change_from_prior_filing",
+    "portfolio_weight",
+]
 
 
 def build_share_class_table(market_snapshot: dict) -> pd.DataFrame:
@@ -266,6 +298,119 @@ def build_top_holdings_table(holdings: pd.DataFrame, limit: int = 20) -> pd.Data
         lambda value: (value / total_value) if total_value else None
     )
     return trimmed.head(limit).reset_index(drop=True)
+
+
+def build_13f_history_summary_table(filings: Sequence[Brk13FBundle]) -> pd.DataFrame:
+    """Summarize Berkshire 13F filings across time."""
+    rows = []
+    for filing in filings:
+        aggregated = aggregate_13f_holdings(filing.holdings)
+        reported_value = (
+            aggregated["value_usd"].dropna().sum()
+            if "value_usd" in aggregated
+            else None
+        )
+        top_holding = aggregated.iloc[0] if not aggregated.empty else pd.Series(dtype=object)
+        top_value = top_holding.get("value_usd")
+        rows.append(
+            {
+                "filing_date": filing.filing_date,
+                "report_date": filing.report_date,
+                "accession_number": filing.accession_number,
+                "information_table_filename": filing.information_table_filename,
+                "holding_count": int(len(aggregated)),
+                "reported_value_usd": reported_value,
+                "top_holding": top_holding.get("issuer"),
+                "top_holding_value_usd": top_value,
+                "top_holding_weight": _ratio(top_value, reported_value),
+            }
+        )
+    return pd.DataFrame(rows, columns=BRK_13F_HISTORY_SUMMARY_COLUMNS)
+
+
+def build_13f_holdings_history_table(
+    filings: Sequence[Brk13FBundle],
+    *,
+    limit: int = 20,
+) -> pd.DataFrame:
+    """Return a per-filing history for the latest filing's top holdings."""
+    if not filings:
+        return pd.DataFrame(columns=BRK_13F_HOLDINGS_HISTORY_COLUMNS)
+    limit = max(0, limit)
+    aggregated_by_filing = [_history_aggregate_for_filing(filing) for filing in filings]
+    if aggregated_by_filing[0].empty:
+        return pd.DataFrame(columns=BRK_13F_HOLDINGS_HISTORY_COLUMNS)
+
+    latest = aggregated_by_filing[0].head(limit).copy()
+    selected_keys = [_holding_history_key(row) for _, row in latest.iterrows()]
+    selected_key_set = set(selected_keys)
+    latest_rank_by_key = {
+        key: rank
+        for rank, key in enumerate(selected_keys, start=1)
+    }
+
+    rows = []
+    for filing_index, (filing, aggregated) in enumerate(zip(filings, aggregated_by_filing)):
+        if aggregated.empty:
+            continue
+        current_by_key = {}
+        for _, current_row in aggregated.iterrows():
+            current_key = _holding_history_key(current_row)
+            if current_key in selected_key_set:
+                current_by_key[current_key] = current_row
+        older_by_key = {}
+        if filing_index + 1 < len(aggregated_by_filing):
+            older_by_key = {
+                _holding_history_key(row): row
+                for _, row in aggregated_by_filing[filing_index + 1].iterrows()
+            }
+        total_value = aggregated["value_usd"].dropna().sum()
+        for key in selected_keys:
+            row = current_by_key.get(key)
+            if row is None:
+                rows.append(
+                    {
+                        "latest_rank": latest_rank_by_key[key],
+                        "filing_date": filing.filing_date,
+                        "report_date": filing.report_date,
+                        "accession_number": filing.accession_number,
+                        "issuer": _history_key_display_value(key, "issuer"),
+                        "class_title": _history_key_display_value(key, "class_title"),
+                        "cusip": _history_key_display_value(key, "cusip"),
+                        "value_usd": None,
+                        "value_change_from_prior_filing_usd": None,
+                        "shares_or_principal": None,
+                        "shares_change_from_prior_filing": None,
+                        "portfolio_weight": None,
+                    }
+                )
+                continue
+            older = older_by_key.get(key)
+            value = row.get("value_usd")
+            shares = row.get("shares_or_principal")
+            rows.append(
+                {
+                    "latest_rank": latest_rank_by_key[key],
+                    "filing_date": filing.filing_date,
+                    "report_date": filing.report_date,
+                    "accession_number": filing.accession_number,
+                    "issuer": row.get("issuer"),
+                    "class_title": row.get("class_title"),
+                    "cusip": row.get("cusip"),
+                    "value_usd": value,
+                    "value_change_from_prior_filing_usd": _difference(
+                        value,
+                        older.get("value_usd") if older is not None else None,
+                    ),
+                    "shares_or_principal": shares,
+                    "shares_change_from_prior_filing": _difference(
+                        shares,
+                        older.get("shares_or_principal") if older is not None else None,
+                    ),
+                    "portfolio_weight": _ratio(value, total_value),
+                }
+            )
+    return pd.DataFrame(rows, columns=BRK_13F_HOLDINGS_HISTORY_COLUMNS)
 
 
 def build_top_holdings_live_table(
@@ -761,6 +906,48 @@ def build_market_implied_sotp_bridge_table(
     return pd.DataFrame(rows)
 
 
+def build_operating_business_context_table(
+    bundle: BrkValuationBundle,
+    reference: pd.DataFrame,
+    *,
+    period: str = "annual",
+    yahoo_client=None,
+    enriched_holdings: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Put the SOTP residual next to latest reported operating segment earnings."""
+    bridge = build_market_implied_sotp_bridge_table(
+        bundle,
+        reference,
+        yahoo_client=yahoo_client,
+        enriched_holdings=enriched_holdings,
+    )
+    residual = _metric_value(bridge, "residual_operating_and_other")
+    market_cap = _metric_value(bridge, "market_cap")
+    segments = _latest_segments_table(bundle.segments.filings, period=period)
+    pretax_earnings = _segment_pretax_earnings_total(segments)
+    period_end = segments.iloc[0].get("period_end") if not segments.empty else None
+    return pd.DataFrame(
+        [
+            {"field": "segment_period_end", "value": period_end},
+            {"field": "operating_segment_count", "value": int(len(segments)) if not segments.empty else 0},
+            {"field": "operating_segment_pretax_earnings_usd", "value": pretax_earnings},
+            {"field": "residual_operating_and_other_usd", "value": residual},
+            {
+                "field": "residual_to_segment_pretax_earnings",
+                "value": _ratio(residual, pretax_earnings),
+            },
+            {
+                "field": "residual_market_cap_weight",
+                "value": _ratio(residual, market_cap),
+            },
+            {
+                "field": "context_note",
+                "value": "Residual includes operating businesses plus non-13F assets, debt, taxes, and other items; segment earnings are pre-tax and not a standalone valuation",
+            },
+        ]
+    )
+
+
 def build_segment_report_summary_table(filings: Sequence[BrkSegmentFiling]) -> pd.DataFrame:
     """Summarize the Berkshire segment filings included in the current output."""
     return pd.DataFrame(
@@ -905,10 +1092,33 @@ def _enriched_holdings_frame(
     )
 
 
-def _latest_segments_table(filings: Sequence[BrkSegmentFiling]) -> pd.DataFrame:
+def _latest_segments_table(
+    filings: Sequence[BrkSegmentFiling],
+    *,
+    period: str = "annual",
+) -> pd.DataFrame:
     if not filings:
         return pd.DataFrame()
-    return build_top_level_operating_segments_table(filings[0].reports, period="annual")
+    return build_top_level_operating_segments_table(filings[0].reports, period=period)
+
+
+def _segment_pretax_earnings_total(segments: pd.DataFrame) -> float | None:
+    if segments.empty or "earnings_before_income_taxes_usd" not in segments.columns:
+        return None
+    total = segments["earnings_before_income_taxes_usd"].dropna().sum()
+    return float(total) if pd.notna(total) else None
+
+
+def _metric_value(frame: pd.DataFrame, metric: str) -> float | None:
+    if frame.empty or "metric" not in frame.columns or "value_usd" not in frame.columns:
+        return None
+    rows = frame[frame["metric"] == metric]
+    if rows.empty:
+        return None
+    value = rows.iloc[0]["value_usd"]
+    if value is None or pd.isna(value):
+        return None
+    return float(value)
 
 
 def _implied_brk_b_equivalent_shares(market_snapshot: dict) -> float | None:
@@ -941,6 +1151,55 @@ def _per_share_value(value: float | None, share_count: float | None) -> float | 
     if pd.isna(value) or pd.isna(share_count):
         return None
     return float(value) / float(share_count)
+
+
+def _history_aggregate_for_filing(filing: Brk13FBundle) -> pd.DataFrame:
+    aggregated = aggregate_13f_holdings(filing.holdings)
+    if aggregated.empty:
+        return aggregated
+    return aggregated.sort_values(
+        by=["value_usd", "issuer"],
+        ascending=[False, True],
+        na_position="last",
+    ).reset_index(drop=True)
+
+
+def _holding_history_key(row) -> tuple[str | None, str | None, str | None, str | None]:
+    return (
+        _none_if_nan(row.get("security_id")),
+        _none_if_nan(row.get("issuer")),
+        _none_if_nan(row.get("class_title")),
+        _none_if_nan(row.get("cusip")),
+    )
+
+
+def _history_key_display_value(
+    key: tuple[str | None, str | None, str | None, str | None],
+    field: str,
+) -> str | None:
+    index_by_field = {
+        "security_id": 0,
+        "issuer": 1,
+        "class_title": 2,
+        "cusip": 3,
+    }
+    return key[index_by_field[field]]
+
+
+def _difference(value, previous):
+    if value is None or previous is None:
+        return None
+    if pd.isna(value) or pd.isna(previous):
+        return None
+    return float(value) - float(previous)
+
+
+def _none_if_nan(value):
+    if value is None:
+        return None
+    if pd.isna(value):
+        return None
+    return str(value)
 
 
 def _ratio(value: float | None, total: float | None) -> float | None:
