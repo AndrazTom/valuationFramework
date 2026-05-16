@@ -230,6 +230,81 @@ def test_statements_cli_writes_files(monkeypatch, tmp_path: Path):
     assert (tmp_path / "AAPL" / "company.md").exists()
 
 
+def test_statements_cli_diagnostics_writes_missing_metric_section(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(
+        cli,
+        "fetch_company_facts",
+        lambda identifier, identifier_kind="auto": type(
+            "Bundle",
+            (),
+            {
+                "resolution": type(
+                    "Resolution",
+                    (),
+                    {
+                        "input_value": identifier,
+                        "identifier_kind": identifier_kind,
+                        "query_used": identifier,
+                        "security_id": "ticker:NASDAQ:AAPL",
+                        "ticker": "AAPL",
+                        "exchange": "NASDAQ",
+                        "company_name": "APPLE INC",
+                        "country": "United States",
+                        "sec_company": SecCompany(
+                            ticker="AAPL",
+                            cik="0000320193",
+                            name="APPLE INC",
+                            exchange="NASDAQ",
+                        ),
+                    },
+                )(),
+                "company_facts": {"facts": {}},
+                "statement_source": "sec",
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_statement_table",
+        lambda company_facts, statement, period, limit=4, **kwargs: pd.DataFrame(
+            [{"metric": "revenue", "unit": "USD", "FY 2025": 100.0}]
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_statement_diagnostics_table",
+        lambda company_facts, statement, period, limit=4, **kwargs: pd.DataFrame(
+            [
+                {
+                    "metric": "diluted_shares",
+                    "status": "missing",
+                    "requested_unit": "shares",
+                    "latest_usable_period": None,
+                    "diagnostic": "concept not present in SEC companyfacts",
+                }
+            ]
+        ),
+    )
+
+    result = cli.main(
+        [
+            "statements",
+            "AAPL",
+            "--statement",
+            "income",
+            "--period",
+            "annual",
+            "--diagnostics",
+            "--outdir",
+            str(tmp_path),
+        ]
+    )
+
+    assert result == 0
+    assert (tmp_path / "AAPL" / "statement_diagnostics.csv").exists()
+    assert "diluted shares" in (tmp_path / "AAPL" / "statement_diagnostics.md").read_text(encoding="utf-8")
+
+
 def test_statements_cli_rejects_invalid_quarter():
     with pytest.raises(SystemExit):
         cli.main(["statements", "AAPL", "--start-quarter", "5"])

@@ -161,10 +161,91 @@ def build_statement_table(
     end_quarter: int | None = None,
 ) -> pd.DataFrame:
     """Return one generic statement table from SEC companyfacts."""
+    frame = _raw_statement_frame(
+        company_facts,
+        statement=statement,
+        period=period,
+        limit=limit,
+        start_year=start_year,
+        end_year=end_year,
+        start_quarter=start_quarter,
+        end_quarter=end_quarter,
+    )
+    frame = _drop_helper_rows(frame)
+    return _drop_all_missing_rows(frame)
+
+
+def build_statement_diagnostics_table(
+    company_facts: dict,
+    *,
+    statement: str,
+    period: str,
+    limit: int = 4,
+    start_year: int | None = None,
+    end_year: int | None = None,
+    start_quarter: int | None = None,
+    end_quarter: int | None = None,
+) -> pd.DataFrame:
+    """Return availability diagnostics for expected statement rows."""
     definitions = STATEMENT_DEFINITIONS[statement]
+    selected_frame = _raw_statement_frame(
+        company_facts,
+        statement=statement,
+        period=period,
+        limit=limit,
+        start_year=start_year,
+        end_year=end_year,
+        start_quarter=start_quarter,
+        end_quarter=end_quarter,
+    )
+    all_period_frame = _raw_statement_frame(
+        company_facts,
+        statement=statement,
+        period=period,
+        limit=99,
+    )
+    rows = []
+    for query in definitions:
+        if query.metric.startswith("_"):
+            continue
+        selected_row = _metric_row(selected_frame, query.metric)
+        all_period_row = _metric_row(all_period_frame, query.metric)
+        selected_periods = _period_columns(selected_frame)
+        all_periods = _period_columns(all_period_frame)
+        status = "available" if _row_has_value(selected_row, selected_periods) else "missing"
+        latest_usable_period = _latest_value_period(all_period_row, all_periods)
+        rows.append(
+            {
+                "metric": query.metric,
+                "status": status,
+                "requested_unit": query.unit,
+                "latest_usable_period": latest_usable_period,
+                "diagnostic": _diagnostic_reason(
+                    company_facts,
+                    query,
+                    period=period,
+                    status=status,
+                    latest_usable_period=latest_usable_period,
+                ),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _raw_statement_frame(
+    company_facts: dict,
+    *,
+    statement: str,
+    period: str,
+    limit: int,
+    start_year: int | None = None,
+    end_year: int | None = None,
+    start_quarter: int | None = None,
+    end_quarter: int | None = None,
+) -> pd.DataFrame:
     frame = company_facts_to_statement_table(
         company_facts,
-        definitions,
+        STATEMENT_DEFINITIONS[statement],
         period=period,
         value_kind=STATEMENT_VALUE_KINDS[statement],
         limit=limit,
@@ -175,8 +256,7 @@ def build_statement_table(
     )
     if statement == "income" and period == "quarterly":
         frame = _fill_income_quarterly_gaps(frame)
-    frame = _drop_helper_rows(frame)
-    return _drop_all_missing_rows(frame)
+    return frame
 
 
 def _fill_income_quarterly_gaps(frame: pd.DataFrame) -> pd.DataFrame:
@@ -231,6 +311,80 @@ def _fill_income_quarterly_gaps(frame: pd.DataFrame) -> pd.DataFrame:
 
 def _is_positive_number(value) -> bool:
     return value is not None and not pd.isna(value) and float(value) > 0
+
+
+def _metric_row(frame: pd.DataFrame, metric: str) -> pd.Series | None:
+    if frame.empty or "metric" not in frame.columns:
+        return None
+    rows = frame[frame["metric"] == metric]
+    if rows.empty:
+        return None
+    return rows.iloc[0]
+
+
+def _period_columns(frame: pd.DataFrame) -> list[str]:
+    return [str(column) for column in frame.columns if column not in {"metric", "unit"}]
+
+
+def _row_has_value(row: pd.Series | None, period_columns: list[str]) -> bool:
+    if row is None:
+        return False
+    return any(not pd.isna(row[column]) for column in period_columns)
+
+
+def _latest_value_period(row: pd.Series | None, period_columns: list[str]) -> str | None:
+    if row is None:
+        return None
+    for column in period_columns:
+        if not pd.isna(row[column]):
+            return column
+    return None
+
+
+def _diagnostic_reason(
+    company_facts: dict,
+    query: CompanyFactQuery,
+    *,
+    period: str,
+    status: str,
+    latest_usable_period: str | None,
+) -> str:
+    if status == "available":
+        return "available in selected periods"
+    state = _company_fact_query_state(company_facts, query)
+    if state["status"] == "absent":
+        return "concept not present in SEC companyfacts"
+    if state["status"] == "unit_missing":
+        return f"requested unit missing; available units: {state['available_units']}"
+    if state["status"] == "empty_unit":
+        return "requested unit present but contains no fact entries"
+    if latest_usable_period is not None:
+        return f"latest usable {period} period is {latest_usable_period}, outside selected output"
+    return f"concept present but no usable {period} periods"
+
+
+def _company_fact_query_state(company_facts: dict, query: CompanyFactQuery) -> dict[str, str]:
+    facts = company_facts.get("facts", {})
+    concept_seen = False
+    requested_unit_seen = False
+    available_units: list[str] = []
+    for taxonomy, concept in query.candidates:
+        units = facts.get(taxonomy, {}).get(concept, {}).get("units", {})
+        if not units:
+            continue
+        concept_seen = True
+        available_units.extend(str(unit) for unit in units)
+        selected_unit = query.unit or next(iter(units.keys()), None)
+        if selected_unit is None or selected_unit not in units:
+            continue
+        requested_unit_seen = True
+        if units.get(selected_unit):
+            return {"status": "present", "available_units": ", ".join(sorted(set(available_units)))}
+    if requested_unit_seen:
+        return {"status": "empty_unit", "available_units": ", ".join(sorted(set(available_units)))}
+    if concept_seen:
+        return {"status": "unit_missing", "available_units": ", ".join(sorted(set(available_units)))}
+    return {"status": "absent", "available_units": ""}
 
 
 def _drop_all_missing_rows(frame: pd.DataFrame) -> pd.DataFrame:

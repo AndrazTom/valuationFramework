@@ -83,6 +83,7 @@ Statement rules:
 - balance-sheet items should stay instant and avoid subtraction logic
 - diluted EPS / diluted shares should prefer direct-quarter values
 - missing statement rows should be explainable through an explicit diagnostic path; do not make users infer whether a row is absent because the concept is missing, stale, wrong-unit, or has no usable period
+- `./vf statements ... --diagnostics` / `--include-missing` emits `Statement Diagnostics` for SEC-backed statements; keep default statement output clean
 - helper heuristics are acceptable only when they are narrow and defensible
 - Yahoo statement handling should stay explicit and shallow; do not build complex inference layers on vendor-standardized rows
 - Yahoo Europe hardening notes from `fix/european-yahoo-statements`:

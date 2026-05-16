@@ -10,6 +10,7 @@ from valuation.company.tables import (
     build_yahoo_statement_availability_table,
     company_summary_to_table,
 )
+from valuation.company.statements import build_statement_diagnostics_table
 from valuation.data.providers.sec import SecCompany
 
 
@@ -101,6 +102,19 @@ def test_build_sec_statement_availability_table_marks_missing_rows_with_reason()
     assert cashflow_quarterly["expected_metric_count"] == 5
     assert cashflow_quarterly["coverage_ratio"] == 0.0
     assert cashflow_quarterly["reason"] == "No matching concepts found in SEC companyfacts"
+
+
+def test_build_statement_diagnostics_table_explains_missing_income_rows():
+    table = build_statement_diagnostics_table(
+        {"facts": {}},
+        statement="income",
+        period="quarterly",
+    )
+
+    diluted_shares = table[table["metric"] == "diluted_shares"].iloc[0]
+
+    assert diluted_shares["status"] == "missing"
+    assert diluted_shares["diagnostic"] == "concept not present in SEC companyfacts"
 
 
 def test_build_yahoo_statement_availability_table_reports_empty_frame_reason():

@@ -286,32 +286,36 @@ Current CLI hardening pass:
 
 Next concrete tasks:
 
-1. Statement transparency:
-   - add `--include-missing` or `--diagnostics` to `./vf statements`
-   - show expected-but-missing metrics with concrete reasons such as absent concept, missing unit, stale concept, or no usable quarterly period
-   - keep default statement output clean, but make it easy to answer "why is this row missing?"
-2. Berkshire statement fallback:
+1. Berkshire statement fallback:
    - investigate BRK 10-Q/10-K filing statement tables for EPS and weighted-average share rows that are not usable through SEC companyfacts
    - if present, add a Berkshire-specific filing-table fallback under `src/valuation/brk/` rather than broadening generic SEC companyfacts heuristics
    - label current market shares separately from weighted-average basic/diluted shares
-3. Berkshire SOTP:
+2. Berkshire SOTP:
    - separate more non-13F assets/liabilities from the residual where filing tables support it
    - add a segment earnings history/multiple table to detailed SOTP output so the current 7.2x residual context can be compared across years
    - decide whether fixed maturity securities should remain in net liquidity or be shown as a separate investment bucket
-4. Generic company workflow:
+3. Generic company workflow:
    - investigate JPM stale revenue in overview; likely bank-specific companyfacts concept freshness, but confirm before adding rules
    - consider extracting reusable market-snapshot freshness/provenance helpers if another module starts duplicating them
-5. Berkshire 13F history:
+4. Berkshire 13F history:
    - add optional export-friendly change summaries by issuer across filings
    - consider distinguishing share-count changes from price-driven value changes in history output
-6. Valuation MVP:
+5. Valuation MVP:
    - start with `owner-earnings`, not full DCF
    - keep model functions pure over normalized statement data
    - output owner earnings, owner earnings yield, per-share owner earnings, and a simple normalized multiple range
    - follow with reverse DCF once statement diagnostics are trustworthy
-7. QA:
+6. QA:
    - run one more live sweep before merging `brk` back toward `main`
    - include `./vf brk sotp --price-change 1M` in that sweep because it exercises the most Yahoo live-price paths
+
+Completed on 2026-05-17:
+
+- `./vf statements ... --diagnostics` / `--include-missing` now emits a `Statement Diagnostics` section for SEC-backed statements
+- diagnostics explain expected rows as available, concept absent, requested-unit missing, empty-unit, stale/outside selected output, or no usable period
+- live BRK quarterly income diagnostic confirmed:
+  - `diluted_eps` and `diluted_shares` are absent from BRK SEC companyfacts
+  - `operating_income` has only stale usable quarterly coverage, latest shown as 2013 Q1
 
 ## Resume Plan
 

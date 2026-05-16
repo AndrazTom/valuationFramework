@@ -79,6 +79,7 @@ Examples:
 ./vf company US0378331005
 ./vf company AAPL --format json
 ./vf statements AAPL --statement income --period annual
+./vf statements BRK --statement income --period quarterly --diagnostics
 ./vf statements BNP.PA --statement income --period annual
 ./vf statements AAPL --statement balance --period quarterly
 ./vf statements AAPL --statement cashflow --period quarterly --start-year 2025 --start-quarter 1 --end-year 2025 --end-quarter 4
@@ -111,6 +112,7 @@ The repo currently revolves around three generic commands:
   - generic income, balance sheet, and cash flow tables
   - annual and quarterly
   - optional year and quarter range filters
+  - optional `--diagnostics` / `--include-missing` section for SEC-backed names explaining expected rows that are missing or stale
 
 If you pass statement range filters such as `--start-year` / `--end-year`, the command widens the default internal period limit so the range filter controls the output instead of a small default cut-off.
 

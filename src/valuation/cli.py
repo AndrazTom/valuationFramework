@@ -11,7 +11,7 @@ from typing import Iterable, Optional, Sequence
 
 from valuation.brk.cli import register_brk_parser, run_brk_command
 from valuation.company.service import fetch_company_facts, fetch_company_snapshot
-from valuation.company.statements import build_statement_table
+from valuation.company.statements import build_statement_diagnostics_table, build_statement_table
 from valuation.company.tables import (
     build_key_financials_table,
     build_sec_overview_table,
@@ -110,6 +110,12 @@ def build_parser() -> argparse.ArgumentParser:
     statements_parser.add_argument("--end-quarter", type=_quarter_int)
     statements_parser.add_argument("--outdir", default="outputs/tables")
     statements_parser.add_argument("--format", choices=("table", "json"), default="table")
+    statements_parser.add_argument(
+        "--diagnostics",
+        "--include-missing",
+        action="store_true",
+        help="Include a diagnostic table explaining expected statement rows that are missing or stale.",
+    )
 
     register_brk_parser(subparsers)
     return parser
@@ -257,6 +263,7 @@ def run_statements(
     end_quarter: int | None,
     outdir: str,
     output_format: str,
+    diagnostics: bool = False,
 ) -> int:
     """Fetch one generic statement table from SEC companyfacts."""
     _validate_statement_range(
@@ -277,6 +284,7 @@ def run_statements(
         identifier,
         identifier_kind=identifier_kind,
     )
+    diagnostics_table = None
     if bundle.statement_source == "sec":
         statement_table = build_statement_table(
             bundle.company_facts,
@@ -288,6 +296,17 @@ def run_statements(
             start_quarter=start_quarter,
             end_quarter=end_quarter,
         )
+        if diagnostics:
+            diagnostics_table = build_statement_diagnostics_table(
+                bundle.company_facts,
+                statement=statement,
+                period=period,
+                limit=limit,
+                start_year=start_year,
+                end_year=end_year,
+                start_quarter=start_quarter,
+                end_quarter=end_quarter,
+            )
     else:
         yahoo = YahooFinanceClient()
         statement_table = build_yahoo_statement_table(
@@ -308,12 +327,15 @@ def run_statements(
         period=period,
     )
     title = f"{statement.title()} Statement {period.title()}"
+    sections = [
+        ("Resolution", resolution_to_table(bundle.resolution)),
+        ("Company", company_summary_to_table(bundle.resolution)),
+        (title, statement_table),
+    ]
+    if diagnostics_table is not None:
+        sections.append(("Statement Diagnostics", diagnostics_table))
     _emit_sections(
-        [
-            ("Resolution", resolution_to_table(bundle.resolution)),
-            ("Company", company_summary_to_table(bundle.resolution)),
-            (title, statement_table),
-        ],
+        sections,
         Path(outdir) / bundle.resolution.ticker.upper().replace(".", "-"),
         output_format=output_format,
         command="statements",
@@ -395,6 +417,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 end_quarter=args.end_quarter,
                 outdir=args.outdir,
                 output_format=args.format,
+                diagnostics=args.diagnostics,
             )
         if args.command == "brk":
             return run_brk_command(args)
