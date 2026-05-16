@@ -275,12 +275,14 @@ Current CLI hardening pass:
 
 - default `./vf brk sotp` should stay compact: market-implied bridge, operating-business context, and optional price-change comparison only
 - use `./vf brk sotp --details` for assumptions, market anchor, quoted holdings, liquidity snapshot, and segment-period support tables
-- terminal rendering now fits normal terminal widths by dropping secondary metadata columns and older period columns only in terminal output; CSV/Markdown/JSON exports remain complete
+- terminal rendering now fits normal terminal widths by dropping secondary metadata columns only; requested period/history columns are split into repeated terminal blocks instead of being removed
+- CSV/Markdown/JSON exports remain complete
 - live checks at `COLUMNS=100` stayed within width for:
   - `./vf brk sotp`
   - `./vf brk sotp --details`
   - `./vf statements AAPL --statement income --period quarterly --start-year 2024 --end-year 2025`
   - `./vf company AAPL`
+  - `./vf statements BRK --statement income --period quarterly --limit 20`
 
 Next concrete tasks:
 

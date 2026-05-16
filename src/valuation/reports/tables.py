@@ -93,7 +93,10 @@ def render_terminal_table(frame: pd.DataFrame, *, max_width: int | None = None) 
     if frame.empty:
         return "(no rows)"
     display = _prepare_display_frame(frame, target="terminal")
-    display = _fit_terminal_frame(display, max_width=max_width)
+    width = max_width or _terminal_width()
+    display = _fit_terminal_frame(display, max_width=width)
+    if width > 0 and _rendered_width(display) > width and _terminal_period_columns(display):
+        return _tabulate_terminal_period_blocks(display, max_width=width)
     return _tabulate_terminal(display)
 
 
@@ -161,31 +164,57 @@ def _fit_terminal_frame(frame: pd.DataFrame, *, max_width: int | None) -> pd.Dat
         fitted = candidate
         if _rendered_width(fitted) <= width:
             return fitted
-    return _fit_terminal_period_columns(fitted, max_width=width)
-
-
-def _fit_terminal_period_columns(frame: pd.DataFrame, *, max_width: int) -> pd.DataFrame:
-    period_columns = [
-        column
-        for column in frame.columns
-        if _is_terminal_period_column(column)
-    ]
-    if len(period_columns) <= 2:
-        return frame
-    fitted = frame.copy()
-    retained_period_columns = len(period_columns)
-    for column in reversed(period_columns):
-        if retained_period_columns <= 2:
-            break
-        fitted = fitted.drop(columns=[column])
-        retained_period_columns -= 1
-        if _rendered_width(fitted) <= max_width:
-            return fitted
     return fitted
 
 
 def _tabulate_terminal(frame: pd.DataFrame) -> str:
     return tabulate(frame.fillna(""), headers="keys", tablefmt="github", showindex=False)
+
+
+def _tabulate_terminal_period_blocks(frame: pd.DataFrame, *, max_width: int) -> str:
+    period_columns = _terminal_period_columns(frame)
+    non_period_columns = [
+        column
+        for column in frame.columns
+        if column not in period_columns
+    ]
+    chunks = _terminal_period_column_chunks(
+        frame,
+        non_period_columns=non_period_columns,
+        period_columns=period_columns,
+        max_width=max_width,
+    )
+    if len(chunks) <= 1:
+        return _tabulate_terminal(frame)
+
+    blocks = []
+    for index, chunk in enumerate(chunks, start=1):
+        columns = non_period_columns + chunk
+        blocks.append(f"Period block {index}/{len(chunks)}")
+        blocks.append(_tabulate_terminal(frame.loc[:, columns]))
+    return "\n\n".join(blocks)
+
+
+def _terminal_period_column_chunks(
+    frame: pd.DataFrame,
+    *,
+    non_period_columns: list[object],
+    period_columns: list[object],
+    max_width: int,
+) -> list[list[object]]:
+    chunks: list[list[object]] = []
+    current: list[object] = []
+    for column in period_columns:
+        candidate = current + [column]
+        candidate_frame = frame.loc[:, non_period_columns + candidate]
+        if current and _rendered_width(candidate_frame) > max_width:
+            chunks.append(current)
+            current = [column]
+            continue
+        current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def _rendered_width(frame: pd.DataFrame) -> int:
@@ -195,6 +224,14 @@ def _rendered_width(frame: pd.DataFrame) -> int:
 
 def _terminal_width() -> int:
     return shutil.get_terminal_size(fallback=(120, 24)).columns
+
+
+def _terminal_period_columns(frame: pd.DataFrame) -> list[object]:
+    return [
+        column
+        for column in frame.columns
+        if _is_terminal_period_column(column)
+    ]
 
 
 def _is_terminal_period_column(column: object) -> bool:

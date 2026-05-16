@@ -158,7 +158,7 @@ def test_render_terminal_table_drops_secondary_columns_to_fit_width():
     assert "concept" in markdown
 
 
-def test_render_terminal_table_drops_old_period_columns_to_fit_width():
+def test_render_terminal_table_splits_period_columns_to_fit_width():
     frame = pd.DataFrame(
         [
             {
@@ -175,9 +175,12 @@ def test_render_terminal_table_drops_old_period_columns_to_fit_width():
 
     rendered = render_terminal_table(frame, max_width=72)
 
+    assert "Period block 1/" in rendered
     assert "FY 2025" in rendered
     assert "FY 2024" in rendered
-    assert "FY 2021" not in rendered
+    assert "FY 2023" in rendered
+    assert "FY 2022" in rendered
+    assert "FY 2021" in rendered
     assert max(len(line) for line in rendered.splitlines()) <= 72
 
     markdown = render_markdown_table(frame)
