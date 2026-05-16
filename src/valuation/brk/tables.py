@@ -130,6 +130,22 @@ BRK_13F_HOLDINGS_HISTORY_COLUMNS = [
     "portfolio_weight",
 ]
 
+BRK_13F_CHANGE_SUMMARY_COLUMNS = [
+    "issuer",
+    "cusip",
+    "change_type",
+    "prior_shares",
+    "current_shares",
+    "share_change",
+    "share_change_pct",
+    "prior_value_usd",
+    "current_value_usd",
+    "value_change_usd",
+    "value_change_pct",
+]
+
+_CHANGE_TYPE_ORDER = {"new": 0, "increased": 1, "decreased": 2, "eliminated": 3, "unchanged": 4}
+
 
 def build_share_class_table(market_snapshot: dict) -> pd.DataFrame:
     """Express Berkshire share classes in BRK.B-equivalent terms."""
@@ -411,6 +427,83 @@ def build_13f_holdings_history_table(
                 }
             )
     return pd.DataFrame(rows, columns=BRK_13F_HOLDINGS_HISTORY_COLUMNS)
+
+
+def build_13f_issuer_change_summary_table(
+    filings: Sequence[Brk13FBundle],
+) -> pd.DataFrame:
+    """Return a per-issuer change summary comparing the two most recent 13F filings.
+
+    Separates share-count changes (Berkshire's active decisions) from value
+    changes (which can also reflect market-price movement).  Change type is
+    driven by the share-count direction: new, increased, decreased, eliminated,
+    or unchanged.
+    """
+    if len(filings) < 2:
+        return pd.DataFrame(columns=BRK_13F_CHANGE_SUMMARY_COLUMNS)
+    current_agg = _history_aggregate_for_filing(filings[0])
+    prior_agg = _history_aggregate_for_filing(filings[1])
+    if current_agg.empty and prior_agg.empty:
+        return pd.DataFrame(columns=BRK_13F_CHANGE_SUMMARY_COLUMNS)
+
+    current_map = _agg_by_cusip(current_agg)
+    prior_map = _agg_by_cusip(prior_agg)
+    all_cusips = sorted(set(current_map) | set(prior_map))
+
+    rows = []
+    for cusip in all_cusips:
+        current_row = current_map.get(cusip)
+        prior_row = prior_map.get(cusip)
+
+        current_shares = _none_if_nan_float(current_row.get("shares_or_principal") if current_row is not None else None)
+        prior_shares = _none_if_nan_float(prior_row.get("shares_or_principal") if prior_row is not None else None)
+        current_value = _none_if_nan_float(current_row.get("value_usd") if current_row is not None else None)
+        prior_value = _none_if_nan_float(prior_row.get("value_usd") if prior_row is not None else None)
+
+        if current_row is None:
+            change_type = "eliminated"
+        elif prior_row is None:
+            change_type = "new"
+        elif prior_shares is not None and current_shares is not None:
+            if current_shares > prior_shares * 1.001:
+                change_type = "increased"
+            elif current_shares < prior_shares * 0.999:
+                change_type = "decreased"
+            else:
+                change_type = "unchanged"
+        else:
+            change_type = "unchanged"
+
+        share_change = _difference(current_shares, prior_shares)
+        share_change_pct = _ratio(share_change, prior_shares)
+        value_change = _difference(current_value, prior_value)
+        value_change_pct = _ratio(value_change, prior_value)
+        issuer = _none_if_nan((current_row if current_row is not None else prior_row).get("issuer"))
+
+        rows.append(
+            {
+                "issuer": issuer,
+                "cusip": cusip,
+                "change_type": change_type,
+                "prior_shares": prior_shares,
+                "current_shares": current_shares,
+                "share_change": share_change,
+                "share_change_pct": share_change_pct,
+                "prior_value_usd": prior_value,
+                "current_value_usd": current_value,
+                "value_change_usd": value_change,
+                "value_change_pct": value_change_pct,
+            }
+        )
+
+    frame = pd.DataFrame(rows, columns=BRK_13F_CHANGE_SUMMARY_COLUMNS)
+    if not frame.empty:
+        frame["_sort_type"] = frame["change_type"].map(lambda t: _CHANGE_TYPE_ORDER.get(t, 99))
+        abs_share_change = frame["share_change"].apply(lambda x: abs(x) if x is not None and pd.notna(x) else 0.0)
+        frame = frame.assign(_sort_abs=abs_share_change)
+        frame = frame.sort_values(["_sort_type", "_sort_abs"], ascending=[True, False])
+        frame = frame.drop(columns=["_sort_type", "_sort_abs"]).reset_index(drop=True)
+    return frame
 
 
 def build_top_holdings_live_table(
@@ -1151,6 +1244,29 @@ def _per_share_value(value: float | None, share_count: float | None) -> float | 
     if pd.isna(value) or pd.isna(share_count):
         return None
     return float(value) / float(share_count)
+
+
+def _agg_by_cusip(agg: pd.DataFrame) -> dict:
+    result = {}
+    if agg.empty:
+        return result
+    for _, row in agg.iterrows():
+        cusip = _none_if_nan(row.get("cusip"))
+        if cusip and cusip not in result:
+            result[cusip] = row
+    return result
+
+
+def _none_if_nan_float(value) -> float | None:
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(f):
+        return None
+    return f
 
 
 def _history_aggregate_for_filing(filing: Brk13FBundle) -> pd.DataFrame:

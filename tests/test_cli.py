@@ -627,7 +627,7 @@ def test_brk_sotp_cli_writes_expected_sections(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(
         brk_cli,
         "fetch_brk_valuation_bundle",
-        lambda period="annual", yahoo_client=None: type(
+        lambda period="annual", yahoo_client=None, segment_limit=1: type(
             "Bundle",
             (),
             {

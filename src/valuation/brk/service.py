@@ -321,6 +321,7 @@ def fetch_brk_valuation_bundle(
     yahoo_client: Optional[YahooFinanceClient] = None,
     *,
     period: str = "annual",
+    segment_limit: int = 1,
 ) -> BrkValuationBundle:
     """Fetch the current Berkshire inputs needed for a first SOTP bridge."""
     sec = sec_client or SecClient()
@@ -329,7 +330,7 @@ def fetch_brk_valuation_bundle(
         overview=fetch_brk_overview(sec_client=sec, yahoo_client=yahoo),
         holdings=fetch_latest_brk_13f(sec_client=sec),
         liquidity=fetch_brk_liquidity(sec_client=sec, period=period, limit=1),
-        segments=fetch_brk_segments(sec_client=sec, period=period, limit=1),
+        segments=fetch_brk_segments(sec_client=sec, period=period, limit=segment_limit),
     )
 
 

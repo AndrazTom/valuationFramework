@@ -60,16 +60,27 @@ Recent completed output:
   - `./vf brk sotp` exited 0 and emitted `Operating Business Context`
   - live SOTP context showed residual operating-and-other of about $371.3B versus $51.7B latest segment pre-tax earnings, or about 7.2x
 
+Recent completed output:
+
+- issuer-level 13F change summary:
+  - `./vf brk holdings --history` now emits a `Holdings Change Summary` table when ≥2 filings are fetched
+  - categorises every issuer as new / increased / decreased / eliminated / unchanged
+  - separates share-count changes (Berkshire's active decisions) from value changes (price + decision)
+  - sorted by change type then absolute share change descending
+- segment earnings history in SOTP `--details`:
+  - `./vf brk sotp --details` now fetches 4 segment filings instead of 1
+  - `build_segment_period_sections` already renders one table per period, so history appears automatically
+  - default `./vf brk sotp` still fetches only the latest segment filing for the context table
+
 Next major output:
 
 - improve Berkshire SOTP by separating more non-13F assets/liabilities and making segment earnings history more valuation-ready
 - next concrete Berkshire tasks:
-  - inspect BRK filing statement tables for EPS and weighted-average share rows missing from current SEC companyfacts statements
+  - inspect BRK filing statement tables for EPS and weighted-average share rows missing from current SEC companyfacts statements; requires live exploration to identify correct report short names
   - keep any BRK-specific statement fallback in this subtree unless it proves generic
-  - add segment earnings history/multiple context to detailed SOTP output without bloating the default view
   - split fixed maturity securities and other non-13F assets more explicitly if filing tables support it
-  - add issuer-level 13F change summaries that separate share-count changes from value changes
-  - include `./vf brk sotp --price-change 1M` in the next live QA sweep
+  - run live QA sweep including `./vf brk sotp --price-change 1M` and `./vf brk holdings --history --filings-limit 2`
+  - valuation MVP: owner earnings approach using segments + capex
 
 Rules:
 
