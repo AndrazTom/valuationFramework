@@ -134,6 +134,11 @@ def _infer_kind_from_field(field_name: str) -> Optional[str]:
             "capex",
             "value",
             "market_cap",
+            "ebitda",
+            "ebit",
+            "free_cash_flow",
+            "owner_earnings",
+            "earnings",
         )
     ):
         return "currency"
