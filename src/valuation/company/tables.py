@@ -69,6 +69,27 @@ COMMON_FACT_DEFINITIONS = (
         ),
     ),
     CompanyFactQuery(
+        "operating_income",
+        (("us-gaap", "OperatingIncomeLoss"),),
+    ),
+    CompanyFactQuery(
+        "long_term_debt",
+        (
+            ("us-gaap", "LongTermDebtAndCapitalLeaseObligations"),
+            ("us-gaap", "LongTermDebtAndFinanceLeaseObligations"),
+            ("us-gaap", "LongTermDebtNoncurrent"),
+            ("us-gaap", "LongTermDebt"),
+        ),
+    ),
+    CompanyFactQuery(
+        "depreciation_amortization",
+        (
+            ("us-gaap", "DepreciationDepletionAndAmortization"),
+            ("us-gaap", "DepreciationAndAmortization"),
+            ("us-gaap", "Depreciation"),
+        ),
+    ),
+    CompanyFactQuery(
         "operating_cash_flow",
         (("us-gaap", "NetCashProvidedByUsedInOperatingActivities"),),
     ),
@@ -304,9 +325,9 @@ def build_valuation_ratios_table(
     """Return standard market valuation ratios from market snapshot + financial metric values.
 
     ``financials`` should map metric names (e.g. ``net_income``, ``revenue``,
-    ``stockholders_equity``, ``operating_cash_flow``, ``capex``) to their latest
-    annual values in the reporting currency.  Missing or zero denominators produce
-    no row for that ratio.
+    ``stockholders_equity``, ``operating_cash_flow``, ``capex``, ``long_term_debt``,
+    ``operating_income``, ``depreciation_amortization``) to their latest annual values
+    in the reporting currency.  Missing or zero denominators produce no row for that ratio.
     """
     market_cap = _to_float(market_snapshot.get("market_cap"))
     if market_cap is None:
@@ -321,17 +342,30 @@ def build_valuation_ratios_table(
     ocf = _to_float(financials.get("operating_cash_flow"))
     capex = _to_float(financials.get("capex"))
     fcf = (ocf - capex) if ocf is not None and capex is not None else None
+    cash = _to_float(financials.get("cash_and_equivalents"))
+    long_term_debt = _to_float(financials.get("long_term_debt"))
+    op_income = _to_float(financials.get("operating_income"))
+    da = _to_float(financials.get("depreciation_amortization"))
 
-    def _ratio(denominator: float | None) -> float | None:
-        if market_cap is None or denominator is None or denominator == 0.0:
+    ev: float | None = None
+    if market_cap is not None and long_term_debt is not None and cash is not None:
+        ev = market_cap + long_term_debt - cash
+    ebitda: float | None = None
+    if op_income is not None and da is not None:
+        ebitda = op_income + da
+
+    def _ratio(numerator: float | None, denominator: float | None) -> float | None:
+        if numerator is None or denominator is None or denominator == 0.0:
             return None
-        return market_cap / denominator
+        return numerator / denominator
 
     candidates = [
-        ("pe_ratio", _ratio(net_income), "Market cap / Net income (LTM)"),
-        ("ps_ratio", _ratio(revenue), "Market cap / Revenue (LTM)"),
-        ("pb_ratio", _ratio(equity), "Market cap / Stockholders equity"),
-        ("price_to_fcf", _ratio(fcf), "Market cap / (Operating cash flow - Capex)"),
+        ("pe_ratio", _ratio(market_cap, net_income), "Market cap / Net income (LTM)"),
+        ("ps_ratio", _ratio(market_cap, revenue), "Market cap / Revenue (LTM)"),
+        ("pb_ratio", _ratio(market_cap, equity), "Market cap / Stockholders equity"),
+        ("price_to_fcf", _ratio(market_cap, fcf), "Market cap / (OCF - Capex)"),
+        ("ev_to_revenue", _ratio(ev, revenue), "EV / Revenue (EV = mkt cap + LT debt - cash)"),
+        ("ev_to_ebitda", _ratio(ev, ebitda), "EV / EBITDA (EBITDA = op income + D&A)"),
     ]
     rows = [
         {"ratio": name, "value": value, "note": note}
