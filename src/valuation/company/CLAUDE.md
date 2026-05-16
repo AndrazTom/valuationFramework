@@ -41,6 +41,10 @@ Rules:
   - `stale`
   - `missing`
 - SEC overview rows should carry real `companyfacts` provenance when available
+- SEC overview concept coverage should stay aligned with statement coverage where concepts are semantically reusable:
+  - bank-style revenue concepts such as `RevenuesNetOfInterestExpense`
+  - alternate net-income concepts such as common-stockholder net income and `ProfitLoss`
+  - equity including noncontrolling interest when plain `StockholdersEquity` is absent or stale
 - Yahoo overview rows should carry statement + matched-label provenance when available
 - market overview rows should carry yfinance provenance in the existing columns:
   - `taxonomy=yfinance`

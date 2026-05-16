@@ -516,7 +516,15 @@ On `brk`, immediate branch-specific target after sync:
     - SEC-backed `AAPL` had full statement availability in company view
     - `BRK-B` and `JPM` correctly surfaced sector/company-shape partial coverage reasons
     - Yahoo-backed `BNP.PA` and `NESN.SW` worked through company and statements paths, with provider gaps explicit for missing quarterly frames
-    - observed follow-up: JPM overview `revenue` can be stale while net income and balance rows are current; this may be real companyfacts concept coverage and should not be forced without a better bank-specific overview rule
+    - observed follow-up at the time: JPM overview `revenue` was stale while net income and balance rows were current
+  - follow-up hardening pass on 2026-05-16:
+    - README examples all exited 0, including `BRK` resolving to SEC-backed `BRK-B`
+    - broader sample checked `JPM`, `XOM`, `PGR`, `UNH`, `CAT`, `MSFT`, `NESN.SW`, `MC.PA`, `OR.PA`, `SU.PA`, and `ASML.AS`
+    - fixed compact SEC overview coverage by reusing statement-grade concepts:
+      - bank-style revenue concepts fixed stale JPM overview revenue after raw concept inspection confirmed current `RevenuesNetOfInterestExpense`
+      - alternate stockholders-equity concept fixed missing/stale CAT and UNH overview equity
+      - alternate net-income concepts fixed CAT overview choosing stale proxy `NetIncomeLoss`
+    - European Yahoo quarterly gaps for `NESN.SW`, `MC.PA`, `OR.PA`, and `SU.PA` remained genuine missing-provider-frame cases and should continue to fail/surface clearly rather than be synthesized
 
 ## Test Notes
 

@@ -198,7 +198,11 @@ def test_build_sec_overview_table_includes_market_and_financial_rows():
     assert revenue["form"] == "10-K"
     assert net_income["status"] == "unavailable"
     assert net_income["completeness"] == "missing"
-    assert net_income["reason"] == "No SEC companyfacts concepts found: NetIncomeLoss"
+    assert net_income["reason"] == (
+        "No SEC companyfacts concepts found: NetIncomeLoss, "
+        "NetIncomeLossAvailableToCommonStockholdersDiluted, "
+        "NetIncomeLossAvailableToCommonStockholdersBasic, ProfitLoss"
+    )
 
 
 def test_build_sec_overview_table_marks_market_snapshot_stale_when_quote_date_is_old():
@@ -428,6 +432,131 @@ def test_build_sec_overview_table_marks_stale_metric_when_older_than_latest_stat
     assert net_income["status"] == "available"
     assert net_income["as_of"] == "2024-12-31"
     assert net_income["completeness"] == "stale"
+
+
+def test_build_sec_overview_table_uses_bank_style_revenue_concepts():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "Revenues": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 1000.0,
+                                "end": "2025-12-31",
+                                "filed": "2026-02-01",
+                                "form": "10-K",
+                            }
+                        ]
+                    }
+                },
+                "RevenuesNetOfInterestExpense": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 300.0,
+                                "end": "2026-03-31",
+                                "filed": "2026-05-01",
+                                "form": "10-Q",
+                            }
+                        ]
+                    }
+                },
+            }
+        }
+    }
+
+    table = build_sec_overview_table(
+        market_snapshot={},
+        company_facts=company_facts,
+        currency="USD",
+    )
+
+    revenue = table[table["metric"] == "revenue"].iloc[0]
+
+    assert revenue["value"] == 300.0
+    assert revenue["concept"] == "RevenuesNetOfInterestExpense"
+    assert revenue["as_of"] == "2026-03-31"
+    assert revenue["completeness"] == "current"
+
+
+def test_build_sec_overview_table_uses_equity_including_noncontrolling_interest():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 400.0,
+                                "end": "2026-03-31",
+                                "filed": "2026-05-01",
+                                "form": "10-Q",
+                            }
+                        ]
+                    }
+                },
+            }
+        }
+    }
+
+    table = build_sec_overview_table(
+        market_snapshot={},
+        company_facts=company_facts,
+        currency="USD",
+    )
+
+    equity = table[table["metric"] == "stockholders_equity"].iloc[0]
+
+    assert equity["status"] == "available"
+    assert equity["value"] == 400.0
+    assert equity["concept"] == "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"
+
+
+def test_build_sec_overview_table_uses_alternate_current_net_income_concepts():
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "NetIncomeLoss": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 1000.0,
+                                "end": "2025-12-31",
+                                "filed": "2026-04-30",
+                                "form": "DEF 14A",
+                            }
+                        ]
+                    }
+                },
+                "NetIncomeLossAvailableToCommonStockholdersBasic": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 300.0,
+                                "end": "2026-03-31",
+                                "filed": "2026-05-06",
+                                "form": "10-Q",
+                            }
+                        ]
+                    }
+                },
+            }
+        }
+    }
+
+    table = build_sec_overview_table(
+        market_snapshot={},
+        company_facts=company_facts,
+        currency="USD",
+    )
+
+    net_income = table[table["metric"] == "net_income"].iloc[0]
+
+    assert net_income["value"] == 300.0
+    assert net_income["concept"] == "NetIncomeLossAvailableToCommonStockholdersBasic"
+    assert net_income["as_of"] == "2026-03-31"
+    assert net_income["period_type"] == "quarterly"
 
 
 def test_build_yahoo_overview_table_marks_stale_metric_when_only_older_annual_period_has_value():
