@@ -620,7 +620,7 @@ def test_build_valuation_ratios_table_omits_ratio_when_denominator_unavailable()
     snapshot = {"market_cap": 1_000.0}
     financials = {"net_income": 50.0}  # no equity, revenue, or fcf inputs
     table = build_valuation_ratios_table(snapshot, financials)
-    assert set(table["ratio"]) == {"pe_ratio"}
+    assert set(table["ratio"]) == {"pe_ratio", "earnings_yield"}
 
 
 def test_build_valuation_ratios_table_derives_market_cap_from_price_and_shares():
@@ -838,3 +838,38 @@ def test_extract_financials_ttm_from_company_facts_falls_back_to_annual():
     financials, ttm_label = extract_financials_ttm_from_company_facts(facts)
     # No quarterly quarters → label would be e.g. "0Q TTM" or None; falls back to annual
     assert financials.get("revenue") == pytest.approx(200.0)
+
+
+def test_build_valuation_ratios_table_includes_yield_counterparts():
+    snapshot = {"market_cap": 1_000.0}
+    financials = {
+        "net_income": 50.0,
+        "operating_cash_flow": 80.0,
+        "capex": 20.0,  # fcf = 60
+        "depreciation_amortization": 10.0,  # owner_earnings = 50 + 10 - 20 = 40
+    }
+    table = build_valuation_ratios_table(snapshot, financials)
+    ratios = {row["ratio"]: row["value"] for _, row in table.iterrows()}
+
+    assert "earnings_yield" in ratios
+    assert ratios["earnings_yield"] == pytest.approx(50.0 / 1_000.0)
+
+    assert "fcf_yield" in ratios
+    assert ratios["fcf_yield"] == pytest.approx(60.0 / 1_000.0)
+
+    assert "owner_earnings_yield" in ratios
+    assert ratios["owner_earnings_yield"] == pytest.approx(40.0 / 1_000.0)
+
+
+def test_humanize_frame_formats_valuation_ratios_as_multiples_and_percent():
+    from valuation.utils.formatting import humanize_frame
+
+    table = build_valuation_ratios_table(
+        {"market_cap": 1_000.0},
+        {"net_income": 50.0},
+    )
+    display = humanize_frame(table)
+    row_by_ratio = {row["ratio"]: row for _, row in display.iterrows()}
+
+    assert row_by_ratio["pe_ratio"]["value"] == "20.0x"
+    assert row_by_ratio["earnings_yield"]["value"] == "5.0%"

@@ -97,6 +97,8 @@ def _infer_format_kind(column: str, row: pd.Series) -> Optional[str]:
         return _infer_kind_from_field(str(row["field"]).lower())
     if column_name == "value" and "metric" in row:
         return _infer_kind_from_field(str(row["metric"]).lower())
+    if "ratio" in row and column_name == "value":
+        return _infer_kind_from_field(str(row["ratio"]).lower())
     return None
 
 
@@ -111,6 +113,8 @@ def _infer_kind_from_field(field_name: str) -> Optional[str]:
     if normalized_field in _VALUATION_RATIO_FIELDS:
         return "multiple"
     if normalized_field.endswith("_pct") or normalized_field.endswith("_ratio"):
+        return "percent"
+    if normalized_field.endswith("_yield"):
         return "percent"
     if normalized_field.endswith("_multiple"):
         return "multiple"
