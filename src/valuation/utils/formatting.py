@@ -100,8 +100,16 @@ def _infer_format_kind(column: str, row: pd.Series) -> Optional[str]:
     return None
 
 
+_VALUATION_RATIO_FIELDS = frozenset({
+    "pe_ratio", "ps_ratio", "pb_ratio", "price_to_fcf", "price_to_owner_earnings",
+    "ev_to_revenue", "ev_to_ebitda",
+})
+
+
 def _infer_kind_from_field(field_name: str) -> Optional[str]:
     normalized_field = field_name.strip().lower().replace(" ", "_").replace("-", "_")
+    if normalized_field in _VALUATION_RATIO_FIELDS:
+        return "multiple"
     if normalized_field.endswith("_pct") or normalized_field.endswith("_ratio"):
         return "percent"
     if normalized_field.endswith("_multiple"):
