@@ -558,6 +558,68 @@ def extract_financials_from_yahoo_frames(
     return result
 
 
+def extract_financials_ttm_from_yahoo_frames(
+    income_annual: pd.DataFrame,
+    balance_annual: pd.DataFrame,
+    cashflow_annual: pd.DataFrame,
+    income_quarterly: pd.DataFrame,
+    balance_quarterly: pd.DataFrame,
+    cashflow_quarterly: pd.DataFrame,
+    *,
+    currency: str = "USD",
+) -> tuple[dict[str, float | None], str | None]:
+    """Extract TTM financials from Yahoo quarterly frames when available, else fall back to annual.
+
+    Returns (financials_dict, ttm_label) where ttm_label is 'TTM', 'NQ TTM', or
+    'FY YYYY' (from the annual frame) when quarterly data is unavailable.
+    """
+    from valuation.company.yahoo_statements import build_yahoo_statement_table_ttm
+
+    result: dict[str, float | None] = {}
+    ttm_label: str | None = None
+
+    # Income: TTM from quarterly
+    income_ttm_frame = build_yahoo_statement_table_ttm(income_quarterly, statement="income", currency=currency)
+    income_ttm_col = next((c for c in income_ttm_frame.columns if c not in {"metric", "unit"}), None)
+    if income_ttm_col and not income_ttm_frame.empty:
+        ttm_label = income_ttm_col
+        for _, row in income_ttm_frame.iterrows():
+            result[str(row["metric"])] = _to_float(row.get(income_ttm_col))
+
+    # Cashflow: TTM from quarterly
+    cf_ttm_frame = build_yahoo_statement_table_ttm(cashflow_quarterly, statement="cashflow", currency=currency)
+    cf_ttm_col = next((c for c in cf_ttm_frame.columns if c not in {"metric", "unit"}), None)
+    if cf_ttm_col and not cf_ttm_frame.empty:
+        if ttm_label is None:
+            ttm_label = cf_ttm_col
+        for _, row in cf_ttm_frame.iterrows():
+            m = str(row["metric"])
+            if m not in result:
+                result[m] = _to_float(row.get(cf_ttm_col))
+
+    # Balance: latest quarterly snapshot (instant items, TTM not meaningful)
+    from valuation.company.yahoo_statements import build_yahoo_statement_table
+    balance_q_frame = build_yahoo_statement_table(
+        balance_quarterly, statement="balance", period="quarterly", currency=currency, limit=1
+    )
+    bal_col = next((c for c in balance_q_frame.columns if c not in {"metric", "unit"}), None)
+    if bal_col:
+        for _, row in balance_q_frame.iterrows():
+            m = str(row["metric"])
+            if m not in result:
+                result[m] = _to_float(row.get(bal_col))
+
+    # Fall back to annual for anything still missing
+    annual = extract_financials_from_yahoo_frames(income_annual, balance_annual, cashflow_annual)
+    for metric, value in annual.items():
+        if metric not in result or result[metric] is None:
+            result[metric] = value
+    if ttm_label is None:
+        ttm_label = _latest_yahoo_period_label(income_annual)
+
+    return result, ttm_label
+
+
 def _to_float(value: object) -> float | None:
     if value is None:
         return None

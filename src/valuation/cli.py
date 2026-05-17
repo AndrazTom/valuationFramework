@@ -24,6 +24,7 @@ from valuation.company.tables import (
     extract_financials_from_company_facts,
     extract_financials_from_yahoo_frames,
     extract_financials_ttm_from_company_facts,
+    extract_financials_ttm_from_yahoo_frames,
     extract_period_label_from_company_facts,
     resolution_to_table,
 )
@@ -238,18 +239,22 @@ def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limi
                 ),
             )
         )
-        yahoo_financials = extract_financials_from_yahoo_frames(
-            income_frame=frames[("income", "annual")],
-            balance_frame=frames[("balance", "annual")],
-            cashflow_frame=frames[("cashflow", "annual")],
+        _yahoo_ttm_financials, _yahoo_ttm_label = extract_financials_ttm_from_yahoo_frames(
+            income_annual=frames[("income", "annual")],
+            balance_annual=frames[("balance", "annual")],
+            cashflow_annual=frames[("cashflow", "annual")],
+            income_quarterly=frames[("income", "quarterly")],
+            balance_quarterly=frames[("balance", "quarterly")],
+            cashflow_quarterly=frames[("cashflow", "quarterly")],
+            currency=company_currency,
         )
         sections.append(
             (
                 "Valuation Ratios",
                 build_valuation_ratios_table(
                     bundle.market_snapshot,
-                    yahoo_financials,
-                    period_label=_yahoo_period_label(frames[("income", "annual")]),
+                    _yahoo_ttm_financials,
+                    period_label=_yahoo_ttm_label,
                 ),
             )
         )

@@ -901,3 +901,60 @@ def test_humanize_frame_formats_per_share_as_currency():
     row_by_ratio = {row["ratio"]: row for _, row in display.iterrows()}
 
     assert row_by_ratio["per_share_owner_earnings"]["value"] == "$11"
+
+
+def test_extract_financials_ttm_from_yahoo_frames_uses_quarterly():
+    """TTM extraction sums 4 quarterly income periods when available."""
+    from valuation.company.tables import extract_financials_ttm_from_yahoo_frames
+    import pandas as pd
+
+    # Build minimal quarterly income frame with 4 quarters
+    q_data = {
+        "2024-03-31": {"Total Revenue": 100.0, "Net Income": 20.0},
+        "2024-06-30": {"Total Revenue": 110.0, "Net Income": 22.0},
+        "2024-09-30": {"Total Revenue": 120.0, "Net Income": 24.0},
+        "2024-12-31": {"Total Revenue": 130.0, "Net Income": 26.0},
+    }
+    q_income = pd.DataFrame(q_data)
+
+    # Annual income frame with older data
+    a_data = {"2023-12-31": {"Total Revenue": 400.0, "Net Income": 80.0}}
+    a_income = pd.DataFrame(a_data)
+
+    empty = pd.DataFrame()
+
+    financials, ttm_label = extract_financials_ttm_from_yahoo_frames(
+        income_annual=a_income,
+        balance_annual=empty,
+        cashflow_annual=empty,
+        income_quarterly=q_income,
+        balance_quarterly=empty,
+        cashflow_quarterly=empty,
+    )
+
+    assert ttm_label == "TTM"
+    # Revenue TTM = 100 + 110 + 120 + 130 = 460 (from quarterly, not annual 400)
+    assert financials.get("revenue") == pytest.approx(460.0)
+    assert financials.get("net_income") == pytest.approx(92.0)
+
+
+def test_extract_financials_ttm_from_yahoo_frames_falls_back_to_annual():
+    """Falls back to annual when quarterly frames are empty."""
+    from valuation.company.tables import extract_financials_ttm_from_yahoo_frames
+    import pandas as pd
+
+    a_data = {"2023-12-31": {"Total Revenue": 400.0, "Net Income": 80.0}}
+    a_income = pd.DataFrame(a_data)
+    empty = pd.DataFrame()
+
+    financials, ttm_label = extract_financials_ttm_from_yahoo_frames(
+        income_annual=a_income,
+        balance_annual=empty,
+        cashflow_annual=empty,
+        income_quarterly=empty,
+        balance_quarterly=empty,
+        cashflow_quarterly=empty,
+    )
+
+    assert financials.get("revenue") == pytest.approx(400.0)
+    assert ttm_label == "FY 2023"
