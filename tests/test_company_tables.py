@@ -873,3 +873,31 @@ def test_humanize_frame_formats_valuation_ratios_as_multiples_and_percent():
 
     assert row_by_ratio["pe_ratio"]["value"] == "20.0x"
     assert row_by_ratio["earnings_yield"]["value"] == "5.0%"
+
+
+def test_build_valuation_ratios_table_includes_per_share_owner_earnings():
+    snapshot = {"market_cap": 1_000.0, "shares": 100.0}
+    financials = {
+        "net_income": 50.0,
+        "depreciation_amortization": 20.0,
+        "capex": 10.0,  # owner_earnings = 50 + 20 - 10 = 60
+    }
+    table = build_valuation_ratios_table(snapshot, financials)
+    ratios = {row["ratio"]: row["value"] for _, row in table.iterrows()}
+
+    assert "per_share_owner_earnings" in ratios
+    assert ratios["per_share_owner_earnings"] == pytest.approx(60.0 / 100.0)
+
+
+def test_humanize_frame_formats_per_share_as_currency():
+    from valuation.utils.formatting import humanize_frame
+
+    # Market cap 1T, shares 5B → per_share_owner_earnings = 55B / 5B = $11
+    table = build_valuation_ratios_table(
+        {"market_cap": 1_000e9, "shares": 5_000e6},
+        {"net_income": 50e9, "depreciation_amortization": 15e9, "capex": 10e9},
+    )
+    display = humanize_frame(table)
+    row_by_ratio = {row["ratio"]: row for _, row in display.iterrows()}
+
+    assert row_by_ratio["per_share_owner_earnings"]["value"] == "$11"

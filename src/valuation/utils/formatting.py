@@ -122,6 +122,8 @@ def _infer_kind_from_field(field_name: str) -> Optional[str]:
         return "currency"
     if "weight" in normalized_field:
         return "percent"
+    if normalized_field.startswith("per_share_"):
+        return "currency"
     if any(token in normalized_field for token in ("share", "count", "position")):
         return "quantity"
     if any(
