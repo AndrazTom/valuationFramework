@@ -433,10 +433,13 @@ def build_valuation_ratios_table(
 
     candidates = [
         ("pe_ratio", _ratio(market_cap, net_income), "Market cap / Net income (LTM)"),
+        ("earnings_yield", _ratio(net_income, market_cap), "Net income / Market cap"),
         ("ps_ratio", _ratio(market_cap, revenue), "Market cap / Revenue (LTM)"),
         ("pb_ratio", _ratio(market_cap, equity), "Market cap / Stockholders equity"),
         ("price_to_fcf", _ratio(market_cap, fcf), "Market cap / (OCF - Capex)"),
+        ("fcf_yield", _ratio(fcf, market_cap), "FCF / Market cap"),
         ("price_to_owner_earnings", _ratio(market_cap, owner_earnings), "Market cap / (Net income + D&A - Capex)"),
+        ("owner_earnings_yield", _ratio(owner_earnings, market_cap), "Owner earnings / Market cap"),
         ("ev_to_revenue", _ratio(ev, revenue), "EV / Revenue (EV = mkt cap + LT debt - cash)"),
         ("ev_to_ebitda", _ratio(ev, ebitda), "EV / EBITDA (EBITDA = op income + D&A)"),
     ]

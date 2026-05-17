@@ -147,3 +147,17 @@ def test_humanize_frame_prioritizes_weight_columns_over_metric_name():
     display = humanize_frame(frame)
 
     assert display.iloc[0]["market_cap_weight"] == "31.1%"
+
+
+def test_humanize_frame_formats_yield_field_as_percent():
+    frame = pd.DataFrame(
+        [
+            {"field": "owner_earnings_yield", "value": 0.055},
+            {"field": "fcf_yield", "value": 0.04},
+        ]
+    )
+
+    display = humanize_frame(frame)
+
+    assert display.iloc[0]["value"] == "5.5%"
+    assert display.iloc[1]["value"] == "4.0%"
