@@ -396,10 +396,10 @@ def build_valuation_ratios_table(
     in the reporting currency.  Missing or zero denominators produce no row for that ratio.
     ``period_label`` is displayed in the ``as_of`` column when provided (e.g. ``"FY 2024"``).
     """
+    shares = _to_float(market_snapshot.get("shares"))
     market_cap = _to_float(market_snapshot.get("market_cap"))
     if market_cap is None:
         price = _to_float(market_snapshot.get("last_price"))
-        shares = _to_float(market_snapshot.get("shares"))
         if price and shares:
             market_cap = price * shares
 
@@ -440,6 +440,7 @@ def build_valuation_ratios_table(
         ("fcf_yield", _ratio(fcf, market_cap), "FCF / Market cap"),
         ("price_to_owner_earnings", _ratio(market_cap, owner_earnings), "Market cap / (Net income + D&A - Capex)"),
         ("owner_earnings_yield", _ratio(owner_earnings, market_cap), "Owner earnings / Market cap"),
+        ("per_share_owner_earnings", _ratio(owner_earnings, shares), "Owner earnings / Shares outstanding"),
         ("ev_to_revenue", _ratio(ev, revenue), "EV / Revenue (EV = mkt cap + LT debt - cash)"),
         ("ev_to_ebitda", _ratio(ev, ebitda), "EV / EBITDA (EBITDA = op income + D&A)"),
     ]
