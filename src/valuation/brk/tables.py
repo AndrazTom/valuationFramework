@@ -142,6 +142,8 @@ BRK_13F_CHANGE_SUMMARY_COLUMNS = [
     "current_value_usd",
     "value_change_usd",
     "value_change_pct",
+    "share_driven_value_change_usd",
+    "price_driven_value_change_usd",
 ]
 
 _CHANGE_TYPE_ORDER = {"new": 0, "increased": 1, "decreased": 2, "eliminated": 3, "unchanged": 4}
@@ -480,6 +482,18 @@ def build_13f_issuer_change_summary_table(
         value_change_pct = _ratio(value_change, prior_value)
         issuer = _none_if_nan((current_row if current_row is not None else prior_row).get("issuer"))
 
+        share_driven: float | None = None
+        price_driven: float | None = None
+        if (
+            prior_shares is not None and prior_shares > 0
+            and current_shares is not None and current_shares > 0
+            and prior_value is not None and current_value is not None
+        ):
+            prior_price = prior_value / prior_shares
+            current_price = current_value / current_shares
+            share_driven = (current_shares - prior_shares) * prior_price
+            price_driven = prior_shares * (current_price - prior_price)
+
         rows.append(
             {
                 "issuer": issuer,
@@ -493,6 +507,8 @@ def build_13f_issuer_change_summary_table(
                 "current_value_usd": current_value,
                 "value_change_usd": value_change,
                 "value_change_pct": value_change_pct,
+                "share_driven_value_change_usd": share_driven,
+                "price_driven_value_change_usd": price_driven,
             }
         )
 

@@ -359,6 +359,53 @@ def test_build_13f_issuer_change_summary_table_sort_order():
     assert types.index("decreased") < types.index("eliminated")
 
 
+def test_build_13f_issuer_change_summary_table_price_and_share_decomposition():
+    """Value change decomposes into share-driven and price-driven components."""
+    # prior: 8 shares at $100 each = $800
+    # current: 15 shares at $80 each = $1200
+    # prior_price = 800/8 = 100, current_price = 1200/15 = 80
+    # share_driven = (15 - 8) * 100 = 700
+    # price_driven = 8 * (80 - 100) = -160
+    # sum = 540 ≈ value_change (400) + cross_term (7 * -20 = -140), so 700 - 160 = 540 != 400
+    # Actually: share_driven + price_driven = 700 - 160 = 540; cross term = (15-8)*(80-100) = -140
+    # So 540 - 140 = 400 which is the correct total value change
+    current = _make_filing(
+        "2026-02-14", "2025-12-31", "0002",
+        [{"security_id": "cusip:A", "issuer": "ALPHA", "class_title": "COM", "cusip": "A", "value_usd": 1200, "shares_or_principal": 15}],
+    )
+    prior = _make_filing(
+        "2025-11-14", "2025-09-30", "0004",
+        [{"security_id": "cusip:A", "issuer": "ALPHA", "class_title": "COM", "cusip": "A", "value_usd": 800, "shares_or_principal": 8}],
+    )
+    frame = build_13f_issuer_change_summary_table([current, prior])
+    row = frame.iloc[0]
+
+    prior_price = 800.0 / 8.0   # = 100
+    current_price = 1200.0 / 15.0  # = 80
+
+    assert row["share_driven_value_change_usd"] == pytest.approx((15 - 8) * prior_price)
+    assert row["price_driven_value_change_usd"] == pytest.approx(8 * (current_price - prior_price))
+
+
+def test_build_13f_issuer_change_summary_table_decomposition_none_for_new_eliminated():
+    """New and eliminated positions have no price/share decomposition."""
+    current = _make_filing(
+        "2026-02-14", "2025-12-31", "0002",
+        [{"security_id": "c:NEW", "issuer": "NEW", "class_title": "COM", "cusip": "N", "value_usd": 100, "shares_or_principal": 10}],
+    )
+    prior = _make_filing(
+        "2025-11-14", "2025-09-30", "0004",
+        [{"security_id": "c:OLD", "issuer": "OLD", "class_title": "COM", "cusip": "O", "value_usd": 100, "shares_or_principal": 10}],
+    )
+    frame = build_13f_issuer_change_summary_table([current, prior])
+    by_type = {row["change_type"]: row for _, row in frame.iterrows()}
+
+    assert pd.isna(by_type["new"]["share_driven_value_change_usd"])
+    assert pd.isna(by_type["new"]["price_driven_value_change_usd"])
+    assert pd.isna(by_type["eliminated"]["share_driven_value_change_usd"])
+    assert pd.isna(by_type["eliminated"]["price_driven_value_change_usd"])
+
+
 def test_build_13f_issuer_change_summary_table_requires_two_filings():
     single = _make_filing(
         "2026-02-14", "2025-12-31", "0002",
