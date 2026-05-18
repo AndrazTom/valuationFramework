@@ -1828,3 +1828,81 @@ def test_build_book_value_history_table_shows_equity_and_bvps():
     fy_col = next(c for c in table.columns if "2024" in str(c))
     assert eq_row[fy_col] == pytest.approx(400 * M)
     assert bv_row[fy_col] == pytest.approx(400 * M / (2.0 * M))  # $200/share
+
+
+# ---------------------------------------------------------------------------
+# build_buyback_history_table
+# ---------------------------------------------------------------------------
+
+def _make_buyback_company_facts(years_buybacks: dict, years_shares_retired: dict | None = None) -> dict:
+    """Build minimal company facts with annual PaymentsForRepurchaseOfCommonStock."""
+    def _entries(vals: dict, unit: str = "USD") -> list[dict]:
+        return [
+            {"end": f"{y}-12-31", "val": v, "fp": "FY", "form": "10-K", "filed": f"{y+1}-02-01", "accn": f"acc-{y}"}
+            for y, v in vals.items()
+        ]
+
+    gaap: dict = {}
+    # Need at least one other concept so statement periods can be discovered
+    gaap["NetCashProvidedByUsedInOperatingActivities"] = {"units": {"USD": _entries({y: 10 * B for y in years_buybacks})}}
+    gaap["PaymentsForRepurchaseOfCommonStock"] = {"units": {"USD": _entries(years_buybacks)}}
+    if years_shares_retired:
+        gaap["StockRepurchasedAndRetiredDuringPeriodShares"] = {"units": {"shares": _entries(years_shares_retired, unit="shares")}}
+    return {"facts": {"us-gaap": gaap}}
+
+
+def test_build_buyback_history_table_basic():
+    from valuation.brk.tables import build_buyback_history_table
+    company_facts = _make_buyback_company_facts({2024: 5 * B, 2023: 4 * B, 2022: 3 * B})
+    table = build_buyback_history_table(company_facts, limit=5)
+    assert not table.empty
+    assert any(table["metric"] == "buyback_usd")
+    buyback_row = table[table["metric"] == "buyback_usd"].iloc[0]
+    fy24_col = next(c for c in table.columns if "2024" in str(c))
+    assert buyback_row[fy24_col] == pytest.approx(5 * B)
+    # CAGR column present
+    assert "cagr_pct" in table.columns
+
+
+def test_build_buyback_history_table_cagr_direction():
+    from valuation.brk.tables import build_buyback_history_table
+    # Buyback grows from 3B (2022) → 4B (2023) → 5B (2024): CAGR should be positive
+    company_facts = _make_buyback_company_facts({2024: 5 * B, 2023: 4 * B, 2022: 3 * B})
+    table = build_buyback_history_table(company_facts, limit=5)
+    buyback_row = table[table["metric"] == "buyback_usd"].iloc[0]
+    assert buyback_row["cagr_pct"] > 0
+
+
+def test_build_buyback_history_table_with_shares_retired():
+    from valuation.brk.tables import build_buyback_history_table
+    # 5B buyback / 25M shares = $200/share implied
+    company_facts = _make_buyback_company_facts(
+        {2024: 5 * B, 2023: 4 * B},
+        years_shares_retired={2024: 25_000_000, 2023: 22_000_000},
+    )
+    table = build_buyback_history_table(company_facts, limit=5)
+    assert any(table["metric"] == "implied_price_per_share_usd")
+    implied_row = table[table["metric"] == "implied_price_per_share_usd"].iloc[0]
+    fy24_col = next(c for c in table.columns if "2024" in str(c))
+    assert implied_row[fy24_col] == pytest.approx(5 * B / 25_000_000)
+
+
+def test_build_buyback_history_table_per_share_row():
+    from valuation.brk.tables import build_buyback_history_table
+    # 5B buyback / 2B share_count = $2.5/share
+    company_facts = _make_buyback_company_facts({2024: 5 * B})
+    table = build_buyback_history_table(company_facts, share_count=2 * B, limit=5)
+    assert any(table["metric"] == "buyback_per_brk_b_usd")
+    per_share_row = table[table["metric"] == "buyback_per_brk_b_usd"].iloc[0]
+    fy24_col = next(c for c in table.columns if "2024" in str(c))
+    assert per_share_row[fy24_col] == pytest.approx(5 * B / (2 * B))
+
+
+def test_build_buyback_history_table_empty_when_no_buyback_data():
+    from valuation.brk.tables import build_buyback_history_table
+    # No PaymentsForRepurchaseOfCommonStock in facts
+    company_facts = {"facts": {"us-gaap": {"NetIncomeLoss": {"units": {"USD": [
+        {"end": "2024-12-31", "val": 10 * B, "fp": "FY", "form": "10-K", "filed": "2025-02-01", "accn": "a1"}
+    ]}}}}}
+    table = build_buyback_history_table(company_facts, limit=5)
+    assert table.empty

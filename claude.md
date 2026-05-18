@@ -20,7 +20,7 @@ Current branch priority:
 - as of 2026-05-18, `brk` is mature; all prior hardening complete (liquidity, segments, SOTP, holdings history, price windows, diagnostics, valuation tables, valuation report, public-equity tax sensitivity)
 - 2026-05-18 live QA sweep passed for `./vf brk holdings --history --filings-limit 2 --limit 10`, `./vf brk sotp --details`, and `./vf brk sotp --price-change 1M`
 - `./vf brk valuation-report` now functional: self-contained Markdown artifact, findings-first order, terminal key-numbers preview, dynamic methodology notes, `--segment-filings`, selectable public-equity basis (`--equity-valuation-basis reported|live`), and public-equity tax context/sensitivity
-- 307 tests passing as of 2026-05-18 (post-hardening batch)
+- 312 tests passing as of 2026-05-18 (post-hardening batch + buyback/oe-per-share additions)
 - temporary hardening branches should be merged back quickly, then deleted
 
 Long-term direction:
@@ -421,17 +421,6 @@ Completed on 2026-05-18 (generic company research tools):
 - `humanize_frame` formatting extended: `depreciation` and `amortization` token → currency format
 - full test suite at 257 tests (was 224 before this session)
 
-## First Task for Next Session
-
-**CLAUDE.md audit — do this before any other work:**
-
-- scan the entire repo for all existing `CLAUDE.md` files and identify every module that has meaningful local context but no `CLAUDE.md` yet
-- update all existing subtree `CLAUDE.md` files to reflect the current state of the code (many were last updated before the valuation report, summary table, and liability-context work)
-- add new subtree `CLAUDE.md` files where missing and genuinely useful (candidates: `src/valuation/company/`, `src/valuation/data/providers/`, `src/valuation/reports/`, `src/valuation/securities/`)
-- cross-check every `CLAUDE.md` against the actual code: remove stale claims, add anything a new chat would need to avoid rediscovering
-
-This is required before any feature work so the repo is fully navigable from a cold start.
-
 ---
 
 Completed on 2026-05-18 (valuation report):
@@ -453,11 +442,9 @@ Next concrete tasks (updated 2026-05-18):
 
 ### Tier 1 — BRK analytical completeness (highest decision value)
 
-**1. Share repurchase history** (lowest effort, fills an obvious gap)
-- `PaymentsForRepurchaseOfCommonStock` is in companyfacts; shares outstanding is already tracked
-- Add `build_buyback_history_table` to `brk/tables.py`: annual buyback $ and implied price paid (buyback $ / shares retired)
-- Surface in `./vf brk sotp --details` and the valuation report
-- Gives concrete data on capital allocation discipline and buyback pace relative to book value
+**1. Share repurchase history** ✓ (shipped 2026-05-18)
+- `build_buyback_history_table` added to `brk/tables.py`: annual `buyback_usd` from `PaymentsForRepurchaseOfCommonStock`, optional `implied_price_per_share_usd` (when `StockRepurchasedAndRetiredDuringPeriodShares` is in companyfacts), `buyback_per_brk_b_usd` when share count supplied; CAGR oldest→newest
+- Surfaced in `./vf brk sotp --details` ("Share Repurchase History" section) and `./vf brk valuation-report` (segment history block)
 
 **2. Explicit intrinsic value estimate** (most actionable addition)
 - The SOTP bridge gives the market-implied residual but no bottom-up "what is it worth" output
@@ -473,12 +460,12 @@ Next concrete tasks (updated 2026-05-18):
 
 ### Tier 2 — Generic tool improvements
 
-**4. Per-share owner earnings in `./vf ratios`** (low effort)
-- `build_historical_ratios_table` has `owner_earnings` but not `oe_per_share`
-- Shares outstanding across years is already in companyfacts
-- Small addition; makes the ratios table more useful for any company
+**4. Per-share owner earnings in `./vf ratios`** ✓ (shipped 2026-05-18)
+- `oe_per_share` column added to both `build_historical_ratios_table` (SEC path, `owner_earnings / diluted_shares`) and `build_historical_ratios_table_from_yahoo` (Yahoo path)
 
-**5. QA sweep completed on 2026-05-18:**
+**5. CLAUDE.md audit completed 2026-05-18:** all subtree CLAUDE.md files reviewed; all were current; brk/CLAUDE.md and company/CLAUDE.md updated for new features above
+
+**6. QA sweep completed on 2026-05-18:**
 - `./vf brk sotp`, `./vf brk sotp --price-change 1M`, `./vf brk holdings --history --filings-limit 2`, `./vf company AAPL`, `./vf company BRK-B`, `./vf company BNP.PA` all exited 0
 - `Operating Business Reverse DCF` confirmed present in SOTP output
 - `Implied Value Range` and `Reverse DCF` confirmed for both AAPL and BRK-B

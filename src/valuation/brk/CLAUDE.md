@@ -62,6 +62,9 @@ Berkshire-specific commands:
 - `build_brk_valuation_summary_table` — compact key-numbers summary for valuation report front page
   - fields: price, market cap, 13F reported/selected basis/blended/selected, live coverage %, net cash/T-bills, residual + per-share + weight, pretax earnings, multiple, implied growth at 10%, zero-growth per-share
 
+**Share repurchase history:**
+- `build_buyback_history_table` — annual `PaymentsForRepurchaseOfCommonStock` series; optionally adds `implied_price_per_share_usd` (buyback $ / `StockRepurchasedAndRetiredDuringPeriodShares`) when share-retirement data is present in companyfacts, and `buyback_per_brk_b_usd` when current `share_count` is supplied; CAGR column computed oldest→newest
+
 **Segments:**
 - `build_segment_report_summary_table` — filing metadata for included segments
 - `build_top_level_operating_segments_summary_table` — latest period segment data

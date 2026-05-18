@@ -41,7 +41,7 @@ Columns: ticker, name, price, market_cap, revenue, net_income, owner_earnings, o
 - `_annual_period_end_dates(company_facts)` — recovers actual FY end dates from raw companyfacts (period labels lose the date)
 - `_price_for_date(date, month_map)` — searches ±3 months in monthly price map for closest bar
 
-Columns: fiscal_year, end_date, price, market_cap, net_income, revenue, owner_earnings, pe_ratio, price_to_oe, oe_yield_pct, pb_ratio, ev_to_ebitda
+Columns: fiscal_year, end_date, price, market_cap, net_income, revenue, owner_earnings, oe_per_share, pe_ratio, price_to_oe, oe_yield_pct, pb_ratio, ev_to_ebitda
 
 ## Overview Schema
 

@@ -181,9 +181,13 @@ def test_build_historical_ratios_table_basic():
     assert not result.empty
     assert "fiscal_year" in result.columns
     assert "pe_ratio" in result.columns
+    assert "oe_per_share" in result.columns
     fy2024 = result[result["fiscal_year"] == "FY 2024"].iloc[0]
     assert fy2024["price"] == pytest.approx(200.0)
     assert fy2024["pe_ratio"] is not None
+    # owner_earnings = net_income + DA - capex = 10B + 3B - 5B = 8B
+    # oe_per_share = 8B / 2B shares = 4.0
+    assert fy2024["oe_per_share"] == pytest.approx(4.0)
 
 
 def test_build_historical_ratios_table_no_price_history():
@@ -217,9 +221,12 @@ def test_build_historical_ratios_table_from_yahoo_basic():
     result = build_historical_ratios_table_from_yahoo(income, balance, cashflow, price_history, limit=2)
     assert not result.empty
     assert "fiscal_year" in result.columns
+    assert "oe_per_share" in result.columns
     fy2024 = result[result["fiscal_year"] == "FY 2024"].iloc[0]
     assert fy2024["revenue"] == pytest.approx(100e9)
     assert fy2024["net_income"] == pytest.approx(10e9)
+    # Yahoo capex is stored negative: OE = 10B + 3B - (-5B) = 18B; shares = 2B → 9.0
+    assert fy2024["oe_per_share"] == pytest.approx(9.0)
 
 
 def test_build_historical_ratios_table_from_yahoo_empty_income():

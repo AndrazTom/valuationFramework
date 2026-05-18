@@ -1998,6 +1998,96 @@ def build_book_value_history_table(
     return result
 
 
+def build_buyback_history_table(
+    company_facts: dict,
+    share_count: float | None = None,
+    *,
+    limit: int = 10,
+) -> pd.DataFrame:
+    """Annual share repurchase history from SEC companyfacts.
+
+    Shows annual buyback dollars.  When shares-retired data is available from
+    ``StockRepurchasedAndRetiredDuringPeriodShares``, also shows implied average
+    price paid per share.  When ``share_count`` (current BRK.B equivalents) is
+    supplied, a per-current-share buyback row is added.
+
+    Columns: metric, [FY YYYY … newest-first], cagr_pct
+    """
+    from valuation.data.normalize.tables import company_facts_to_statement_table
+
+    buyback_wide = company_facts_to_statement_table(
+        company_facts,
+        [CompanyFactQuery("buyback_usd", (("us-gaap", "PaymentsForRepurchaseOfCommonStock"),), unit="USD")],
+        period="annual",
+        value_kind="duration",
+        limit=limit,
+    )
+    if buyback_wide.empty:
+        return pd.DataFrame()
+
+    buyback_row_df = buyback_wide[buyback_wide["metric"] == "buyback_usd"]
+    if buyback_row_df.empty:
+        return pd.DataFrame()
+
+    buyback_row = buyback_row_df.iloc[0]
+    out_period_cols = [c for c in buyback_wide.columns if c not in {"metric", "unit"}]
+    if not out_period_cols:
+        return pd.DataFrame()
+
+    rows: list[dict] = [{"metric": "buyback_usd", "unit": "USD", **{c: buyback_row.get(c) for c in out_period_cols}}]
+
+    # Try shares retired per year → implied average price paid (B-equivalent shares from SEC)
+    shares_wide = company_facts_to_statement_table(
+        company_facts,
+        [CompanyFactQuery("shares_retired", (("us-gaap", "StockRepurchasedAndRetiredDuringPeriodShares"),), unit="shares")],
+        period="annual",
+        value_kind="duration",
+        limit=limit,
+    )
+    shares_row_df = shares_wide[shares_wide["metric"] == "shares_retired"] if not shares_wide.empty else pd.DataFrame()
+    if not shares_row_df.empty:
+        shares_row = shares_row_df.iloc[0]
+        implied: dict = {"metric": "implied_price_per_share_usd", "unit": "USD"}
+        has_any = False
+        for col in out_period_cols:
+            b = _safe_float(buyback_row.get(col))
+            s = _safe_float(shares_row.get(col))
+            if b is not None and s is not None and s > 0:
+                implied[col] = b / s
+                has_any = True
+            else:
+                implied[col] = None
+        if has_any:
+            rows.append(implied)
+
+    # Per-current-share buyback row: buyback / current share_count
+    if share_count is not None and share_count > 0:
+        per_share: dict = {"metric": "buyback_per_brk_b_usd", "unit": "USD"}
+        for col in out_period_cols:
+            b = _safe_float(buyback_row.get(col))
+            per_share[col] = b / share_count if b is not None else None
+        rows.append(per_share)
+
+    result = pd.DataFrame(rows)
+    # CAGR: pass values oldest-first (out_period_cols are newest-first from statement table)
+    cagr_cols = sorted(out_period_cols, key=_period_col_sort_key)
+    result["cagr_pct"] = result.apply(
+        lambda row: _row_cagr([_safe_float(row.get(c)) for c in cagr_cols]),
+        axis=1,
+    )
+    return result
+
+
+def _safe_float(v) -> float | None:
+    if v is None:
+        return None
+    try:
+        f = float(v)
+        return None if pd.isna(f) else f
+    except (TypeError, ValueError):
+        return None
+
+
 def _period_col_sort_key(label: str) -> tuple[int, int]:
     """Sort period labels chronologically. FY YYYY → (year, 0); YYYY Qn → (year, quarter)."""
     import re as _re

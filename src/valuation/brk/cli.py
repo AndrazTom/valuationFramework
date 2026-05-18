@@ -47,6 +47,7 @@ from valuation.brk.tables import (
     build_segment_earnings_history_table,
     build_segment_implied_allocation_table,
     build_segment_owner_earnings_history_table,
+    build_buyback_history_table,
     build_segment_period_sections,
     build_segment_pretax_margin_history_table,
     build_segment_revenues_history_table,
@@ -698,10 +699,11 @@ def run_brk_sotp(
             equity_valuation_basis=equity_valuation_basis,
             max_live_holdings=equity_live_limit if equity_valuation_basis == "live" else None,
         ))
-        # Book value history from SEC company facts
+        # Book value history and share repurchase history from SEC company facts
         company_facts = getattr(bundle.overview, "company_facts", {}) or {}
         share_count = _brk_share_count_for_report(bundle.overview.market_snapshot)
         _append_nonempty(sections, "Book Value History", build_book_value_history_table(company_facts, share_count=share_count, limit=5))
+        _append_nonempty(sections, "Share Repurchase History", build_buyback_history_table(company_facts, share_count=share_count, limit=10))
     _emit_sections(sections, Path(outdir) / "BRK_SOTP")
     return 0
 
@@ -874,6 +876,9 @@ def run_brk_valuation_report(
     _bv = build_book_value_history_table(company_facts, share_count=share_count, limit=5)
     if not _bv.empty:
         segment_history_md.append(("Book Value History", _bv))
+    _bb = build_buyback_history_table(company_facts, share_count=share_count, limit=10)
+    if not _bb.empty:
+        segment_history_md.append(("Share Repurchase History", _bb))
 
     # Build Markdown document
     lines: list[str] = [
