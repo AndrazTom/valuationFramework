@@ -12,6 +12,7 @@ from typing import Iterable, Optional, Sequence
 
 from valuation.brk.cli import register_brk_parser, run_brk_command
 from valuation.brk.statements import supplement_brk_income_statement_eps_shares
+from valuation.portfolio.cli import run_portfolio_show, run_portfolio_tax
 from valuation.company.service import fetch_company_facts, fetch_company_snapshot
 from valuation.company.statements import build_statement_diagnostics_table, build_statement_table, build_statement_table_ttm
 from valuation.company.tables import (
@@ -175,7 +176,46 @@ def build_parser() -> argparse.ArgumentParser:
     wl_show.add_argument("--format", choices=("table", "json"), default="table")
 
     register_brk_parser(subparsers)
+    _register_portfolio_parser(subparsers)
     return parser
+
+
+def _register_portfolio_parser(subparsers) -> None:
+    portfolio_parser = subparsers.add_parser(
+        "portfolio",
+        help="IBKR portfolio: open positions, unrealized P&L, and Slovenian CGT.",
+    )
+    portfolio_sub = portfolio_parser.add_subparsers(dest="portfolio_command", required=True)
+
+    show_parser = portfolio_sub.add_parser(
+        "show",
+        help="Show open positions with cost basis, unrealized P&L, and tax tier.",
+    )
+    show_parser.add_argument(
+        "--file",
+        metavar="PATH",
+        help="Path to IBKR activity statement CSV. Falls back to IBKR_STATEMENT_PATH env var.",
+    )
+    show_parser.add_argument("--outdir", default="outputs/tables")
+    show_parser.add_argument("--format", choices=("table", "json"), default="table")
+
+    tax_parser = portfolio_sub.add_parser(
+        "tax",
+        help="Show realized gains for a year and compute Slovenian CGT owed.",
+    )
+    tax_parser.add_argument(
+        "--file",
+        metavar="PATH",
+        help="Path to IBKR activity statement CSV. Falls back to IBKR_STATEMENT_PATH env var.",
+    )
+    tax_parser.add_argument(
+        "--year",
+        type=int,
+        default=None,
+        help="Tax year to report (default: current calendar year).",
+    )
+    tax_parser.add_argument("--outdir", default="outputs/tables")
+    tax_parser.add_argument("--format", choices=("table", "json"), default="table")
 
 
 def run_snapshot(ticker: str, outdir: str, filings_limit: int, output_format: str) -> int:
@@ -687,6 +727,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return run_watchlist(args, outdir=outdir, output_format=output_format)
         if args.command == "brk":
             return run_brk_command(args)
+        if args.command == "portfolio":
+            import datetime as _dt
+            year = getattr(args, "year", None) or _dt.date.today().year
+            if args.portfolio_command == "show":
+                return run_portfolio_show(
+                    file=getattr(args, "file", None),
+                    outdir=args.outdir,
+                    output_format=args.format,
+                )
+            if args.portfolio_command == "tax":
+                return run_portfolio_tax(
+                    file=getattr(args, "file", None),
+                    year=year,
+                    outdir=args.outdir,
+                    output_format=args.format,
+                )
     except (LookupError, RuntimeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
