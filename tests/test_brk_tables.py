@@ -971,9 +971,12 @@ def test_build_market_implied_sotp_bridge_table():
 
     bridge = build_market_implied_sotp_bridge_table(bundle, reference, yahoo_client=FakeYahooClient())
 
+    # cash=100M, T-bills=200M, payable=10M → net_core = 290M (fixed maturity excluded)
     assert bridge[bridge["metric"] == "public_equity_holdings_blended"].iloc[0]["value_usd"] == 70.0
-    assert bridge[bridge["metric"] == "net_liquidity_total"].iloc[0]["value_usd"] == 340.0 * M
-    assert bridge[bridge["metric"] == "residual_operating_and_other"].iloc[0]["value_usd"] == pytest.approx((1000.0 * M) - (340.0 * M) - 70.0)
+    assert bridge[bridge["metric"] == "net_cash_and_treasury_bills"].iloc[0]["value_usd"] == pytest.approx(290.0 * M)
+    assert bridge[bridge["metric"] == "residual_operating_and_other"].iloc[0]["value_usd"] == pytest.approx((1000.0 * M) - (290.0 * M) - 70.0)
+    # fixed maturity appears as a context row, not subtracted
+    assert bridge[bridge["metric"] == "fixed_maturity_securities_context"].iloc[0]["value_usd"] == pytest.approx(50.0 * M)
 
 
 def test_build_operating_business_context_table_compares_residual_to_segment_earnings():

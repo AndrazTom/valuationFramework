@@ -1121,18 +1121,18 @@ def build_market_implied_sotp_bridge_table(
     cash_and_equivalents = _frame_row_value(liquidity_snapshot, "cash_and_equivalents_usd")
     short_term_t_bills = _frame_row_value(liquidity_snapshot, "short_term_us_treasury_bills_usd")
     fixed_maturity = _frame_row_value(liquidity_snapshot, "fixed_maturity_securities_usd")
-    payable_component = _frame_row_value(
-        liquidity_snapshot,
-        "payable_for_purchase_of_us_treasury_bills_usd",
-    )
-    if payable_component is not None and pd.notna(payable_component):
-        payable_component = -float(payable_component)
-    net_liquidity = _frame_row_value(liquidity_snapshot, "net_liquid_investments_usd")
+    payable_raw = _frame_row_value(liquidity_snapshot, "payable_for_purchase_of_us_treasury_bills_usd")
+    payable_component = -float(payable_raw) if payable_raw is not None and pd.notna(payable_raw) else None
+
+    # Core deployable liquidity: cash + T-bills - payable only.
+    # Fixed maturity securities are insurance-reserve-backed and sit inside the insurance
+    # business; they are not freely deployable capital and must not be subtracted here.
+    net_core_liquidity = _sum_defined(cash_and_equivalents, short_term_t_bills, payable_component)
     public_equities = holdings_metrics["blended_value_usd"]
-    quoted_plus_liquidity = _sum_defined(public_equities, net_liquidity)
+    quoted_plus_core_liquidity = _sum_defined(public_equities, net_core_liquidity)
     residual = None
-    if market_cap is not None and quoted_plus_liquidity is not None and pd.notna(market_cap):
-        residual = float(market_cap) - float(quoted_plus_liquidity)
+    if market_cap is not None and quoted_plus_core_liquidity is not None and pd.notna(market_cap):
+        residual = float(market_cap) - float(quoted_plus_core_liquidity)
 
     coverage_text = None
     if holdings_metrics["coverage_ratio"] is not None:
@@ -1161,32 +1161,25 @@ def build_market_implied_sotp_bridge_table(
             "note": "Latest filing Treasury-bill position",
         },
         {
-            "metric": "fixed_maturity_securities",
-            "value_usd": fixed_maturity,
-            "per_brk_b_share_usd": _per_share_value(fixed_maturity, share_count),
-            "market_cap_weight": _ratio(fixed_maturity, market_cap),
-            "note": "Latest filing fixed maturity securities (insurance-reserve-backed; not freely deployable excess capital)",
-        },
-        {
             "metric": "payable_for_purchase_of_us_treasury_bills",
             "value_usd": payable_component,
             "per_brk_b_share_usd": _per_share_value(payable_component, share_count),
             "market_cap_weight": _ratio(payable_component, market_cap),
-            "note": "Deducted from liquidity when reported",
+            "note": "Deducted from core liquidity when reported",
         },
         {
-            "metric": "net_liquidity_total",
-            "value_usd": net_liquidity,
-            "per_brk_b_share_usd": _per_share_value(net_liquidity, share_count),
-            "market_cap_weight": _ratio(net_liquidity, market_cap),
-            "note": "Cash + Treasury bills + fixed maturity securities - payable",
+            "metric": "net_cash_and_treasury_bills",
+            "value_usd": net_core_liquidity,
+            "per_brk_b_share_usd": _per_share_value(net_core_liquidity, share_count),
+            "market_cap_weight": _ratio(net_core_liquidity, market_cap),
+            "note": "Cash + Treasury bills - payable (excludes fixed maturity; see context row below)",
         },
         {
-            "metric": "quoted_holdings_plus_net_liquidity",
-            "value_usd": quoted_plus_liquidity,
-            "per_brk_b_share_usd": _per_share_value(quoted_plus_liquidity, share_count),
-            "market_cap_weight": _ratio(quoted_plus_liquidity, market_cap),
-            "note": "Blended 13F public equities plus net liquidity subtotal",
+            "metric": "quoted_holdings_plus_net_cash",
+            "value_usd": quoted_plus_core_liquidity,
+            "per_brk_b_share_usd": _per_share_value(quoted_plus_core_liquidity, share_count),
+            "market_cap_weight": _ratio(quoted_plus_core_liquidity, market_cap),
+            "note": "Blended 13F public equities plus net cash and T-bills",
         },
         {
             "metric": "market_cap",
@@ -1200,7 +1193,14 @@ def build_market_implied_sotp_bridge_table(
             "value_usd": residual,
             "per_brk_b_share_usd": _per_share_value(residual, share_count),
             "market_cap_weight": _ratio(residual, market_cap),
-            "note": "Market-implied plug (circular): market cap minus public equities and net liquidity. Not an independent appraisal — reflects what the market already prices in for operating businesses, non-13F assets, debt, and deferred taxes",
+            "note": "Market-implied plug (circular): market cap minus public equities and net cash/T-bills. Not an independent appraisal — reflects what the market already prices in for operating businesses, insurance portfolio (incl. fixed maturity), non-13F assets, debt, and deferred taxes",
+        },
+        {
+            "metric": "fixed_maturity_securities_context",
+            "value_usd": fixed_maturity,
+            "per_brk_b_share_usd": _per_share_value(fixed_maturity, share_count),
+            "market_cap_weight": _ratio(fixed_maturity, market_cap),
+            "note": "Context only — included in residual above; insurance-reserve-backed bond portfolio, not freely deployable capital",
         },
     ]
     return pd.DataFrame(rows)
