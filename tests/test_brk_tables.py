@@ -21,6 +21,7 @@ from valuation.brk.tables import (
     build_13f_live_price_summary_table,
     build_balance_sheet_context_table,
     build_brk_valuation_context_table,
+    build_brk_valuation_summary_table,
     build_segment_period_sections,
     build_holdings_vs_brk_price_change_table,
     build_key_facts_table,
@@ -1122,3 +1123,156 @@ def test_build_brk_operating_reverse_dcf_table_returns_empty_when_pretax_missing
     snapshot = {"market_cap": 1000.0 * M, "last_price": 500.0}
     table = build_brk_operating_reverse_dcf_table(context, snapshot)
     assert table.empty
+
+
+# ---------------------------------------------------------------------------
+# build_brk_valuation_summary_table
+# ---------------------------------------------------------------------------
+
+def _make_sotp_bridge(
+    market_cap=700.0 * B,
+    public_equities=300.0 * B,
+    net_liquidity=50.0 * B,
+    residual=350.0 * B,
+    share_count=2_800.0e6,
+) -> pd.DataFrame:
+    """Minimal SOTP bridge fixture with the rows the summary table reads."""
+    def _per(v):
+        return v / share_count if v is not None and share_count else None
+
+    def _wt(v):
+        return v / market_cap if v is not None and market_cap else None
+
+    rows = [
+        {
+            "metric": "public_equity_holdings_blended",
+            "value_usd": public_equities,
+            "per_brk_b_share_usd": _per(public_equities),
+            "market_cap_weight": _wt(public_equities),
+        },
+        {
+            "metric": "net_cash_and_treasury_bills",
+            "value_usd": net_liquidity,
+            "per_brk_b_share_usd": _per(net_liquidity),
+            "market_cap_weight": _wt(net_liquidity),
+        },
+        {
+            "metric": "quoted_holdings_plus_net_cash",
+            "value_usd": public_equities + net_liquidity,
+            "per_brk_b_share_usd": _per(public_equities + net_liquidity),
+            "market_cap_weight": _wt(public_equities + net_liquidity),
+        },
+        {
+            "metric": "market_cap",
+            "value_usd": market_cap,
+            "per_brk_b_share_usd": _per(market_cap),
+            "market_cap_weight": 1.0,
+        },
+        {
+            "metric": "residual_operating_and_other",
+            "value_usd": residual,
+            "per_brk_b_share_usd": _per(residual),
+            "market_cap_weight": _wt(residual),
+        },
+    ]
+    return pd.DataFrame(rows)
+
+
+def _make_operating_context(residual=350.0 * B, pretax=50.0 * B) -> pd.DataFrame:
+    multiple = residual / pretax if pretax else None
+    return pd.DataFrame([
+        {"field": "operating_segment_pretax_earnings_usd", "value": pretax},
+        {"field": "residual_operating_and_other_usd", "value": residual},
+        {"field": "residual_to_pretax_earnings_multiple", "value": multiple},
+    ])
+
+
+def _make_reverse_dcf(residual=350.0 * B, pretax=35.0 * B) -> pd.DataFrame:
+    # implied_growth at 10% = 0.10 - pretax/residual = 0.10 - 0.10 = 0.00
+    return pd.DataFrame([
+        {
+            "assumed_return": 0.10,
+            "implied_growth": 0.10 - pretax / residual,
+            "zero_growth_operating_value_usd": pretax / 0.10,
+            "zero_growth_per_brk_b_usd": (pretax / 0.10) / (700.0 * B / 500.0),
+        }
+    ])
+
+
+def _make_equity_portfolio(reported=300.0 * B, blended=305.0 * B, coverage=0.85) -> pd.DataFrame:
+    return pd.DataFrame([
+        {"field": "reported_13f_value_usd", "value": reported},
+        {"field": "blended_13f_value_usd", "value": blended},
+        {"field": "live_price_coverage_pct", "value": coverage},
+    ])
+
+
+def test_build_brk_valuation_summary_table_happy_path():
+    snapshot = {"last_price": 500.0, "market_cap": 700.0 * B}
+    bridge = _make_sotp_bridge()
+    context = _make_operating_context()
+    rdcf = _make_reverse_dcf()
+    portfolio = _make_equity_portfolio()
+
+    table = build_brk_valuation_summary_table(snapshot, bridge, context, rdcf, portfolio)
+
+    assert not table.empty
+    fields = set(table["field"].tolist())
+    assert "price_brk_b" in fields
+    assert "market_cap_usd" in fields
+    assert "residual_operating_and_other_usd" in fields
+    assert "residual_per_brk_b_usd" in fields
+    assert "residual_market_cap_weight" in fields
+    assert "segment_pretax_earnings_usd" in fields
+    assert "residual_to_pretax_earnings_multiple" in fields
+    assert "implied_growth_at_10_pct" in fields
+    assert "zero_growth_value_per_brk_b_usd" in fields
+
+    def _val(field):
+        return table.loc[table["field"] == field, "value"].iloc[0]
+
+    assert _val("price_brk_b") == pytest.approx(500.0)
+    assert _val("market_cap_usd") == pytest.approx(700.0 * B)
+    assert _val("13f_blended_value_usd") == pytest.approx(305.0 * B)
+    assert _val("13f_live_coverage_pct") == pytest.approx(0.85)
+    assert _val("residual_operating_and_other_usd") == pytest.approx(350.0 * B)
+    assert _val("residual_market_cap_weight") == pytest.approx(350.0 / 700.0)
+    # implied growth at 10%: 0.10 - 35B/350B = 0.0
+    assert _val("implied_growth_at_10_pct") == pytest.approx(0.0, abs=1e-9)
+
+
+def test_build_brk_valuation_summary_table_empty_inputs_return_none_values():
+    """Empty sub-tables should not crash; numeric fields should be None."""
+    snapshot = {"last_price": 500.0, "market_cap": 700.0 * B}
+    table = build_brk_valuation_summary_table(
+        snapshot,
+        pd.DataFrame(),   # empty sotp_bridge
+        pd.DataFrame(),   # empty operating_context
+        pd.DataFrame(),   # empty reverse_dcf
+        pd.DataFrame(),   # empty equity_portfolio
+    )
+    assert not table.empty
+    # All numeric fields should be None or NaN when inputs are empty
+    for _, row in table.iterrows():
+        if row["field"] == "price_brk_b":
+            assert row["value"] == pytest.approx(500.0)
+        elif row["field"] == "market_cap_usd":
+            # market_cap comes from sotp_bridge which is empty — should be None
+            assert row["value"] is None or (isinstance(row["value"], float) and pd.isna(row["value"]))
+
+
+def test_build_brk_valuation_summary_table_no_reverse_dcf():
+    """Empty reverse_dcf leaves implied_growth and zero_growth rows as None."""
+    snapshot = {"last_price": 500.0, "market_cap": 700.0 * B}
+    bridge = _make_sotp_bridge()
+    context = _make_operating_context()
+    portfolio = _make_equity_portfolio()
+
+    table = build_brk_valuation_summary_table(
+        snapshot, bridge, context, pd.DataFrame(), portfolio
+    )
+    def _val(field):
+        return table.loc[table["field"] == field, "value"].iloc[0]
+
+    assert _val("implied_growth_at_10_pct") is None or pd.isna(_val("implied_growth_at_10_pct"))
+    assert _val("zero_growth_value_per_brk_b_usd") is None or pd.isna(_val("zero_growth_value_per_brk_b_usd"))

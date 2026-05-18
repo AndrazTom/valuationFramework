@@ -17,9 +17,10 @@ Project posture:
 Current branch priority:
 
 - `brk` is the Berkshire-specific proving ground layered on top of the generic base from `main`
-- as of 2026-05-18, `brk` is mature; the requested live QA sweep, BRK EPS/share filing-table fallback, and SOTP balance-sheet residual context are complete, with Yahoo Europe hardening left if specific issuers fail
-- all prior hardening work is complete (liquidity, segments, SOTP, holdings history, price windows, diagnostics, valuation tables)
-- 2026-05-18 live QA sweep passed for `./vf brk holdings --history --filings-limit 2 --limit 10`, `./vf brk sotp --details`, and `./vf brk sotp --price-change 1M`; the sweep only found terminal readability issues, now fixed in the report renderer
+- as of 2026-05-18, `brk` is mature; all prior hardening complete (liquidity, segments, SOTP, holdings history, price windows, diagnostics, valuation tables, valuation report)
+- 2026-05-18 live QA sweep passed for `./vf brk holdings --history --filings-limit 2 --limit 10`, `./vf brk sotp --details`, and `./vf brk sotp --price-change 1M`
+- `./vf brk valuation-report` now functional: self-contained Markdown artifact, findings-first order, terminal key-numbers preview, dynamic methodology notes, `--segment-filings` arg
+- 275 tests passing as of 2026-05-18
 - temporary hardening branches should be merged back quickly, then deleted
 
 Long-term direction:
@@ -236,6 +237,8 @@ As of 2026-05-18, `main` contains (on `brk`, pending merge):
 - `./vf brk sotp`
 - `./vf brk sotp --details`
 - `./vf brk sotp --price-change 1M`
+- `./vf brk valuation-report`
+- `./vf brk valuation-report --segment-filings 4`
 - `./vf brk liquidity --period annual --limit 4`
 - `./vf brk liquidity --period quarterly --limit 4`
 - `./vf brk segments --period annual --limit 4`
@@ -279,12 +282,43 @@ As of 2026-05-18, `main` contains (on `brk`, pending merge):
 
 ## Berkshire Priorities
 
-Steps 1-2 below are done; continuing with steps 3-4:
+Steps 1-4 done. Next hardening pass:
 
 1. ~~keep `./vf brk ...` workflows healthy after mainline sync~~ ✓
 2. ~~improve Berkshire SOTP~~ ✓ (operating context + reverse DCF shipped 2026-05-18)
-3. tighten Berkshire-specific filing/report extraction quality (EPS/share fallback from filing tables)
-4. keep pushing reusable pieces back into `main` when they are genuinely generic
+3. ~~tighten Berkshire-specific filing/report extraction quality (EPS/share fallback from filing tables)~~ ✓
+4. ~~`./vf brk valuation-report` command~~ ✓ (shipped 2026-05-18: findings-first MD report, terminal summary, dynamic methodology notes)
+
+### Next SOTP / Valuation Hardening Tasks
+
+These are the highest-value next steps for improving the quality and trust of the BRK valuation output:
+
+**Liability awareness in the SOTP bridge (highest priority conceptual improvement):**
+- The current bridge does not explicitly show the deferred tax liability on unrealized equity gains (~$35B as of latest balance sheet)
+  - This is a real contingent liability: selling the equity portfolio triggers ~21% capital gains tax on the unrealized gain
+  - The 13F portfolio is valued at current market prices (pre-tax), so the "true" after-tax value is lower
+  - Add a `deferred_tax_haircut_on_equity` context row to the SOTP bridge (shown as a context row, not deducted from the bridge, so the user can apply their own judgment)
+  - This would require fetching `DeferredIncomeTaxLiabilitiesNet` or `DeferredTaxLiabilitiesInvestments` from SEC companyfacts
+- Insurance float treatment: the methodology notes now explain this correctly; no code change needed unless a separate float-funded investment yield table becomes worthwhile
+- Holding-company debt vs subsidiary debt: balance sheet context already shows `notes_payable_and_other_borrowings`; consider splitting into holding-company debt (Senior notes issued by BRK parent) vs consolidated debt in a future pass
+
+**Valuation report quality:**
+- Run `./vf brk valuation-report` live and QA the output Markdown for:
+  - Fixed maturity figure is pulled from actual data (not hardcoded ~$25B)
+  - All sections render without empty tables
+  - Methodology notes are factually accurate with actual balance sheet context values
+- Consider adding a `--price-change` flag to the valuation report so holdings can be revalued with a window (e.g. 1M price change context)
+
+**Independent operating business valuation (medium-term):**
+- The SOTP residual is market-implied (circular). A higher-quality report would also include a bottoms-up range estimate for the operating businesses
+- BNSF: could use rail-industry EV/EBITDA multiples applied to BNSF segment EBITDA
+- BHE: similar approach with utility multiples, noting the ongoing BHE utility wildfire liability
+- Insurance / other: harder to value independently; keep as residual
+- This is a larger project but the segment data + reverse DCF are already in place to support it
+
+**Merge readiness:**
+- after next live QA sweep, port `brk` clean to `main`
+- keep pushing reusable pieces back into `main` when genuinely generic
 
 Latest Berkshire live check on 2026-05-16:
 
@@ -378,11 +412,22 @@ Completed on 2026-05-18 (generic company research tools):
 - `humanize_frame` formatting extended: `depreciation` and `amortization` token → currency format
 - full test suite at 257 tests (was 224 before this session)
 
+Completed on 2026-05-18 (valuation report):
+
+- `./vf brk valuation-report` now fully functional
+  - findings-first section order: Key Valuation Summary → SOTP Bridge → Operating Context → Reverse DCF → Supporting Detail → Segment History → Methodology
+  - terminal key-numbers preview (prints `Key Valuation Summary` table before writing file)
+  - `build_brk_valuation_summary_table` added to `brk/tables.py`: compact summary over already-computed tables (price, mktcap, 13F blended, net liquidity, residual + per-share + weight, pretax earnings, multiple, implied growth at 10%, zero-growth per-share)
+  - dynamic methodology notes: fixed maturity note pulled from actual liquidity data
+  - improved liability context in methodology notes: float explained correctly (not a simple deduction), deferred tax haircut on equity flagged, subsidiary vs holdco debt distinction made explicit
+  - `--segment-filings` arg (default 4) controls segment history depth
+  - accession numbers included in report header for both 13F and liquidity filings
+  - 275 tests passing (was 257)
+- `_metric_per_share()` and `_metric_weight()` helpers added to `brk/tables.py` for SOTP bridge row extraction
+
 Next concrete tasks:
 
-1. Berkshire valuation report:
-   - add `./vf brk valuation-report` that composes the current SOTP, operating context, reverse DCF, balance-sheet context, and assumptions into one Markdown artifact
-   - include generated timestamp, command, filing dates/accessions, price date, and clear caveats
+1. Deferred tax context row in SOTP bridge (see Berkshire Priorities → Next SOTP/Valuation Hardening Tasks)
 2. Cached universe/index layer:
    - build a small security/filer index before any top-500/top-1000 downloader
    - for updated SEC filings after long gaps, refresh submissions first, compare latest accession/report dates to local index, then fetch only new immutable filing artifacts

@@ -28,6 +28,7 @@ from valuation.brk.tables import (
     build_balance_sheet_context_table,
     build_brk_operating_reverse_dcf_table,
     build_brk_valuation_assumptions_table,
+    build_brk_valuation_summary_table,
     build_key_facts_table,
     build_holdings_vs_brk_price_change_table,
     build_liquidity_bridge_table,
@@ -195,6 +196,12 @@ def register_brk_parser(subparsers) -> None:
         default="annual",
         help="Use annual 10-K or quarterly 10-Q inputs for liquidity and segment context.",
     )
+    report_parser.add_argument(
+        "--segment-filings",
+        type=_non_negative_int,
+        default=4,
+        help="Number of segment filings to include in the report.",
+    )
 
 
 def run_brk_command(args: argparse.Namespace) -> int:
@@ -241,7 +248,11 @@ def run_brk_command(args: argparse.Namespace) -> int:
             details=args.details,
         )
     if args.brk_command == "valuation-report":
-        return run_brk_valuation_report(outdir=args.outdir, period=args.period)
+        return run_brk_valuation_report(
+            outdir=args.outdir,
+            period=args.period,
+            segment_filings=args.segment_filings,
+        )
     raise ValueError(f"Unknown Berkshire command: {args.brk_command}")
 
 
@@ -609,12 +620,13 @@ def run_brk_sotp(
     return 0
 
 
-def run_brk_valuation_report(outdir: str, period: str) -> int:
+def run_brk_valuation_report(outdir: str, period: str, segment_filings: int = 4) -> int:
     """Generate a self-contained Berkshire valuation report as a single Markdown file."""
     from datetime import datetime as _dt
+    from valuation.utils.formatting import format_currency as _fmt_currency
 
     yahoo = YahooFinanceClient()
-    bundle = fetch_brk_valuation_bundle(period=period, yahoo_client=yahoo, segment_limit=4)
+    bundle = fetch_brk_valuation_bundle(period=period, yahoo_client=yahoo, segment_limit=segment_filings)
     reference = build_brk_security_reference()
     enriched_holdings = enrich_holdings_with_market_prices(
         aggregate_13f_holdings(bundle.holdings.holdings),
@@ -622,74 +634,154 @@ def run_brk_valuation_report(outdir: str, period: str) -> int:
         yahoo_client=yahoo,
     )
 
+    # Build primary tables up-front — each is reused in multiple places.
+    liquidity_bridge = build_liquidity_bridge_table(bundle.liquidity.filings)
+    liquidity_snapshot = build_latest_liquidity_snapshot_table(liquidity_bridge)
+    sotp_bridge = build_market_implied_sotp_bridge_table(
+        bundle, reference, yahoo_client=yahoo, enriched_holdings=enriched_holdings,
+    )
+    equity_portfolio = build_public_equity_portfolio_summary_table(
+        bundle.holdings.holdings, reference,
+        yahoo_client=yahoo, enriched_holdings=enriched_holdings,
+    )
     operating_context = build_operating_business_context_table(
         bundle, reference, period=period, yahoo_client=yahoo, enriched_holdings=enriched_holdings,
     )
     reverse_dcf = build_brk_operating_reverse_dcf_table(
         operating_context, bundle.overview.market_snapshot
     )
-    liquidity_bridge = build_liquidity_bridge_table(bundle.liquidity.filings)
+    summary = build_brk_valuation_summary_table(
+        bundle.overview.market_snapshot,
+        sotp_bridge,
+        operating_context,
+        reverse_dcf,
+        equity_portfolio,
+    )
 
-    sections = [
-        ("Valuation Assumptions", build_brk_valuation_assumptions_table(period=period)),
-        ("Market Anchor", build_market_anchor_table(bundle.overview.market_snapshot)),
-        (
-            "Public Equity Portfolio",
-            build_public_equity_portfolio_summary_table(
-                bundle.holdings.holdings, reference,
-                yahoo_client=yahoo, enriched_holdings=enriched_holdings,
-            ),
-        ),
-        ("Liquidity Snapshot", build_latest_liquidity_snapshot_table(liquidity_bridge)),
-        ("Balance Sheet Context", build_balance_sheet_context_table(liquidity_bridge)),
-        (
-            "Market-Implied SOTP Bridge",
-            build_market_implied_sotp_bridge_table(
-                bundle, reference, yahoo_client=yahoo, enriched_holdings=enriched_holdings,
-            ),
-        ),
+    # Header metadata
+    now = _dt.now()
+    price_date = bundle.overview.market_snapshot.get("latest_price_date", "unknown")
+    holdings_filing_date = bundle.holdings.filing_date or "unknown"
+    holdings_accession = bundle.holdings.accession_number or "unknown"
+    liquidity_period_end = (
+        str(liquidity_snapshot.iloc[0]["period_end"])
+        if not liquidity_snapshot.empty and "period_end" in liquidity_snapshot.columns
+        else "unknown"
+    )
+    liquidity_accession = (
+        str(liquidity_snapshot.iloc[0]["accession_number"])
+        if not liquidity_snapshot.empty and "accession_number" in liquidity_snapshot.columns
+        else "unknown"
+    )
+
+    # Fixed maturity figure for methodology notes — pull from actual data.
+    fixed_maturity_raw = None
+    if not liquidity_snapshot.empty and "fixed_maturity_securities_usd" in liquidity_snapshot.columns:
+        v = liquidity_snapshot.iloc[0]["fixed_maturity_securities_usd"]
+        if v is not None and str(v) not in {"nan", "None", ""}:
+            try:
+                fixed_maturity_raw = float(v)
+            except (TypeError, ValueError):
+                pass
+    fixed_maturity_note = _fmt_currency(fixed_maturity_raw) if fixed_maturity_raw else "~$25B"
+
+    # Print key numbers to terminal so the user sees results without opening the file.
+    print("\n## Key Valuation Summary\n")
+    print(render_terminal_table(summary))
+
+    # Assemble Markdown sections in findings-first order.
+    core_md = [
+        ("Key Valuation Summary", summary),
+        ("Market-Implied SOTP Bridge", sotp_bridge),
         ("Operating Business Context", operating_context),
     ]
     if not reverse_dcf.empty:
-        sections.append(("Operating Business Reverse DCF", reverse_dcf))
-    sections.extend(build_segment_period_sections(bundle.segments.filings, period=period))
+        core_md.append(("Operating Business Reverse DCF", reverse_dcf))
 
-    now = _dt.now()
-    price_date = bundle.overview.market_snapshot.get("latest_price_date", "unknown")
-    holdings_date = bundle.holdings.filing_date or "unknown"
+    support_md = [
+        ("Market Anchor", build_market_anchor_table(bundle.overview.market_snapshot)),
+        ("Public Equity Portfolio", equity_portfolio),
+        ("Liquidity Snapshot", liquidity_snapshot),
+        ("Balance Sheet Context", build_balance_sheet_context_table(liquidity_bridge)),
+    ]
 
-    lines = [
+    segment_md = build_segment_period_sections(bundle.segments.filings, period=period)
+
+    # Build Markdown document
+    lines: list[str] = [
         "# Berkshire Hathaway Valuation Report",
         "",
         f"Generated: {now.strftime('%Y-%m-%d %H:%M')}  ",
         f"Price date: {price_date}  ",
-        f"13F filing date: {holdings_date}  ",
+        f"13F filing date: {holdings_filing_date} · accession {holdings_accession}  ",
+        f"Liquidity period end: {liquidity_period_end} · accession {liquidity_accession}  ",
         f"Segment period type: {period}  ",
         "",
-        "## Methodology Notes",
-        "",
-        "- **SOTP residual is market-implied (circular):** The operating-business residual is",
-        "  `market cap − public equities − net liquidity`. It reflects what the market is already",
-        "  pricing in, not an independent bottoms-up appraisal of the operating businesses.",
-        "- **Reverse DCF uses pre-tax segment earnings:** Implied growth rates are approximations.",
-        "  Multiply the earnings yield by ~0.75 to estimate an after-tax equivalent.",
-        "- **Fixed maturity securities** (~$25B) are insurance-reserve-backed and not freely",
-        "  deployable excess capital.",
-        "- **Insurance float (~$170B)** is not separately valued in this bridge. Float enables",
-        "  investment of policyholders' funds at near-zero cost and is implicitly captured in the",
-        "  public-equity portfolio value.",
-        "- **Owner earnings** = net income + D&A − capex. For BNSF and other capital-intensive",
-        "  subsidiaries where capex substantially exceeds D&A, this may overstate maintenance-",
-        "  adjusted earnings.",
-        "- **13F lag:** Unresolved holdings use reported values from the 13F filing date, not today.",
+        "---",
         "",
     ]
 
-    for title, frame in sections:
-        lines.append(f"## {title}")
-        lines.append("")
-        lines.append(render_markdown_table(frame))
-        lines.append("")
+    # Core findings
+    for title, frame in core_md:
+        lines += [f"## {title}", "", render_markdown_table(frame), ""]
+
+    # Supporting detail
+    lines += ["---", "", "## Supporting Detail", ""]
+    for title, frame in support_md:
+        lines += [f"### {title}", "", render_markdown_table(frame), ""]
+
+    # Segment history
+    if segment_md:
+        lines += ["---", "", "## Segment History", ""]
+        for title, frame in segment_md:
+            lines += [f"### {title}", "", render_markdown_table(frame), ""]
+
+    # Methodology — at the end so findings lead
+    lines += [
+        "---",
+        "",
+        "## Valuation Assumptions & Methodology",
+        "",
+        "### Assumptions",
+        "",
+        render_markdown_table(build_brk_valuation_assumptions_table(period=period)),
+        "",
+        "### Methodology Notes",
+        "",
+        "- **SOTP residual is market-implied (circular).** The operating-business residual is"
+        " `market cap − public equities − net core liquidity`. It reflects what the market"
+        " is already pricing in, not an independent bottoms-up appraisal of the operating"
+        " businesses.",
+        "- **Reverse DCF uses pre-tax segment earnings.** Implied growth rates are"
+        " approximations. Apply a ~0.75 factor to estimate an after-tax earnings yield.",
+        f"- **Fixed maturity securities ({fixed_maturity_note}) are insurance-reserve-backed**"
+        " and not freely deployable capital. They are included inside the residual above;"
+        " a conservative adjustment would reduce the residual by this amount to isolate"
+        " purely operating-business value.",
+        "- **Insurance float (~$170B) is an accounting liability but not a simple deduction.**"
+        " Float is policyholders' money Berkshire holds before paying claims. If underwriting"
+        " is break-even or profitable the cost of float is zero or negative, making it"
+        " an interest-free funding source. Do not subtract float at face value if you are"
+        " also valuing the investment portfolio at market — the portfolio already reflects"
+        " float-funded investments.",
+        "- **Deferred tax on unrealized equity gains (~$35B).** The 13F portfolio is valued"
+        " at current market prices (pre-tax). A sale of the entire equity portfolio would"
+        " trigger capital-gains tax on the embedded gain. A conservative view haircuts the"
+        " 13F value by roughly (unrealized gain × 21%) to reach an after-tax net value.",
+        "- **Subsidiary debt is not separately deducted.** BNSF (~$24B) and BHE (~$40B+)"
+        " carry their own debt. Since we value the operating businesses via the market-implied"
+        " residual, subsidiary debt is already reflected in how the market prices those"
+        " franchises. Holding-company debt is similarly embedded in the residual.",
+        "- **Owner earnings** = net income + D&A − capex. For capital-intensive subsidiaries"
+        " like BNSF where capex substantially exceeds D&A, this may overstate"
+        " maintenance-adjusted earnings.",
+        "- **13F lag.** Unresolved holdings use reported values from the 13F filing date, not"
+        " today's market prices.",
+        "",
+        "---",
+        "",
+        f"*Generated by valuationFramework · {now.strftime('%Y-%m-%d %H:%M')}*",
+    ]
 
     content = "\n".join(lines)
     outpath = Path(outdir) / f"brk_valuation_report_{now.strftime('%Y%m%d')}.md"

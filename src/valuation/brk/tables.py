@@ -1313,6 +1313,58 @@ def build_brk_operating_reverse_dcf_table(
     return pd.DataFrame(rows)
 
 
+def build_brk_valuation_summary_table(
+    market_snapshot: dict,
+    sotp_bridge: pd.DataFrame,
+    operating_context: pd.DataFrame,
+    reverse_dcf: pd.DataFrame,
+    equity_portfolio: pd.DataFrame,
+) -> pd.DataFrame:
+    """Return a compact key-numbers summary extracted from already-computed SOTP tables.
+
+    Columns: field, value.  Values are raw numerics; humanize_frame formats them for display.
+    Designed to be the first section of a valuation report — key findings at a glance.
+    """
+    price = market_snapshot.get("last_price")
+    market_cap = _metric_value(sotp_bridge, "market_cap")
+    blended_13f = _context_field_value(equity_portfolio, "blended_13f_value_usd")
+    reported_13f = _context_field_value(equity_portfolio, "reported_13f_value_usd")
+    coverage = _context_field_value(equity_portfolio, "live_price_coverage_pct")
+    net_liquidity = _metric_value(sotp_bridge, "net_cash_and_treasury_bills")
+    residual = _metric_value(sotp_bridge, "residual_operating_and_other")
+    residual_per_share = _metric_per_share(sotp_bridge, "residual_operating_and_other")
+    residual_weight = _metric_weight(sotp_bridge, "residual_operating_and_other")
+    pretax_earnings = _context_field_value(operating_context, "operating_segment_pretax_earnings_usd")
+    earnings_multiple = _context_field_value(operating_context, "residual_to_pretax_earnings_multiple")
+
+    implied_growth_10 = None
+    zero_growth_per_share_10 = None
+    if not reverse_dcf.empty and "assumed_return" in reverse_dcf.columns:
+        row_10 = reverse_dcf[abs(reverse_dcf["assumed_return"] - 0.10) < 0.001]
+        if not row_10.empty:
+            v = row_10.iloc[0].get("implied_growth")
+            implied_growth_10 = float(v) if v is not None and pd.notna(v) else None
+            v = row_10.iloc[0].get("zero_growth_per_brk_b_usd")
+            zero_growth_per_share_10 = float(v) if v is not None and pd.notna(v) else None
+
+    rows = [
+        {"field": "price_brk_b", "value": price},
+        {"field": "market_cap_usd", "value": market_cap},
+        {"field": "13f_reported_value_usd", "value": reported_13f},
+        {"field": "13f_blended_value_usd", "value": blended_13f},
+        {"field": "13f_live_coverage_pct", "value": coverage},
+        {"field": "net_core_liquidity_usd", "value": net_liquidity},
+        {"field": "residual_operating_and_other_usd", "value": residual},
+        {"field": "residual_per_brk_b_usd", "value": residual_per_share},
+        {"field": "residual_market_cap_weight", "value": residual_weight},
+        {"field": "segment_pretax_earnings_usd", "value": pretax_earnings},
+        {"field": "residual_to_pretax_earnings_multiple", "value": earnings_multiple},
+        {"field": "implied_growth_at_10_pct", "value": implied_growth_10},
+        {"field": "zero_growth_value_per_brk_b_usd", "value": zero_growth_per_share_10},
+    ]
+    return pd.DataFrame(rows)
+
+
 def build_segment_report_summary_table(filings: Sequence[BrkSegmentFiling]) -> pd.DataFrame:
     """Summarize the Berkshire segment filings included in the current output."""
     return pd.DataFrame(
@@ -1484,6 +1536,30 @@ def _metric_value(frame: pd.DataFrame, metric: str) -> float | None:
         return None
     value = rows.iloc[0]["value_usd"]
     if value is None or pd.isna(value):
+        return None
+    return float(value)
+
+
+def _metric_per_share(frame: pd.DataFrame, metric: str) -> float | None:
+    if frame.empty or "metric" not in frame.columns or "per_brk_b_share_usd" not in frame.columns:
+        return None
+    rows = frame[frame["metric"] == metric]
+    if rows.empty:
+        return None
+    value = rows.iloc[0]["per_brk_b_share_usd"]
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    return float(value)
+
+
+def _metric_weight(frame: pd.DataFrame, metric: str) -> float | None:
+    if frame.empty or "metric" not in frame.columns or "market_cap_weight" not in frame.columns:
+        return None
+    rows = frame[frame["metric"] == metric]
+    if rows.empty:
+        return None
+    value = rows.iloc[0]["market_cap_weight"]
+    if value is None or (isinstance(value, float) and pd.isna(value)):
         return None
     return float(value)
 
