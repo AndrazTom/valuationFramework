@@ -95,6 +95,19 @@ Rules:
   - fallback path only, not a deep modeling layer
 - `src/valuation/company/tables.py`
   - compact backend-facing company tables such as summary, overview, and statement availability
+  - also contains `build_implied_value_range_table` and `build_reverse_dcf_table` (owner-earnings valuation)
+- `src/valuation/company/comps.py`
+  - multi-security comparison table builder: `fetch_comps_entries` (parallel TTM fetch) + `build_comps_table`
+  - columns: ticker, name, price, market_cap, revenue, net_income, owner_earnings, oe_margin_pct, pe_ratio, price_to_oe, oe_yield_pct, ev_to_ebitda, implied_growth_pct
+- `src/valuation/company/ratios.py`
+  - historical per-fiscal-year valuation ratio builder
+  - SEC path: `build_historical_ratios_table` (annual companyfacts + monthly Yahoo price history)
+  - Yahoo path: `build_historical_ratios_table_from_yahoo` (Yahoo annual frames)
+  - `_annual_period_end_dates` reads raw companyfacts to recover actual fiscal year end dates (lost when statements convert to period labels)
+- `src/valuation/watchlist.py`
+  - persistent ticker watchlist backed by `~/.config/valuationFramework/watchlist.toml`
+  - add/remove/load/save with case-insensitive deduplication
+  - `./vf watchlist show` delegates to `run_comps` on the full watchlist
 - `src/valuation/data/normalize/tables.py`
   - core normalization contract layer
   - latest-fact selection, filing normalization, statement period matrix logic
@@ -167,7 +180,7 @@ As of 2026-05-18, `main` contains (on `brk`, pending merge):
 - generic statements command backed by SEC companyfacts:
   - income
   - balance
-  - cashflow
+  - cashflow (now includes `depreciation_amortization` row via `DepreciationDepletionAndAmortization`)
   - annual and quarterly
   - optional start/end year filters
   - optional start/end quarter filters for quarterly views
@@ -176,6 +189,9 @@ As of 2026-05-18, `main` contains (on `brk`, pending merge):
     - additive flows may derive from YTD/FY
     - balance-sheet items stay instant
     - diluted EPS / diluted shares should prefer direct-quarter facts and avoid subtraction
+- multi-security comps table: `./vf comps AAPL MSFT GOOG` fetches TTM metrics in parallel and renders side-by-side
+- historical valuation ratios: `./vf ratios AAPL --limit 5` shows annual P/E, P/OE, OE yield, P/B, EV/EBITDA with price from Yahoo monthly history
+- persistent watchlist: `./vf watchlist add/remove/list/show` backed by `~/.config/valuationFramework/watchlist.toml`
 
 ## Current Commands
 
@@ -190,6 +206,13 @@ As of 2026-05-18, `main` contains (on `brk`, pending merge):
 - `./vf statements BNP.PA --statement income --period annual`
 - `./vf statements AAPL --statement balance --period quarterly`
 - `./vf statements BRK --statement income --period quarterly --diagnostics`
+- `./vf ratios AAPL --limit 5`
+- `./vf ratios BNP.PA --limit 4`
+- `./vf comps AAPL MSFT GOOG`
+- `./vf watchlist add AAPL MSFT BRK-B`
+- `./vf watchlist remove MSFT`
+- `./vf watchlist list`
+- `./vf watchlist show`
 - `./vf brk overview`
 - `./vf brk holdings --limit 10`
 - `./vf brk holdings --history --filings-limit 4 --limit 10`
@@ -321,6 +344,25 @@ Completed on 2026-05-18 (Berkshire SOTP):
   - only emits when operating context has positive residual and pretax earnings
 - 5 new tests in `test_brk_tables.py`; full suite now 224 tests, all passing
 
+Completed on 2026-05-18 (generic company research tools):
+
+- `src/valuation/company/comps.py` added: multi-ticker TTM comps via parallel `fetch_comps_entries` + `build_comps_table`
+  - columns: ticker, name, price, market_cap, revenue, net_income, owner_earnings, oe_margin_pct, pe_ratio, price_to_oe, oe_yield_pct, ev_to_ebitda, implied_growth_pct
+  - implied_growth_pct = 0.10 - (owner_earnings / market_cap), shown when owner earnings positive
+- `src/valuation/company/ratios.py` added: historical per-fiscal-year valuation ratios
+  - `build_historical_ratios_table`: SEC path using annual companyfacts + Yahoo monthly price history
+  - `build_historical_ratios_table_from_yahoo`: Yahoo annual frames path
+  - `_annual_period_end_dates`: recovers actual FY end dates from raw companyfacts (period labels lose the date)
+  - `_price_for_date`: searches ±3 months in monthly price map for closest bar
+  - columns: fiscal_year, end_date, price, market_cap, net_income, revenue, owner_earnings, pe_ratio, price_to_oe, oe_yield_pct, pb_ratio, ev_to_ebitda
+- `src/valuation/watchlist.py` added: persistent ticker watchlist at `~/.config/valuationFramework/watchlist.toml`
+  - `./vf watchlist add/remove/list/show` subcommands; `show` delegates to `run_comps` on full watchlist
+- `depreciation_amortization` added to `CASH_FLOW_DEFINITIONS` (`DepreciationDepletionAndAmortization` / `DepreciationAndAmortization`)
+  - unlocks owner earnings in historical ratios for all issuers with SEC cashflow D&A data
+  - D&A now also surfaces in Key Financials section of `./vf company` with proper `$X.XXB` formatting
+- `humanize_frame` formatting extended: `depreciation` and `amortization` token → currency format
+- full test suite at 257 tests (was 224 before this session)
+
 Next concrete tasks:
 
 1. Berkshire statement fallback:
@@ -330,10 +372,9 @@ Next concrete tasks:
 2. Berkshire SOTP depth:
    - add more non-13F balance-sheet items explicitly (deferred taxes, pension obligations) where filing tables reliably expose them
    - confirm the residual is well-defined after all explicit components are separated
-3. Generic company — focus on non-valuation improvements next:
+3. Generic company improvements:
    - statement concept coverage: consider sector-specific concept additions for energy/utility/insurance companies
    - filing quality: ensure `8-K` and proxy filings are surfaced cleanly in the company view
-   - overview completeness: investigate whether `capex` and `depreciation_amortization` can be exposed in the overview layer
 4. QA sweep completed on 2026-05-18:
    - `./vf brk sotp`, `./vf brk sotp --price-change 1M`, `./vf brk holdings --history --filings-limit 2`, `./vf company AAPL`, `./vf company BRK-B`, `./vf company BNP.PA` all exited 0
    - `Operating Business Reverse DCF` confirmed present in SOTP output
