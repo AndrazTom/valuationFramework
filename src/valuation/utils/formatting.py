@@ -80,6 +80,10 @@ def _infer_format_kind(column: str, row: pd.Series) -> Optional[str]:
         return "currency"
     if column_name in {"coverage_ratio"} or column_name.endswith("_pct"):
         return "percent"
+    if column_name in {"assumed_return", "implied_growth"}:
+        return "percent"
+    if column_name == "multiple":
+        return "multiple"
     if column_name in {"portfolio_weight"} or "weight" in column_name:
         return "percent"
     if column_name in {

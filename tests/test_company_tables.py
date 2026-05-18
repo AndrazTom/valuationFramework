@@ -4,6 +4,8 @@ import pytest
 import pandas as pd
 
 from valuation.company.tables import (
+    build_implied_value_range_table,
+    build_reverse_dcf_table,
     build_sec_overview_table,
     build_sec_statement_availability_table,
     build_valuation_ratios_table,
@@ -958,3 +960,139 @@ def test_extract_financials_ttm_from_yahoo_frames_falls_back_to_annual():
 
     assert financials.get("revenue") == pytest.approx(400.0)
     assert ttm_label == "FY 2023"
+
+
+def test_build_implied_value_range_table_basic():
+    snapshot = {"last_price": 500.0, "shares": 100.0}
+    financials = {
+        "net_income": 50.0,
+        "depreciation_amortization": 20.0,
+        "capex": 10.0,  # owner_earnings = 60, per_share = 0.60
+    }
+    table = build_implied_value_range_table(snapshot, financials, multiples=[10, 20])
+    assert len(table) == 2
+    rows = {row["multiple"]: row for _, row in table.iterrows()}
+    assert rows[10]["implied_price"] == pytest.approx(6.0)
+    assert rows[20]["implied_price"] == pytest.approx(12.0)
+    # current price 500, implied at 10x = 6 → upside = (6-500)/500 = -0.988 (stored as 0-1 decimal)
+    assert rows[10]["upside_pct"] == pytest.approx((6.0 - 500.0) / 500.0)
+
+
+def test_build_implied_value_range_table_positive_upside():
+    # per_share_oe = 100 / 10 = 10, current_price = 80
+    # at 10x: implied = 100, upside = (100-80)/80 = 0.25 (stored as 0-1 decimal)
+    snapshot = {"last_price": 80.0, "shares": 10.0}
+    financials = {
+        "net_income": 80.0,
+        "depreciation_amortization": 30.0,
+        "capex": 10.0,  # owner_earnings = 100, per_share = 10
+    }
+    table = build_implied_value_range_table(snapshot, financials, multiples=[10])
+    assert len(table) == 1
+    row = table.iloc[0]
+    assert row["implied_price"] == pytest.approx(100.0)
+    assert row["upside_pct"] == pytest.approx(0.25)
+
+
+def test_build_implied_value_range_table_returns_empty_when_owner_earnings_negative():
+    snapshot = {"last_price": 100.0, "shares": 10.0}
+    financials = {
+        "net_income": -20.0,
+        "depreciation_amortization": 5.0,
+        "capex": 3.0,  # owner_earnings = -18 (negative)
+    }
+    table = build_implied_value_range_table(snapshot, financials)
+    assert table.empty
+
+
+def test_build_implied_value_range_table_returns_empty_when_inputs_missing():
+    snapshot = {"last_price": 100.0, "shares": 10.0}
+    # missing depreciation_amortization
+    financials = {"net_income": 50.0, "capex": 10.0}
+    table = build_implied_value_range_table(snapshot, financials)
+    assert table.empty
+
+
+def test_build_implied_value_range_table_returns_empty_when_price_missing():
+    snapshot = {"shares": 10.0}
+    financials = {"net_income": 50.0, "depreciation_amortization": 20.0, "capex": 10.0}
+    table = build_implied_value_range_table(snapshot, financials)
+    assert table.empty
+
+
+def test_build_implied_value_range_table_uses_default_multiples():
+    snapshot = {"last_price": 100.0, "shares": 10.0}
+    financials = {
+        "net_income": 50.0,
+        "depreciation_amortization": 20.0,
+        "capex": 10.0,
+    }
+    table = build_implied_value_range_table(snapshot, financials)
+    assert list(table["multiple"]) == [10, 15, 20, 25, 30]
+
+
+def test_build_implied_value_range_table_carries_period_label():
+    snapshot = {"last_price": 100.0, "shares": 10.0}
+    financials = {"net_income": 50.0, "depreciation_amortization": 20.0, "capex": 10.0}
+    table = build_implied_value_range_table(snapshot, financials, multiples=[15], period_label="TTM")
+    assert table.iloc[0]["as_of"] == "TTM"
+
+
+def test_build_reverse_dcf_table_basic():
+    # market_cap = 1000, owner_earnings = 60
+    # oe_yield = 60/1000 = 0.06
+    # at r=0.10: implied_g = 0.10 - 0.06 = 0.04
+    # zero_growth_price = (60/100) / 0.10 = 6.0
+    snapshot = {"market_cap": 1000.0, "last_price": 10.0, "shares": 100.0}
+    financials = {
+        "net_income": 50.0,
+        "depreciation_amortization": 20.0,
+        "capex": 10.0,  # owner_earnings = 60
+    }
+    table = build_reverse_dcf_table(snapshot, financials, required_returns=[0.10])
+    assert len(table) == 1
+    row = table.iloc[0]
+    assert row["assumed_return"] == pytest.approx(0.10)
+    assert row["implied_growth"] == pytest.approx(0.04)
+    assert row["zero_growth_price"] == pytest.approx(6.0)
+
+
+def test_build_reverse_dcf_table_default_returns():
+    snapshot = {"market_cap": 1000.0, "last_price": 10.0, "shares": 100.0}
+    financials = {"net_income": 50.0, "depreciation_amortization": 20.0, "capex": 10.0}
+    table = build_reverse_dcf_table(snapshot, financials)
+    assert list(table["assumed_return"]) == pytest.approx([0.08, 0.10, 0.12])
+
+
+def test_build_reverse_dcf_table_derives_market_cap_from_price_and_shares():
+    # No direct market_cap; should derive from last_price * shares = 200
+    snapshot = {"last_price": 20.0, "shares": 10.0}
+    financials = {
+        "net_income": 10.0,
+        "depreciation_amortization": 5.0,
+        "capex": 3.0,  # owner_earnings = 12, oe_yield = 12/200 = 0.06
+    }
+    table = build_reverse_dcf_table(snapshot, financials, required_returns=[0.10])
+    row = table.iloc[0]
+    assert row["implied_growth"] == pytest.approx(0.04)
+
+
+def test_build_reverse_dcf_table_returns_empty_when_owner_earnings_negative():
+    snapshot = {"market_cap": 1000.0, "last_price": 10.0, "shares": 100.0}
+    financials = {"net_income": -50.0, "depreciation_amortization": 5.0, "capex": 3.0}
+    table = build_reverse_dcf_table(snapshot, financials)
+    assert table.empty
+
+
+def test_build_reverse_dcf_table_returns_empty_when_market_cap_unavailable():
+    snapshot = {}  # no price, no market_cap
+    financials = {"net_income": 50.0, "depreciation_amortization": 20.0, "capex": 10.0}
+    table = build_reverse_dcf_table(snapshot, financials)
+    assert table.empty
+
+
+def test_build_reverse_dcf_table_carries_period_label():
+    snapshot = {"market_cap": 1000.0, "last_price": 10.0, "shares": 100.0}
+    financials = {"net_income": 50.0, "depreciation_amortization": 20.0, "capex": 10.0}
+    table = build_reverse_dcf_table(snapshot, financials, required_returns=[0.10], period_label="TTM")
+    assert table.iloc[0]["as_of"] == "TTM"

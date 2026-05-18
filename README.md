@@ -66,6 +66,9 @@ Current backend behavior:
   - market snapshot
   - overview
   - key financials
+  - valuation ratios (TTM P/E, P/B, P/S, P/FCF, P/OE, yields, EV multiples)
+  - implied value range (per-share value at 10x–30x owner earnings)
+  - reverse DCF (implied perpetual growth rate at 8%/10%/12% required return)
   - statement availability
   - recent core filings
 

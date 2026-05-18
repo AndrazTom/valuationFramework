@@ -85,7 +85,9 @@ Statement rules:
 - missing statement rows should be explainable through an explicit diagnostic path; do not make users infer whether a row is absent because the concept is missing, stale, wrong-unit, or has no usable period
 - `./vf statements ... --diagnostics` / `--include-missing` emits `Statement Diagnostics` for SEC-backed statements; keep default statement output clean
 - cash flow statement appends a derived `free_cash_flow = operating_cash_flow - capex` row when both are present; capex is `PaymentsToAcquirePropertyPlantAndEquipment`, a positive outflow
-- `./vf company` emits a `Valuation Ratios` section with P/E, P/B, P/S, and P/FCF computed from market snapshot + latest annual financials; works for both SEC and Yahoo paths; rows are omitted silently when a denominator is unavailable
+- `./vf company` emits a `Valuation Ratios` section with P/E, P/B, P/S, P/FCF, P/OE, owner earnings yield, FCF yield, EV/Revenue, EV/EBITDA, and per-share owner earnings using TTM financials; works for both SEC and Yahoo paths; rows are omitted silently when a denominator is unavailable
+- `./vf company` emits an `Implied Value Range` section after Valuation Ratios when owner earnings are positive: shows implied price per share at 10x/15x/20x/25x/30x owner earnings multiples with upside_pct vs current price (0-1 decimal)
+- `./vf company` emits a `Reverse DCF` section when owner earnings are positive: uses Gordon Growth model to show implied perpetual growth rate at 8%/10%/12% required return, plus zero-growth fair value per share at each rate
 - helper heuristics are acceptable only when they are narrow and defensible
 - Yahoo statement handling should stay explicit and shallow; do not build complex inference layers on vendor-standardized rows
 - Yahoo Europe hardening notes from `fix/european-yahoo-statements`:

@@ -13,7 +13,9 @@ from valuation.brk.cli import register_brk_parser, run_brk_command
 from valuation.company.service import fetch_company_facts, fetch_company_snapshot
 from valuation.company.statements import build_statement_diagnostics_table, build_statement_table, build_statement_table_ttm
 from valuation.company.tables import (
+    build_implied_value_range_table,
     build_key_financials_table,
+    build_reverse_dcf_table,
     build_sec_overview_table,
     build_sec_statement_availability_table,
     build_valuation_ratios_table,
@@ -184,16 +186,27 @@ def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limi
         )
         sections.append(("Key Financials", build_key_financials_table(bundle.company_facts)))
         _ttm_financials, _ttm_label = extract_financials_ttm_from_company_facts(bundle.company_facts)
+        _ratio_label = _ttm_label or extract_period_label_from_company_facts(bundle.company_facts)
         sections.append(
             (
                 "Valuation Ratios",
                 build_valuation_ratios_table(
                     bundle.market_snapshot,
                     _ttm_financials,
-                    period_label=_ttm_label or extract_period_label_from_company_facts(bundle.company_facts),
+                    period_label=_ratio_label,
                 ),
             )
         )
+        _oe_range = build_implied_value_range_table(
+            bundle.market_snapshot, _ttm_financials, period_label=_ratio_label
+        )
+        if not _oe_range.empty:
+            sections.append(("Implied Value Range", _oe_range))
+        _rdcf = build_reverse_dcf_table(
+            bundle.market_snapshot, _ttm_financials, period_label=_ratio_label
+        )
+        if not _rdcf.empty:
+            sections.append(("Reverse DCF", _rdcf))
         sections.append(("Statement Availability", build_sec_statement_availability_table(bundle.company_facts)))
     elif bundle.company_profile:
         yahoo = YahooFinanceClient()
@@ -258,6 +271,16 @@ def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limi
                 ),
             )
         )
+        _yahoo_oe_range = build_implied_value_range_table(
+            bundle.market_snapshot, _yahoo_ttm_financials, period_label=_yahoo_ttm_label
+        )
+        if not _yahoo_oe_range.empty:
+            sections.append(("Implied Value Range", _yahoo_oe_range))
+        _yahoo_rdcf = build_reverse_dcf_table(
+            bundle.market_snapshot, _yahoo_ttm_financials, period_label=_yahoo_ttm_label
+        )
+        if not _yahoo_rdcf.empty:
+            sections.append(("Reverse DCF", _yahoo_rdcf))
         sections.append(
             (
                 "Statement Availability",
