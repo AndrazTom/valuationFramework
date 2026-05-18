@@ -49,6 +49,24 @@ DISPLAY_COLUMN_ALIASES = {
     "identifier_kind": "id kind",
     "query_used": "query",
     "short_term_us_treasury_bills_usd": "T-bills",
+    # Segment history and implied allocation
+    "revenues_usd": "revenues",
+    "capex_usd": "capex",
+    "pretax_earnings_usd": "pre-tax earnings",
+    "owner_earnings_usd": "owner earnings",
+    "pretax_share_pct": "% of total",
+    "implied_value_usd": "implied value",
+    "implied_pe_multiple": "implied P/E",
+    "implied_p_oe_multiple": "implied P/OE",
+    # Book value and OpCo sensitivity
+    "stockholders_equity_usd": "stockholders equity",
+    "book_value_per_brk_b_usd": "BV/BRK.B",
+    "implied_opco_value_usd": "implied opco value",
+    "implied_total_value_usd": "implied total value",
+    "implied_brk_b_price_usd": "implied BRK.B price",
+    "vs_current_price_pct": "vs current price",
+    "scenario": "scenario",
+    "cagr_pct": "CAGR",
 }
 
 DISPLAY_VALUE_ALIASES = {
@@ -166,6 +184,8 @@ def write_json(data: object, path: str | Path) -> None:
 
 def _prepare_display_frame(frame: pd.DataFrame, *, target: str) -> pd.DataFrame:
     display = humanize_frame(frame)
+    # "unit" is a formatting-hint column; always drop it from any rendered output
+    display = display.drop(columns=["unit"], errors="ignore")
     display = display.rename(columns={column: _display_column_name(str(column), target=target) for column in display.columns})
     for column in display.columns:
         if str(column).lower() in {"field", "metric"}:

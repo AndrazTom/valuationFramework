@@ -26,6 +26,7 @@ from valuation.brk.tables import (
     build_13f_summary_table,
     build_13f_live_price_summary_table,
     build_balance_sheet_context_table,
+    build_book_value_history_table,
     build_brk_operating_reverse_dcf_table,
     build_brk_valuation_assumptions_table,
     build_brk_valuation_summary_table,
@@ -38,8 +39,14 @@ from valuation.brk.tables import (
     build_market_anchor_table,
     build_market_implied_sotp_bridge_table,
     build_operating_business_context_table,
+    build_opco_valuation_sensitivity_table,
     build_public_equity_portfolio_summary_table,
+    build_segment_earnings_history_table,
+    build_segment_implied_allocation_table,
+    build_segment_owner_earnings_history_table,
     build_segment_period_sections,
+    build_segment_pretax_margin_history_table,
+    build_segment_revenues_history_table,
     build_segment_report_summary_table,
     build_share_class_table,
     build_top_level_operating_segments_summary_table,
@@ -480,6 +487,10 @@ def run_brk_segments(
         ),
     ]
     sections.extend(build_segment_period_sections(bundle.filings, period=period))
+    _append_nonempty(sections, "Segment Pre-Tax Earnings History", build_segment_earnings_history_table(bundle.filings, period=period))
+    _append_nonempty(sections, "Segment Revenues History", build_segment_revenues_history_table(bundle.filings, period=period))
+    _append_nonempty(sections, "Segment Owner Earnings History", build_segment_owner_earnings_history_table(bundle.filings, period=period))
+    _append_nonempty(sections, "Segment Pre-Tax Margin History", build_segment_pretax_margin_history_table(bundle.filings, period=period))
     if len(bundle.filings) == 1 and len(sections) == 1:
         sections.append(
             (
@@ -616,6 +627,17 @@ def run_brk_sotp(
                 ),
             )
         sections.extend(build_segment_period_sections(bundle.segments.filings, period=period))
+        # Segment history pivot tables
+        _append_nonempty(sections, "Segment Pre-Tax Earnings History", build_segment_earnings_history_table(bundle.segments.filings, period=period))
+        _append_nonempty(sections, "Segment Owner Earnings History", build_segment_owner_earnings_history_table(bundle.segments.filings, period=period))
+        _append_nonempty(sections, "Segment Pre-Tax Margin History", build_segment_pretax_margin_history_table(bundle.segments.filings, period=period))
+        # Implied segment allocation and OpCo sensitivity
+        _append_nonempty(sections, "Implied Segment Allocation", build_segment_implied_allocation_table(bundle, reference, period=period, yahoo_client=yahoo, enriched_holdings=enriched_holdings))
+        _append_nonempty(sections, "OpCo Valuation Sensitivity", build_opco_valuation_sensitivity_table(bundle, reference, period=period, yahoo_client=yahoo, enriched_holdings=enriched_holdings))
+        # Book value history from SEC company facts
+        company_facts = getattr(bundle.overview, "company_facts", {}) or {}
+        share_count = _brk_share_count_for_report(bundle.overview.market_snapshot)
+        _append_nonempty(sections, "Book Value History", build_book_value_history_table(company_facts, share_count=share_count, limit=5))
     _emit_sections(sections, Path(outdir) / "BRK_SOTP")
     return 0
 
@@ -719,6 +741,25 @@ def run_brk_valuation_report(outdir: str, period: str, segment_filings: int = 4)
     ]
 
     segment_md = build_segment_period_sections(bundle.segments.filings, period=period)
+    segment_history_md: list[tuple[str, "pd.DataFrame"]] = []
+    _ht = build_segment_earnings_history_table(bundle.segments.filings, period=period)
+    if not _ht.empty:
+        segment_history_md.append(("Segment Pre-Tax Earnings History", _ht))
+    _ht = build_segment_revenues_history_table(bundle.segments.filings, period=period)
+    if not _ht.empty:
+        segment_history_md.append(("Segment Revenues History", _ht))
+    _ht = build_segment_owner_earnings_history_table(bundle.segments.filings, period=period)
+    if not _ht.empty:
+        segment_history_md.append(("Segment Owner Earnings History", _ht))
+    _ht = build_segment_pretax_margin_history_table(bundle.segments.filings, period=period)
+    if not _ht.empty:
+        segment_history_md.append(("Segment Pre-Tax Margin History", _ht))
+
+    company_facts = getattr(bundle.overview, "company_facts", {}) or {}
+    share_count = _brk_share_count_for_report(bundle.overview.market_snapshot)
+    _bv = build_book_value_history_table(company_facts, share_count=share_count, limit=5)
+    if not _bv.empty:
+        segment_history_md.append(("Book Value History", _bv))
 
     # Build Markdown document
     lines: list[str] = [
@@ -744,9 +785,11 @@ def run_brk_valuation_report(outdir: str, period: str, segment_filings: int = 4)
         lines += [f"### {title}", "", render_markdown_table(frame), ""]
 
     # Segment history
-    if segment_md:
+    if segment_md or segment_history_md:
         lines += ["---", "", "## Segment History", ""]
         for title, frame in segment_md:
+            lines += [f"### {title}", "", render_markdown_table(frame), ""]
+        for title, frame in segment_history_md:
             lines += [f"### {title}", "", render_markdown_table(frame), ""]
 
     # Methodology — at the end so findings lead
@@ -803,6 +846,16 @@ def run_brk_valuation_report(outdir: str, period: str, segment_filings: int = 4)
     outpath.write_text(content, encoding="utf-8")
     print(f"\nValuation report written to: {outpath}")
     return 0
+
+
+def _append_nonempty(sections: list, title: str, frame: "pd.DataFrame") -> None:
+    if frame is not None and not frame.empty:
+        sections.append((title, frame))
+
+
+def _brk_share_count_for_report(market_snapshot: dict) -> float | None:
+    from valuation.brk.tables import _implied_brk_b_equivalent_shares
+    return _implied_brk_b_equivalent_shares(market_snapshot)
 
 
 def _emit_sections(sections: Iterable[tuple[str, object]], output_dir: Path) -> None:

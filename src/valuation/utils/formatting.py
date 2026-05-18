@@ -104,6 +104,15 @@ def _infer_format_kind(column: str, row: pd.Series) -> Optional[str]:
         return _infer_kind_from_field(str(row["metric"]).lower())
     if "ratio" in row and column_name == "value":
         return _infer_kind_from_field(str(row["ratio"]).lower())
+    # Unit sentinel: period/wide-table columns inherit format from the row's unit field.
+    unit_val = str(row.get("unit") or "").upper().strip()
+    if unit_val and column_name not in {"metric", "segment", "field", "ratio", "unit", "note", "name", "ticker", "scenario", "cagr_pct"}:
+        if unit_val == "USD":
+            return "currency"
+        if unit_val in {"PCT", "PERCENT"}:
+            return "percent"
+        if unit_val in {"SHARES", "COUNT"}:
+            return "quantity"
     # Fallback: column-name inference for wide tables (e.g. comps) that lack a
     # "metric"/"field"/"ratio" structure column. Skip generic names that would
     # collide with non-numeric columns.

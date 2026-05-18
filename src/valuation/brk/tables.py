@@ -1373,6 +1373,428 @@ def build_brk_valuation_summary_table(
     return pd.DataFrame(rows)
 
 
+def build_segment_metric_history_table(
+    filings: Sequence[BrkSegmentFiling],
+    *,
+    metric: str,
+    period: str = "annual",
+    row_label: str | None = None,
+) -> pd.DataFrame:
+    """Generic pivot: segments as rows, period labels as columns, CAGR appended.
+
+    Each cell is the raw USD value for that segment in that period.
+    Returns empty DataFrame when no filings yield the requested metric.
+    """
+    records: list[dict] = []
+    for filing in filings:
+        table = build_top_level_operating_segments_table(filing.reports, period=period)
+        if table.empty or metric not in table.columns:
+            continue
+        ts = table.iloc[0]["period_end"]
+        try:
+            t = pd.Timestamp(ts)
+        except Exception:
+            continue
+        if period == "annual":
+            col_label = f"FY {t.year}"
+        else:
+            q = ((t.month - 1) // 3) + 1
+            col_label = f"{t.year} Q{q}"
+        for _, row in table.iterrows():
+            seg = row.get("segment")
+            val = row.get(metric)
+            if seg is None or val is None or (isinstance(val, float) and pd.isna(val)):
+                continue
+            records.append({"segment": seg, "period_label": col_label, "value": float(val)})
+    if not records:
+        return pd.DataFrame()
+    df = pd.DataFrame(records)
+    pivot = (
+        df.pivot_table(index="segment", columns="period_label", values="value", aggfunc="first")
+        .rename_axis(columns=None)
+        .reset_index()
+    )
+    # Sort period columns chronologically (oldest left → newest right for CAGR direction)
+    period_cols = [c for c in pivot.columns if c != "segment"]
+    period_cols_sorted = sorted(period_cols, key=_period_col_sort_key)
+    pivot = pivot[["segment"] + period_cols_sorted]
+
+    pivot["cagr_pct"] = pivot.apply(
+        lambda row: _row_cagr([row.get(c) for c in period_cols_sorted]), axis=1
+    )
+    # Add Total row
+    total_row: dict = {"segment": "Total"}
+    for c in period_cols_sorted:
+        col_vals = pd.to_numeric(pivot[c], errors="coerce")
+        total_row[c] = col_vals.sum() if col_vals.notna().any() else None
+    total_row["cagr_pct"] = _row_cagr([total_row.get(c) for c in period_cols_sorted])
+    pivot = pd.concat([pivot, pd.DataFrame([total_row])], ignore_index=True)
+    pivot["unit"] = "USD"
+    return pivot
+
+
+def build_segment_earnings_history_table(
+    filings: Sequence[BrkSegmentFiling], *, period: str = "annual"
+) -> pd.DataFrame:
+    return build_segment_metric_history_table(filings, metric="earnings_before_income_taxes_usd", period=period)
+
+
+def build_segment_revenues_history_table(
+    filings: Sequence[BrkSegmentFiling], *, period: str = "annual"
+) -> pd.DataFrame:
+    return build_segment_metric_history_table(filings, metric="revenues_usd", period=period)
+
+
+def build_segment_dna_history_table(
+    filings: Sequence[BrkSegmentFiling], *, period: str = "annual"
+) -> pd.DataFrame:
+    return build_segment_metric_history_table(filings, metric="depreciation_and_amortization_usd", period=period)
+
+
+def build_segment_capex_history_table(
+    filings: Sequence[BrkSegmentFiling], *, period: str = "annual"
+) -> pd.DataFrame:
+    return build_segment_metric_history_table(filings, metric="capex_usd", period=period)
+
+
+def build_segment_owner_earnings_history_table(
+    filings: Sequence[BrkSegmentFiling], *, period: str = "annual"
+) -> pd.DataFrame:
+    """Pivot of owner earnings (pretax + D&A - capex) per segment per period."""
+    records: list[dict] = []
+    for filing in filings:
+        table = build_top_level_operating_segments_table(filing.reports, period=period)
+        if table.empty:
+            continue
+        required = {"earnings_before_income_taxes_usd", "depreciation_and_amortization_usd", "capex_usd"}
+        if not required.issubset(table.columns):
+            continue
+        ts = table.iloc[0]["period_end"]
+        try:
+            t = pd.Timestamp(ts)
+        except Exception:
+            continue
+        if period == "annual":
+            col_label = f"FY {t.year}"
+        else:
+            q = ((t.month - 1) // 3) + 1
+            col_label = f"{t.year} Q{q}"
+        for _, row in table.iterrows():
+            seg = row.get("segment")
+            pretax = row.get("earnings_before_income_taxes_usd")
+            dna = row.get("depreciation_and_amortization_usd")
+            capex = row.get("capex_usd")
+            if seg is None or any(v is None or (isinstance(v, float) and pd.isna(v)) for v in [pretax, dna, capex]):
+                continue
+            oe = float(pretax) + float(dna) - float(capex)
+            records.append({"segment": seg, "period_label": col_label, "value": oe})
+    if not records:
+        return pd.DataFrame()
+    df = pd.DataFrame(records)
+    pivot = (
+        df.pivot_table(index="segment", columns="period_label", values="value", aggfunc="first")
+        .rename_axis(columns=None)
+        .reset_index()
+    )
+    period_cols = sorted([c for c in pivot.columns if c != "segment"], key=_period_col_sort_key)
+    pivot = pivot[["segment"] + period_cols]
+    pivot["cagr_pct"] = pivot.apply(lambda row: _row_cagr([row.get(c) for c in period_cols]), axis=1)
+    total_row: dict = {"segment": "Total"}
+    for c in period_cols:
+        col_vals = pd.to_numeric(pivot[c], errors="coerce")
+        total_row[c] = col_vals.sum() if col_vals.notna().any() else None
+    total_row["cagr_pct"] = _row_cagr([total_row.get(c) for c in period_cols])
+    pivot = pd.concat([pivot, pd.DataFrame([total_row])], ignore_index=True)
+    pivot["unit"] = "USD"
+    return pivot
+
+
+def build_segment_pretax_margin_history_table(
+    filings: Sequence[BrkSegmentFiling], *, period: str = "annual"
+) -> pd.DataFrame:
+    """Pivot of pretax margin (pretax / revenue) per segment per period.
+
+    Values stored as 0-1 ratios; unit='PCT' so humanize_frame renders as %.
+    Includes Total row using aggregate pretax / aggregate revenue.
+    """
+    records: list[dict] = []
+    for filing in filings:
+        table = build_top_level_operating_segments_table(filing.reports, period=period)
+        if table.empty:
+            continue
+        if "earnings_before_income_taxes_usd" not in table.columns or "revenues_usd" not in table.columns:
+            continue
+        ts = table.iloc[0]["period_end"]
+        try:
+            t = pd.Timestamp(ts)
+        except Exception:
+            continue
+        col_label = f"FY {t.year}" if period == "annual" else f"{t.year} Q{((t.month - 1) // 3) + 1}"
+        for _, row in table.iterrows():
+            seg = row.get("segment")
+            pretax = row.get("earnings_before_income_taxes_usd")
+            rev = row.get("revenues_usd")
+            if seg is None or any(v is None or (isinstance(v, float) and pd.isna(v)) for v in [pretax, rev]):
+                continue
+            if float(rev) == 0:
+                continue
+            records.append({"segment": seg, "period_label": col_label, "value": float(pretax) / float(rev)})
+    if not records:
+        return pd.DataFrame()
+    df = pd.DataFrame(records)
+    pivot = (
+        df.pivot_table(index="segment", columns="period_label", values="value", aggfunc="first")
+        .rename_axis(columns=None)
+        .reset_index()
+    )
+    period_cols = sorted([c for c in pivot.columns if c != "segment"], key=_period_col_sort_key)
+    pivot = pivot[["segment"] + period_cols]
+    pivot["cagr_pct"] = pivot.apply(lambda row: _row_cagr([row.get(c) for c in period_cols]), axis=1)
+
+    # Total row: aggregate pretax / aggregate revenue per period
+    pretax_table = build_segment_earnings_history_table(filings, period=period)
+    rev_table = build_segment_revenues_history_table(filings, period=period)
+    total_row: dict = {"segment": "Total"}
+    for c in period_cols:
+        pretax_total = None
+        rev_total = None
+        if not pretax_table.empty and c in pretax_table.columns:
+            seg_rows = pretax_table[pretax_table["segment"] != "Total"]
+            vals = pd.to_numeric(seg_rows[c], errors="coerce")
+            pretax_total = vals.sum() if vals.notna().any() else None
+        if not rev_table.empty and c in rev_table.columns:
+            seg_rows2 = rev_table[rev_table["segment"] != "Total"]
+            vals2 = pd.to_numeric(seg_rows2[c], errors="coerce")
+            rev_total = vals2.sum() if vals2.notna().any() else None
+        if pretax_total is not None and rev_total is not None and rev_total != 0:
+            total_row[c] = pretax_total / rev_total
+        else:
+            total_row[c] = None
+    total_row["cagr_pct"] = _row_cagr([total_row.get(c) for c in period_cols])
+    pivot = pd.concat([pivot, pd.DataFrame([total_row])], ignore_index=True)
+    pivot["unit"] = "PCT"
+    return pivot
+
+
+def build_segment_implied_allocation_table(
+    bundle: "BrkValuationBundle",
+    reference: pd.DataFrame,
+    *,
+    period: str = "annual",
+    yahoo_client=None,
+    enriched_holdings: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Allocate the SOTP residual proportionally to each segment's pre-tax earnings share.
+
+    Shows segment, pretax earnings, % of total, implied value, and implied P/E.
+    Also shows owner earnings columns when available.
+    """
+    bridge = build_market_implied_sotp_bridge_table(
+        bundle, reference, yahoo_client=yahoo_client, enriched_holdings=enriched_holdings
+    )
+    residual = _metric_value(bridge, "residual_operating_and_other")
+    share_count = _implied_brk_b_equivalent_shares(bundle.overview.market_snapshot)
+    if residual is None or residual <= 0:
+        return pd.DataFrame()
+    segments = _latest_segments_table(bundle.segments.filings, period=period)
+    if segments.empty or "earnings_before_income_taxes_usd" not in segments.columns:
+        return pd.DataFrame()
+    valid_segs = segments[pd.to_numeric(segments["earnings_before_income_taxes_usd"], errors="coerce").notna()].copy()
+    if valid_segs.empty:
+        return pd.DataFrame()
+    total_pretax = float(pd.to_numeric(valid_segs["earnings_before_income_taxes_usd"], errors="coerce").sum())
+    if total_pretax <= 0:
+        return pd.DataFrame()
+
+    has_oe = (
+        "earnings_before_income_taxes_usd" in segments.columns
+        and "depreciation_and_amortization_usd" in segments.columns
+        and "capex_usd" in segments.columns
+    )
+    rows = []
+    for _, row in valid_segs.iterrows():
+        pretax = float(row["earnings_before_income_taxes_usd"])
+        share_pct = pretax / total_pretax
+        implied_val = residual * share_pct
+        implied_pe = implied_val / pretax if pretax != 0 else None
+        rec: dict = {
+            "segment": row.get("segment"),
+            "pretax_earnings_usd": pretax,
+            "pretax_share_pct": share_pct,
+            "implied_value_usd": implied_val,
+            "implied_pe_multiple": implied_pe,
+        }
+        if has_oe:
+            dna = row.get("depreciation_and_amortization_usd")
+            capex = row.get("capex_usd")
+            if dna is not None and capex is not None and not any(
+                isinstance(v, float) and pd.isna(v) for v in [dna, capex]
+            ):
+                oe = pretax + float(dna) - float(capex)
+                rec["owner_earnings_usd"] = oe
+                rec["implied_p_oe_multiple"] = implied_val / oe if oe != 0 else None
+        rows.append(rec)
+    if not rows:
+        return pd.DataFrame()
+    result = pd.DataFrame(rows)
+    # Append totals row
+    total: dict = {
+        "segment": "Total",
+        "pretax_earnings_usd": total_pretax,
+        "pretax_share_pct": 1.0,
+        "implied_value_usd": residual,
+        "implied_pe_multiple": residual / total_pretax if total_pretax != 0 else None,
+    }
+    if has_oe and "owner_earnings_usd" in result.columns:
+        total_oe = pd.to_numeric(result["owner_earnings_usd"], errors="coerce").sum()
+        total["owner_earnings_usd"] = total_oe
+        total["implied_p_oe_multiple"] = residual / total_oe if total_oe != 0 else None
+    return pd.concat([result, pd.DataFrame([total])], ignore_index=True)
+
+
+def build_opco_valuation_sensitivity_table(
+    bundle: "BrkValuationBundle",
+    reference: pd.DataFrame,
+    *,
+    period: str = "annual",
+    pe_multiples: tuple[float, ...] = (6.0, 8.0, 10.0, 12.0, 15.0),
+    yahoo_client=None,
+    enriched_holdings: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Show implied BRK.B price at various owner-earnings (or pretax-earnings) multiples.
+
+    Total value = (13F blended + net liquidity) + (owner earnings × multiple).
+    Falls back to pretax earnings when OE components are unavailable.
+    """
+    bridge = build_market_implied_sotp_bridge_table(
+        bundle, reference, yahoo_client=yahoo_client, enriched_holdings=enriched_holdings
+    )
+    known_assets = None
+    pe_val = _metric_value(bridge, "public_equity_holdings_blended")
+    liq_val = _metric_value(bridge, "net_cash_and_treasury_bills")
+    if pe_val is not None and liq_val is not None:
+        known_assets = pe_val + liq_val
+    if known_assets is None:
+        return pd.DataFrame()
+
+    share_count = _implied_brk_b_equivalent_shares(bundle.overview.market_snapshot)
+    last_price = bundle.overview.market_snapshot.get("last_price")
+    if share_count is None or share_count <= 0:
+        return pd.DataFrame()
+
+    segments = _latest_segments_table(bundle.segments.filings, period=period)
+    owner_earnings: float | None = None
+    earnings_label = "pretax earnings"
+    if not segments.empty:
+        required_oe = {"earnings_before_income_taxes_usd", "depreciation_and_amortization_usd", "capex_usd"}
+        if required_oe.issubset(segments.columns):
+            pt_vals = pd.to_numeric(segments["earnings_before_income_taxes_usd"], errors="coerce")
+            dna_vals = pd.to_numeric(segments["depreciation_and_amortization_usd"], errors="coerce")
+            capex_vals = pd.to_numeric(segments["capex_usd"], errors="coerce")
+            total_pt = pt_vals.sum() if pt_vals.notna().any() else None
+            total_dna = dna_vals.sum() if dna_vals.notna().any() else None
+            total_capex = capex_vals.sum() if capex_vals.notna().any() else None
+            if all(v is not None for v in [total_pt, total_dna, total_capex]):
+                oe = float(total_pt) + float(total_dna) - float(total_capex)
+                if oe > 0:
+                    owner_earnings = oe
+                    earnings_label = "owner earnings"
+        if owner_earnings is None and "earnings_before_income_taxes_usd" in segments.columns:
+            pt_vals = pd.to_numeric(segments["earnings_before_income_taxes_usd"], errors="coerce")
+            total_pt = float(pt_vals.sum()) if pt_vals.notna().any() else None
+            if total_pt is not None and total_pt > 0:
+                owner_earnings = total_pt
+    if owner_earnings is None or owner_earnings <= 0:
+        return pd.DataFrame()
+
+    rows = []
+    for multiple in pe_multiples:
+        implied_opco = owner_earnings * multiple
+        implied_total = known_assets + implied_opco
+        implied_price = implied_total / share_count
+        upside = ((implied_price / float(last_price)) - 1.0) if last_price and float(last_price) > 0 else None
+        rows.append({
+            "scenario": f"{multiple:.0f}× {earnings_label}",
+            "implied_opco_value_usd": implied_opco,
+            "implied_total_value_usd": implied_total,
+            "implied_brk_b_price_usd": implied_price,
+            "vs_current_price_pct": upside,
+        })
+    return pd.DataFrame(rows)
+
+
+def build_book_value_history_table(
+    company_facts: dict,
+    share_count: float | None,
+    *,
+    limit: int = 5,
+) -> pd.DataFrame:
+    """Show stockholders' equity and optional book value per BRK.B across annual periods.
+
+    Uses build_key_facts_table to find the latest equity value, and
+    company_facts_to_table for the multi-year annual series.
+    """
+    from valuation.company.statements import build_statement_table
+
+    balance = build_statement_table(company_facts, statement="balance", period="annual", limit=limit)
+    if balance.empty:
+        return pd.DataFrame()
+
+    # Find stockholders_equity row
+    eq_rows = balance[balance["metric"] == "stockholders_equity"]
+    if eq_rows.empty:
+        return pd.DataFrame()
+
+    # period columns are all columns except 'metric', 'unit', and 'cagr_pct'
+    non_period_cols = {"metric", "unit", "cagr_pct"}
+    period_cols = [c for c in eq_rows.columns if c not in non_period_cols]
+    if not period_cols:
+        return pd.DataFrame()
+
+    equity_row = eq_rows.iloc[0][period_cols].to_dict()
+    rows = [{"metric": "stockholders_equity_usd", "unit": "USD", **equity_row}]
+
+    if share_count is not None and share_count > 0:
+        bvps = {}
+        for col in period_cols:
+            v = equity_row.get(col)
+            if v is not None and not (isinstance(v, float) and pd.isna(v)):
+                bvps[col] = float(v) / share_count
+            else:
+                bvps[col] = None
+        rows.append({"metric": "book_value_per_brk_b_usd", "unit": "USD", **bvps})
+
+    result = pd.DataFrame(rows)
+    # Compute CAGR on the equity row
+    result["cagr_pct"] = result.apply(
+        lambda row: _row_cagr([row.get(c) for c in period_cols]), axis=1
+    )
+    return result
+
+
+def _period_col_sort_key(label: str) -> tuple[int, int]:
+    """Sort period labels chronologically. FY YYYY → (year, 0); YYYY Qn → (year, quarter)."""
+    import re as _re
+    m_fy = _re.match(r"FY (\d{4})$", label)
+    if m_fy:
+        return (int(m_fy.group(1)), 0)
+    m_q = _re.match(r"(\d{4}) Q(\d)$", label)
+    if m_q:
+        return (int(m_q.group(1)), int(m_q.group(2)))
+    return (0, 0)
+
+
+def _row_cagr(values: list) -> float | None:
+    """Compute annualised CAGR from first to last positive value in the list."""
+    clean = [float(v) for v in values if v is not None and not (isinstance(v, float) and pd.isna(v))]
+    if len(clean) < 2 or clean[0] <= 0 or clean[-1] <= 0:
+        return None
+    periods = len(clean) - 1
+    if periods == 0:
+        return None
+    return (clean[-1] / clean[0]) ** (1.0 / periods) - 1.0
+
+
 def build_segment_report_summary_table(filings: Sequence[BrkSegmentFiling]) -> pd.DataFrame:
     """Summarize the Berkshire segment filings included in the current output."""
     return pd.DataFrame(

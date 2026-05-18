@@ -1331,3 +1331,165 @@ def test_build_brk_valuation_summary_table_no_reverse_dcf():
 
     assert _val("implied_growth_at_10_pct") is None or pd.isna(_val("implied_growth_at_10_pct"))
     assert _val("zero_growth_value_per_brk_b_usd") is None or pd.isna(_val("zero_growth_value_per_brk_b_usd"))
+
+
+# ─── Segment history tables ────────────────────────────────────────────────
+
+
+def _make_two_annual_segment_filings():
+    """Two annual filings with BNSF and BHE earning pretax earnings, revenues, D&A, capex."""
+    rows_2024 = [
+        {"report": "earnings", "member_path": "Operating Businesses | BNSF", "member_name": "BNSF", "metric": "Revenues", "duration_months": 12, "period_end": "2024-12-31", "value": 20 * M},
+        {"report": "earnings", "member_path": "Operating Businesses | BNSF", "member_name": "BNSF", "metric": "Earnings before income taxes", "duration_months": 12, "period_end": "2024-12-31", "value": 5 * M},
+        {"report": "add", "member_path": "Operating Businesses | BNSF", "member_name": "BNSF", "metric": "Capital expenditures", "duration_months": 12, "period_end": "2024-12-31", "value": 3 * M},
+        {"report": "add", "member_path": "Operating Businesses | BNSF", "member_name": "BNSF", "metric": "Depreciation and amortization", "duration_months": 12, "period_end": "2024-12-31", "value": 2 * M},
+        {"report": "earnings", "member_path": "Operating Businesses | BHE", "member_name": "BHE", "metric": "Revenues", "duration_months": 12, "period_end": "2024-12-31", "value": 10 * M},
+        {"report": "earnings", "member_path": "Operating Businesses | BHE", "member_name": "BHE", "metric": "Earnings before income taxes", "duration_months": 12, "period_end": "2024-12-31", "value": 3 * M},
+        {"report": "add", "member_path": "Operating Businesses | BHE", "member_name": "BHE", "metric": "Capital expenditures", "duration_months": 12, "period_end": "2024-12-31", "value": 2 * M},
+        {"report": "add", "member_path": "Operating Businesses | BHE", "member_name": "BHE", "metric": "Depreciation and amortization", "duration_months": 12, "period_end": "2024-12-31", "value": 1 * M},
+    ]
+    rows_2023 = [r.copy() for r in rows_2024]
+    for r in rows_2023:
+        r["period_end"] = "2023-12-31"
+        r["value"] = r["value"] * 0.9  # slightly lower
+
+    def _filing(date, rows, accession):
+        return BrkSegmentFiling(
+            filing_date=date,
+            accession_number=accession,
+            form="10-K",
+            reports=BrkSegmentReportSet(
+                filing_date=date,
+                accession_number=accession,
+                earnings_detail=pd.DataFrame([r for r in rows if r["report"] == "earnings"]).drop(columns=["report"]),
+                reconciliation_detail=pd.DataFrame(),
+                additional_detail=pd.DataFrame([r for r in rows if r["report"] == "add"]).drop(columns=["report"]),
+            ),
+        )
+
+    return [_filing("2025-02-20", rows_2024, "acc1"), _filing("2024-02-20", rows_2023, "acc2")]
+
+
+def test_build_segment_earnings_history_table_pivots_across_filings():
+    from valuation.brk.tables import build_segment_earnings_history_table
+    filings = _make_two_annual_segment_filings()
+    table = build_segment_earnings_history_table(filings, period="annual")
+    assert not table.empty
+    assert "FY 2024" in table.columns
+    assert "FY 2023" in table.columns
+    assert "cagr_pct" in table.columns
+    assert "unit" in table.columns
+    bnsf_row = table[table["segment"] == "BNSF"].iloc[0]
+    assert bnsf_row["FY 2024"] == pytest.approx(5 * M)
+    total_row = table[table["segment"] == "Total"].iloc[0]
+    assert total_row["FY 2024"] == pytest.approx(8 * M)  # 5 + 3
+
+
+def test_build_segment_revenues_history_table_returns_revenues():
+    from valuation.brk.tables import build_segment_revenues_history_table
+    filings = _make_two_annual_segment_filings()
+    table = build_segment_revenues_history_table(filings, period="annual")
+    assert not table.empty
+    bnsf_row = table[table["segment"] == "BNSF"].iloc[0]
+    assert bnsf_row["FY 2024"] == pytest.approx(20 * M)
+
+
+def test_build_segment_owner_earnings_history_table_derives_oe():
+    from valuation.brk.tables import build_segment_owner_earnings_history_table
+    filings = _make_two_annual_segment_filings()
+    table = build_segment_owner_earnings_history_table(filings, period="annual")
+    assert not table.empty
+    bnsf_row = table[table["segment"] == "BNSF"].iloc[0]
+    # OE = pretax + D&A - capex = 5M + 2M - 3M = 4M
+    assert bnsf_row["FY 2024"] == pytest.approx(4 * M)
+
+
+def test_build_segment_pretax_margin_history_table_computes_ratio():
+    from valuation.brk.tables import build_segment_pretax_margin_history_table
+    filings = _make_two_annual_segment_filings()
+    table = build_segment_pretax_margin_history_table(filings, period="annual")
+    assert not table.empty
+    bnsf_row = table[table["segment"] == "BNSF"].iloc[0]
+    assert bnsf_row["FY 2024"] == pytest.approx(5 / 20)  # 25% margin
+    assert table[table["segment"] == "Total"].iloc[0]["FY 2024"] == pytest.approx(8 / 30)  # total pretax / total rev
+
+
+def test_build_segment_history_empty_without_filings():
+    from valuation.brk.tables import build_segment_earnings_history_table
+    assert build_segment_earnings_history_table([], period="annual").empty
+
+
+def test_build_opco_valuation_sensitivity_table_shows_scenarios():
+    from valuation.brk.tables import build_opco_valuation_sensitivity_table
+    filings = _make_two_annual_segment_filings()
+    bundle = BrkValuationBundle(
+        overview=BrkOverviewBundle(
+            company=None,
+            market_snapshot={"ticker": "BRK-B", "last_price": 500.0, "market_cap": 1000.0 * M,
+                             "shares": 2.0 * M, "shares_class_b": 2.0 * M},
+            submissions={},
+            company_facts={},
+        ),
+        holdings=Brk13FBundle(
+            company=None, filing_date="2026-02-17", accession_number="0001",
+            information_table_filename="info.xml",
+            holdings=pd.DataFrame([
+                {"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM",
+                 "cusip": "037833100", "value_usd": 300.0 * M, "shares_or_principal": 1.0},
+            ]),
+        ),
+        liquidity=BrkLiquidityBundle(
+            company=None,
+            filings=[
+                BrkLiquidityFiling(
+                    filing_date="2026-03-02", accession_number="0002", form="10-K",
+                    balance_sheet=pd.DataFrame(
+                        [
+                            ["Cash and cash equivalents", "", "100", "90"],
+                            ["Short-term investments in U.S. Treasury Bills", "", "200", "180"],
+                        ],
+                        columns=["Consolidated Balance Sheets", "Consolidated Balance Sheets", "Dec. 31, 2025", "Dec. 31, 2024"],
+                    ),
+                )
+            ],
+        ),
+        segments=BrkSegmentsBundle(company=None, filings=filings),
+    )
+    reference = pd.DataFrame()
+    table = build_opco_valuation_sensitivity_table(
+        bundle, reference, period="annual", yahoo_client=FakeYahooClient()
+    )
+    assert not table.empty
+    assert "implied_brk_b_price_usd" in table.columns
+    assert "vs_current_price_pct" in table.columns
+    assert len(table) == 5  # 5 multiples
+
+
+def test_build_book_value_history_table_shows_equity_and_bvps():
+    from valuation.brk.tables import build_book_value_history_table
+    # Build minimal SEC companyfacts with annual stockholders_equity
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "StockholdersEquity": {
+                    "units": {
+                        "USD": [
+                            {"form": "10-K", "end": "2024-12-31", "val": 400 * M, "accn": "a1", "fy": 2024, "fp": "FY", "filed": "2025-02-21"},
+                            {"form": "10-K", "end": "2023-12-31", "val": 360 * M, "accn": "a2", "fy": 2023, "fp": "FY", "filed": "2024-02-21"},
+                        ]
+                    }
+                }
+            }
+        },
+        "entityName": "Test Corp",
+    }
+    table = build_book_value_history_table(company_facts, share_count=2.0 * M, limit=5)
+    assert not table.empty
+    assert any(table["metric"] == "stockholders_equity_usd")
+    assert any(table["metric"] == "book_value_per_brk_b_usd")
+    eq_row = table[table["metric"] == "stockholders_equity_usd"].iloc[0]
+    bv_row = table[table["metric"] == "book_value_per_brk_b_usd"].iloc[0]
+    # Find FY 2024 column
+    fy_col = next(c for c in table.columns if "2024" in str(c))
+    assert eq_row[fy_col] == pytest.approx(400 * M)
+    assert bv_row[fy_col] == pytest.approx(400 * M / (2.0 * M))  # $200/share
