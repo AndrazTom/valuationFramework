@@ -12,7 +12,7 @@ from typing import Iterable, Optional, Sequence
 
 from valuation.brk.cli import register_brk_parser, run_brk_command
 from valuation.brk.statements import supplement_brk_income_statement_eps_shares
-from valuation.portfolio.cli import run_portfolio_show, run_portfolio_tax
+from valuation.portfolio.cli import run_portfolio_dividends, run_portfolio_show, run_portfolio_tax
 from valuation.company.service import fetch_company_facts, fetch_company_snapshot
 from valuation.company.statements import build_statement_diagnostics_table, build_statement_table, build_statement_table_ttm
 from valuation.company.tables import (
@@ -198,6 +198,11 @@ def _register_portfolio_parser(subparsers) -> None:
     )
     show_parser.add_argument("--outdir", default="outputs/tables")
     show_parser.add_argument("--format", choices=("table", "json"), default="table")
+    show_parser.add_argument(
+        "--fx-auto",
+        action="store_true",
+        help="Fetch ECB historical FX rates to convert non-EUR trades to EUR.",
+    )
 
     tax_parser = portfolio_sub.add_parser(
         "tax",
@@ -216,6 +221,34 @@ def _register_portfolio_parser(subparsers) -> None:
     )
     tax_parser.add_argument("--outdir", default="outputs/tables")
     tax_parser.add_argument("--format", choices=("table", "json"), default="table")
+    tax_parser.add_argument(
+        "--fx-auto",
+        action="store_true",
+        help="Fetch ECB historical FX rates to convert non-EUR trades to EUR.",
+    )
+
+    div_parser = portfolio_sub.add_parser(
+        "dividends",
+        help="Show dividend income for a year and compute Slovenian dividend tax.",
+    )
+    div_parser.add_argument(
+        "--file",
+        metavar="PATH",
+        help="Path to IBKR activity statement CSV. Falls back to IBKR_STATEMENT_PATH env var.",
+    )
+    div_parser.add_argument(
+        "--year",
+        type=int,
+        default=None,
+        help="Tax year to report (default: current calendar year).",
+    )
+    div_parser.add_argument("--outdir", default="outputs/tables")
+    div_parser.add_argument("--format", choices=("table", "json"), default="table")
+    div_parser.add_argument(
+        "--fx-auto",
+        action="store_true",
+        help="Fetch ECB historical FX rates to convert non-EUR dividends to EUR.",
+    )
 
 
 def run_snapshot(ticker: str, outdir: str, filings_limit: int, output_format: str) -> int:
@@ -730,11 +763,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.command == "portfolio":
             import datetime as _dt
             year = getattr(args, "year", None) or _dt.date.today().year
+            fx_auto = getattr(args, "fx_auto", False)
             if args.portfolio_command == "show":
                 return run_portfolio_show(
                     file=getattr(args, "file", None),
                     outdir=args.outdir,
                     output_format=args.format,
+                    fx_auto=fx_auto,
                 )
             if args.portfolio_command == "tax":
                 return run_portfolio_tax(
@@ -742,6 +777,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     year=year,
                     outdir=args.outdir,
                     output_format=args.format,
+                    fx_auto=fx_auto,
+                )
+            if args.portfolio_command == "dividends":
+                return run_portfolio_dividends(
+                    file=getattr(args, "file", None),
+                    year=year,
+                    outdir=args.outdir,
+                    output_format=args.format,
+                    fx_auto=fx_auto,
                 )
     except (LookupError, RuntimeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

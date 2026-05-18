@@ -13,3 +13,11 @@ build/
 dist/
 *.whl
 outputs/
+
+# IBKR activity statements — never commit brokerage data to a public repo
+*.flex.xml
+*.activity.csv
+*_activity.csv
+*_statement.csv
+ibkr_*.csv
+ibkr_*.xml

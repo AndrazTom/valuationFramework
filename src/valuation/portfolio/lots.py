@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 from typing import Sequence
 
@@ -93,7 +93,15 @@ def build_lots_and_realized(
     open_lots: dict[str, list[_OpenLot]] = {}
     realized: list[RealizedGain] = []
 
-    for trade in trades:
+    # Sort chronologically; on the same date, buys (positive qty) before sells.
+    # This mirrors the _sort_key set by the parser but makes the engine robust to
+    # manually constructed trade lists (e.g. in tests).
+    ordered = sorted(
+        trades,
+        key=lambda t: (t.trade_date, 0 if t.quantity > 0 else 1),
+    )
+
+    for trade in ordered:
         eur_rate = _eur_rate(trade, fx_rates)
 
         if trade.quantity > 0:
@@ -221,6 +229,20 @@ def _process_sell(
             trade.trade_date,
             remaining,
         )
+
+
+def non_eur_currency_dates(trades: Sequence[IbkrTrade]) -> list[tuple[str, date]]:
+    """Return all (currency, date) pairs for non-EUR trades (for ECB FX lookup)."""
+    seen: set[tuple[str, str]] = set()
+    result: list[tuple[str, date]] = []
+    for t in trades:
+        if t.currency == "EUR":
+            continue
+        key = (t.currency, t.trade_date.isoformat())
+        if key not in seen:
+            seen.add(key)
+            result.append((t.currency, t.trade_date))
+    return result
 
 
 def _eur_rate(trade: IbkrTrade, fx_rates: dict[tuple[str, str], float] | None) -> float | None:

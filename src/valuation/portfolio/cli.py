@@ -1,4 +1,4 @@
-"""Portfolio CLI: show holdings and compute Slovenian realized-gains tax."""
+"""Portfolio CLI: holdings snapshot, realized-gains tax, and dividend tax summary."""
 
 from __future__ import annotations
 
@@ -7,13 +7,17 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 
-from valuation.portfolio.ibkr import load_activity_statement
-from valuation.portfolio.lots import Lot, RealizedGain, build_lots_and_realized
-from valuation.portfolio.tax_si import next_si_cgt_threshold, si_cgt_rate, si_cgt_tax
+from valuation.portfolio.ibkr import IbkrDividend, load_activity_statement
+from valuation.portfolio.lots import Lot, RealizedGain, build_lots_and_realized, non_eur_currency_dates
+from valuation.portfolio.tax_si import (
+    next_si_cgt_threshold,
+    si_cgt_rate,
+    si_cgt_tax,
+    si_dividend_tax,
+)
 
 _ENV_STATEMENT_PATH = "IBKR_STATEMENT_PATH"
 
@@ -27,19 +31,16 @@ def run_portfolio_show(
     outdir: str,
     output_format: str,
     use_cache: bool = True,
+    fx_auto: bool = False,
 ) -> int:
     """Show open positions with cost basis, unrealized P&L, and Slovenian tax tier."""
     path = _resolve_statement_path(file)
     if path is None:
-        print(
-            "Error: specify an IBKR activity statement with --file <path> "
-            f"or set {_ENV_STATEMENT_PATH}.",
-            file=sys.stderr,
-        )
         return 1
 
-    trades = load_activity_statement(path)
-    open_lots, _ = build_lots_and_realized(trades)
+    trades, _dividends, meta = load_activity_statement(path)
+    fx_rates = _maybe_fetch_fx(trades, fx_auto)
+    open_lots, _ = build_lots_and_realized(trades, fx_rates=fx_rates)
 
     if not open_lots:
         print("No open positions found in statement.")
@@ -61,19 +62,16 @@ def run_portfolio_tax(
     year: int,
     outdir: str,
     output_format: str,
+    fx_auto: bool = False,
 ) -> int:
-    """Show realized gains for a given tax year and compute Slovenian CGT owed."""
+    """Show realized gains for a tax year and compute Slovenian CGT owed."""
     path = _resolve_statement_path(file)
     if path is None:
-        print(
-            "Error: specify an IBKR activity statement with --file <path> "
-            f"or set {_ENV_STATEMENT_PATH}.",
-            file=sys.stderr,
-        )
         return 1
 
-    trades = load_activity_statement(path)
-    _, realized = build_lots_and_realized(trades)
+    trades, _dividends, meta = load_activity_statement(path)
+    fx_rates = _maybe_fetch_fx(trades, fx_auto)
+    _, realized = build_lots_and_realized(trades, fx_rates=fx_rates)
 
     year_gains = [r for r in realized if r.sold.year == year]
     if not year_gains:
@@ -96,38 +94,86 @@ def run_portfolio_tax(
     return 0
 
 
+def run_portfolio_dividends(
+    file: str | None,
+    year: int,
+    outdir: str,
+    output_format: str,
+    fx_auto: bool = False,
+) -> int:
+    """Show dividend income for a tax year and compute Slovenian dividend tax owed."""
+    path = _resolve_statement_path(file)
+    if path is None:
+        return 1
+
+    _trades, dividends, meta = load_activity_statement(path)
+
+    # Filter to the requested year
+    year_divs = [d for d in dividends if d.payment_date.year == year]
+    if not year_divs:
+        print(f"No dividends found for {year}.")
+        return 0
+
+    # For non-EUR dividends we need FX rates; fetch if requested
+    non_eur_pairs = [
+        (d.currency, d.payment_date)
+        for d in year_divs
+        if d.currency != "EUR"
+    ]
+    fx_rates: dict = {}
+    if fx_auto and non_eur_pairs:
+        from valuation.portfolio.fx import EcbFxClient
+        client = EcbFxClient()
+        fx_rates = client.build_fx_rates_dict(non_eur_pairs)
+
+    div_table = _build_dividend_table(year_divs, fx_rates)
+    summary_table = _build_dividend_summary(year_divs, fx_rates, year)
+
+    _print_and_save(
+        [
+            (f"Dividends {year}", div_table),
+            ("Dividend Tax Summary", summary_table),
+        ],
+        outdir=outdir,
+        output_format=output_format,
+        slug=f"portfolio_dividends_{year}",
+    )
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Table builders
 # ---------------------------------------------------------------------------
 
 def _build_holdings_table(open_lots: list[Lot], *, use_cache: bool = True) -> pd.DataFrame:
-    """Aggregate open lots per symbol, enrich with live Yahoo prices."""
     today = date.today()
-
-    # Group lots by symbol
     by_symbol: dict[str, list[Lot]] = {}
     for lot in open_lots:
         by_symbol.setdefault(lot.symbol, []).append(lot)
 
-    # Fetch current prices in parallel
-    yahoo_symbols = list(by_symbol.keys())
-    prices = _fetch_prices(yahoo_symbols, use_cache=use_cache)
+    prices = _fetch_prices(list(by_symbol.keys()), use_cache=use_cache)
 
     rows = []
     for symbol, lots in sorted(by_symbol.items()):
         total_qty = sum(l.quantity for l in lots)
         total_cost_eur = _sum_optional(l.cost_basis_eur for l in lots)
-        avg_cost_eur = total_cost_eur / total_qty if (total_cost_eur is not None and total_qty > 0) else None
+        avg_cost_eur = (total_cost_eur / total_qty
+                        if (total_cost_eur is not None and total_qty > 0)
+                        else None)
 
-        oldest_lot = min(lots, key=lambda l: l.acquired)
-        threshold = next_si_cgt_threshold(oldest_lot.acquired, today)
-        current_rate = si_cgt_rate(oldest_lot.acquired, today)
+        oldest = min(lots, key=lambda l: l.acquired)
+        threshold = next_si_cgt_threshold(oldest.acquired, today)
+        current_rate = si_cgt_rate(oldest.acquired, today)
         days_to_next = (threshold[0] - today).days if threshold else None
 
         snap = prices.get(_ibkr_to_yahoo(symbol), {})
         last_price_eur = _to_eur_price(snap, lots[0].currency)
         value_eur = last_price_eur * total_qty if last_price_eur is not None else None
-        unrealized_eur = (value_eur - total_cost_eur) if (value_eur is not None and total_cost_eur is not None) else None
+        unrealized_eur = (
+            (value_eur - total_cost_eur)
+            if (value_eur is not None and total_cost_eur is not None)
+            else None
+        )
 
         rows.append(
             {
@@ -138,9 +184,11 @@ def _build_holdings_table(open_lots: list[Lot], *, use_cache: bool = True) -> pd
                 "last_eur": _fmt_eur(last_price_eur),
                 "value_eur": _fmt_eur(value_eur),
                 "unrealized_eur": _fmt_signed_eur(unrealized_eur),
-                "oldest_lot": oldest_lot.acquired.isoformat(),
+                "oldest_lot": oldest.acquired.isoformat(),
                 "cgt_rate": f"{current_rate * 100:.0f}%",
-                "days_to_next_tier": str(days_to_next) if days_to_next is not None else "exempt",
+                "days_to_next_tier": (
+                    str(days_to_next) if days_to_next is not None else "exempt"
+                ),
                 "needs_fx": any(l.cost_basis_eur is None for l in lots),
             }
         )
@@ -173,38 +221,103 @@ def _build_tax_table(realized: list[RealizedGain]) -> pd.DataFrame:
 
 
 def _build_tax_summary(realized: list[RealizedGain], year: int) -> pd.DataFrame:
-    """Aggregate totals and net tax (gains offset losses within the year)."""
-    eur_gains = [r.gain_eur for r in realized if r.gain_eur is not None and r.gain_eur > 0]
-    eur_losses = [r.gain_eur for r in realized if r.gain_eur is not None and r.gain_eur < 0]
     all_eur = [r.gain_eur for r in realized if r.gain_eur is not None]
+    gains_eur = [g for g in all_eur if g > 0]
+    losses_eur = [g for g in all_eur if g < 0]
 
-    total_gains = sum(eur_gains) if eur_gains else None
-    total_losses = sum(eur_losses) if eur_losses else None
+    total_gains = sum(gains_eur) if gains_eur else None
+    total_losses = sum(losses_eur) if losses_eur else None
     net_gain = sum(all_eur) if all_eur else None
 
-    # Tax is assessed on net gain (losses offset gains within the year)
-    # Each gain row uses its own rate, but for a simple summary we compute gross tax per row
+    # Gross tax: sum per-disposal tax (each disposal may have a different rate)
     gross_tax = sum(
         si_cgt_tax(r.gain_eur, r.acquired, r.sold)
         for r in realized
         if r.gain_eur is not None
     )
-
     needs_fx = any(r.needs_fx for r in realized)
 
     rows = [
         {"metric": "Tax year", "value": str(year)},
-        {"metric": "Realized gains (gross)", "value": _fmt_eur(total_gains)},
-        {"metric": "Realized losses (gross)", "value": _fmt_signed_eur(total_losses)},
-        {"metric": "Net gain/loss", "value": _fmt_signed_eur(net_gain)},
-        {"metric": "Gross tax due (before loss offset)", "value": _fmt_eur(gross_tax)},
+        {"metric": "Gross realized gains", "value": _fmt_eur(total_gains)},
+        {"metric": "Gross realized losses", "value": _fmt_signed_eur(total_losses)},
+        {"metric": "Net gain / loss", "value": _fmt_signed_eur(net_gain)},
+        {"metric": "Gross CGT due", "value": _fmt_eur(gross_tax)},
         {
             "metric": "Note",
             "value": (
-                "EUR amounts unavailable for some trades (FX conversion needed) — "
-                "tax figures are partial. See --help for --fx-rates-file."
+                "Some EUR amounts missing (non-EUR trades, no FX rates). "
+                "Re-run with --fx-auto or provide ECB rates. Tax figures are partial."
                 if needs_fx
-                else "All EUR amounts available. Verify with FURS before filing."
+                else "Losses may offset gains; carry-forward rules apply. Verify with FURS."
+            ),
+        },
+    ]
+    return pd.DataFrame(rows)
+
+
+def _build_dividend_table(
+    dividends: list[IbkrDividend],
+    fx_rates: dict,
+) -> pd.DataFrame:
+    rows = []
+    for d in dividends:
+        eur_rate = fx_rates.get((d.currency, d.payment_date.isoformat()), 1.0 if d.currency == "EUR" else None)
+        gross_eur = d.amount * eur_rate if eur_rate is not None else None
+        wht_eur = d.withholding_tax * eur_rate if eur_rate is not None else None
+        top_up = (
+            si_dividend_tax(gross_eur, wht_eur)
+            if (gross_eur is not None and wht_eur is not None)
+            else None
+        )
+        rows.append(
+            {
+                "symbol": d.symbol,
+                "date": d.payment_date.isoformat(),
+                "currency": d.currency,
+                "gross_native": _fmt_currency(d.amount, d.currency),
+                "wht_native": _fmt_currency(d.withholding_tax, d.currency),
+                "gross_eur": _fmt_eur(gross_eur),
+                "wht_eur": _fmt_eur(wht_eur),
+                "si_topup_eur": _fmt_eur(top_up),
+                "needs_fx": eur_rate is None,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _build_dividend_summary(
+    dividends: list[IbkrDividend],
+    fx_rates: dict,
+    year: int,
+) -> pd.DataFrame:
+    gross_eur_total = 0.0
+    wht_eur_total = 0.0
+    topup_total = 0.0
+    partial = False
+
+    for d in dividends:
+        eur_rate = fx_rates.get((d.currency, d.payment_date.isoformat()), 1.0 if d.currency == "EUR" else None)
+        if eur_rate is None:
+            partial = True
+            continue
+        gross_eur = d.amount * eur_rate
+        wht_eur = d.withholding_tax * eur_rate
+        gross_eur_total += gross_eur
+        wht_eur_total += wht_eur
+        topup_total += si_dividend_tax(gross_eur, wht_eur)
+
+    rows = [
+        {"metric": "Tax year", "value": str(year)},
+        {"metric": "Gross dividend income (EUR)", "value": _fmt_eur(gross_eur_total)},
+        {"metric": "Foreign WHT already paid (EUR)", "value": _fmt_eur(wht_eur_total)},
+        {"metric": "Additional SI dividend tax due (EUR)", "value": _fmt_eur(topup_total)},
+        {
+            "metric": "Note",
+            "value": (
+                "Some EUR amounts missing — re-run with --fx-auto for full totals."
+                if partial
+                else "Verify with FURS before filing (DOHDSP-2 form)."
             ),
         },
     ]
@@ -212,11 +325,25 @@ def _build_tax_summary(realized: list[RealizedGain], year: int) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# FX helpers
+# ---------------------------------------------------------------------------
+
+def _maybe_fetch_fx(trades, fx_auto: bool) -> dict | None:
+    if not fx_auto:
+        return None
+    pairs = non_eur_currency_dates(trades)
+    if not pairs:
+        return None
+    from valuation.portfolio.fx import EcbFxClient
+    client = EcbFxClient()
+    return client.build_fx_rates_dict(pairs)
+
+
+# ---------------------------------------------------------------------------
 # Price fetching
 # ---------------------------------------------------------------------------
 
 def _fetch_prices(symbols: list[str], *, use_cache: bool) -> dict[str, dict]:
-    """Fetch Yahoo price snapshots for a list of symbols in parallel."""
     from valuation.data.providers.yahoo import YahooFinanceClient
 
     client = YahooFinanceClient(use_cache=use_cache)
@@ -240,7 +367,6 @@ def _safe_fetch(client, symbol: str) -> dict | None:
 
 
 def _to_eur_price(snap: dict, trade_currency: str) -> float | None:
-    """Extract last price in EUR from a Yahoo snapshot."""
     if not snap:
         return None
     last = snap.get("last_price")
@@ -249,17 +375,21 @@ def _to_eur_price(snap: dict, trade_currency: str) -> float | None:
     currency = snap.get("currency") or trade_currency
     if currency == "EUR":
         return float(last)
-    # For non-EUR quotes, we can't reliably convert without an FX rate
     return None
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Output helpers
 # ---------------------------------------------------------------------------
 
 def _resolve_statement_path(file: str | None) -> Path | None:
     raw = file or os.environ.get(_ENV_STATEMENT_PATH)
     if raw is None:
+        print(
+            f"Error: no IBKR statement file specified. "
+            f"Use --file <path> or set {_ENV_STATEMENT_PATH} in .env.",
+            file=sys.stderr,
+        )
         return None
     p = Path(raw).expanduser()
     if not p.is_file():
@@ -269,8 +399,7 @@ def _resolve_statement_path(file: str | None) -> Path | None:
 
 
 def _ibkr_to_yahoo(symbol: str) -> str:
-    """Normalize IBKR symbol to Yahoo Finance format."""
-    # IBKR uses "BRK B"; Yahoo uses "BRK-B"
+    """Normalize IBKR symbol format to Yahoo Finance format."""
     return symbol.replace(" ", "-")
 
 
@@ -305,6 +434,11 @@ def _fmt_qty(qty: float) -> str:
     if qty == int(qty):
         return str(int(qty))
     return f"{qty:.4f}"
+
+
+def _fmt_currency(value: float, currency: str) -> str:
+    symbol = "€" if currency == "EUR" else ("$" if currency == "USD" else currency + " ")
+    return f"{symbol}{value:,.2f}"
 
 
 def _print_and_save(
@@ -355,7 +489,7 @@ def _warn_needs_fx(open_lots: list[Lot]) -> None:
     if non_eur:
         print(
             f"\nNote: EUR cost basis unavailable for {', '.join(sorted(non_eur))} "
-            "(non-EUR currency). Provide an FX rates file for full EUR P&L.",
+            "(non-EUR trades). Re-run with --fx-auto to fetch ECB historical rates.",
             file=sys.stderr,
         )
 
@@ -364,7 +498,7 @@ def _warn_needs_fx_realized(realized: list[RealizedGain]) -> None:
     non_eur = {r.symbol for r in realized if r.needs_fx}
     if non_eur:
         print(
-            f"\nNote: EUR amounts missing for {', '.join(sorted(non_eur))} — "
-            "tax figures for these positions are incomplete.",
+            f"\nNote: EUR amounts incomplete for {', '.join(sorted(non_eur))}. "
+            "Re-run with --fx-auto for full tax calculation.",
             file=sys.stderr,
         )
