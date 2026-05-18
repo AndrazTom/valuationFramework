@@ -1159,6 +1159,114 @@ def test_build_public_equity_tax_context_and_sensitivity_table():
     assert federal["estimated_tax_usd"] == pytest.approx(50.82 * M)
 
 
+def test_build_public_equity_tax_context_table_none_returns_empty():
+    result = build_public_equity_tax_context_table(None, pd.DataFrame())
+    assert result.empty
+
+
+def test_build_public_equity_tax_context_table_empty_equity_note():
+    """No parseable equity-note rows → cost/gain fields are None, sensitivity is empty."""
+    tax_context = BrkTaxContextBundle(
+        company=None,
+        equity_filing_date="2026-05-04",
+        equity_accession_number="0001",
+        equity_securities=pd.DataFrame(columns=["Label", "Col1"]),
+        tax_filing_date="2026-03-02",
+        tax_accession_number="0002",
+        deferred_income_taxes=pd.DataFrame(),
+        income_tax_reconciliation=pd.DataFrame(),
+    )
+    equity_portfolio = pd.DataFrame([
+        {"field": "selected_13f_value_usd", "value": 300.0 * M},
+        {"field": "reported_13f_value_usd", "value": 250.0 * M},
+    ])
+    context = build_public_equity_tax_context_table(tax_context, equity_portfolio)
+    values = dict(zip(context["field"], context["value"]))
+    assert values["equity_note_cost_basis_usd"] is None
+    assert values["estimated_selected_13f_cost_basis_usd"] is None
+    assert values["estimated_selected_13f_unrealized_gain_usd"] is None
+
+    sensitivity = build_public_equity_tax_sensitivity_table(context)
+    assert sensitivity.empty
+
+
+def test_build_public_equity_tax_context_table_underwater_portfolio_clamps_gain():
+    """When cost ratio > 1 (portfolio underwater), estimated gain clamps to zero; sensitivity has no tax."""
+    tax_context = BrkTaxContextBundle(
+        company=None,
+        equity_filing_date="2026-05-04",
+        equity_accession_number="0001",
+        equity_securities=pd.DataFrame(
+            [
+                ["Cost Basis", "350", ""],
+                ["Net Unrealized Gains", "(50)", ""],
+                ["Fair Value", "300", ""],
+            ],
+            columns=["Investments in equity securities (Detail) - USD ($) $ in Millions", "Mar. 31, 2026", "Dec. 31, 2025"],
+        ),
+        tax_filing_date="2026-03-02",
+        tax_accession_number="0002",
+        deferred_income_taxes=pd.DataFrame(),
+        income_tax_reconciliation=pd.DataFrame(),
+    )
+    equity_portfolio = pd.DataFrame([
+        {"field": "selected_13f_value_usd", "value": 280.0 * M},
+        {"field": "reported_13f_value_usd", "value": 300.0 * M},
+    ])
+    context = build_public_equity_tax_context_table(tax_context, equity_portfolio)
+    values = dict(zip(context["field"], context["value"]))
+    assert values["estimated_selected_13f_unrealized_gain_usd"] == pytest.approx(0.0)
+
+    sensitivity = build_public_equity_tax_sensitivity_table(context)
+    # All rate-case taxes are 0 since gain is 0; after-tax value equals selected value
+    for _, row in sensitivity.iterrows():
+        if row["scenario"] != "scaled_reported_investment_deferred_tax":
+            assert row["estimated_tax_usd"] == pytest.approx(0.0)
+            assert row["after_tax_selected_13f_value_usd"] == pytest.approx(280.0 * M)
+
+
+def test_build_public_equity_tax_sensitivity_after_tax_value_never_exceeds_selected():
+    """after_tax_selected_13f_value_usd is always <= selected_13f_value_usd across all scenarios."""
+    tax_context = BrkTaxContextBundle(
+        company=None,
+        equity_filing_date="2026-05-04",
+        equity_accession_number="0001",
+        equity_securities=pd.DataFrame(
+            [
+                ["Cost Basis", "80", "70"],
+                ["Net Unrealized Gains", "220", "180"],
+                ["Fair Value", "300", "250"],
+            ],
+            columns=["Investments in equity securities (Detail) - USD ($) $ in Millions", "Mar. 31, 2026", "Dec. 31, 2025"],
+        ),
+        tax_filing_date="2026-03-02",
+        tax_accession_number="0002",
+        deferred_income_taxes=pd.DataFrame(
+            [
+                ["Investments, including unrealized appreciation", "50", "45"],
+                ["Net deferred income tax liability", "85", "80"],
+            ],
+            columns=["Income taxes - Deferred income taxes (Detail) - USD ($) $ in Millions", "Dec. 31, 2025", "Dec. 31, 2024"],
+        ),
+        income_tax_reconciliation=pd.DataFrame(
+            [
+                ["State and local income taxes, net of U.S. federal effect, percentage", "0.90%", "0.50%"],
+                ["Effective income tax rate percentage", "18.40%", "18.90%"],
+            ],
+            columns=["Income taxes - Income tax expense (benefit) reconciliation (Detail) - USD ($) $ in Millions", "12 Months Ended Dec. 31, 2025", "12 Months Ended Dec. 31, 2024"],
+        ),
+    )
+    equity_portfolio = pd.DataFrame([
+        {"field": "reported_13f_value_usd", "value": 250.0 * M},
+        {"field": "selected_13f_value_usd", "value": 330.0 * M},
+    ])
+    context = build_public_equity_tax_context_table(tax_context, equity_portfolio)
+    sensitivity = build_public_equity_tax_sensitivity_table(context)
+    selected = 330.0 * M
+    for _, row in sensitivity.iterrows():
+        assert row["after_tax_selected_13f_value_usd"] <= selected + 1.0
+
+
 def test_build_market_implied_sotp_bridge_table_deferred_tax_context():
     """Deferred income taxes show as a context row when present in the balance sheet."""
     reference = pd.DataFrame([{"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"}])
