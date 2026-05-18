@@ -978,6 +978,61 @@ def test_build_market_implied_sotp_bridge_table():
     assert bridge[bridge["metric"] == "residual_operating_and_other"].iloc[0]["value_usd"] == pytest.approx((1000.0 * M) - (290.0 * M) - 70.0)
     # fixed maturity appears as a context row, not subtracted
     assert bridge[bridge["metric"] == "fixed_maturity_securities_context"].iloc[0]["value_usd"] == pytest.approx(50.0 * M)
+    # deferred tax row is absent when balance sheet has no deferred tax entry
+    assert bridge[bridge["metric"] == "deferred_tax_on_equity_context"]["value_usd"].isna().all()
+
+
+def test_build_market_implied_sotp_bridge_table_deferred_tax_context():
+    """Deferred tax on equity shows as a context row when present in the balance sheet."""
+    reference = pd.DataFrame([{"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"}])
+    bundle = BrkValuationBundle(
+        overview=BrkOverviewBundle(
+            company=None,
+            market_snapshot={"ticker": "BRK-B", "last_price": 500.0, "market_cap": 1000.0 * M},
+            submissions={},
+            company_facts={},
+        ),
+        holdings=Brk13FBundle(
+            company=None,
+            filing_date="2026-02-17",
+            accession_number="0001",
+            information_table_filename="info.xml",
+            holdings=pd.DataFrame(
+                [{"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 100.0, "shares_or_principal": 0.2}]
+            ),
+        ),
+        liquidity=BrkLiquidityBundle(
+            company=None,
+            filings=[
+                BrkLiquidityFiling(
+                    filing_date="2026-03-02",
+                    accession_number="0002",
+                    form="10-K",
+                    balance_sheet=pd.DataFrame(
+                        [
+                            ["Cash and cash equivalents", "", "100", "90"],
+                            ["Short-term investments in U.S. Treasury Bills", "", "200", "180"],
+                            ["Investments in fixed maturity securities", "", "50", "40"],
+                            ["Payable for purchase of U.S. Treasury Bills", "", "10", "5"],
+                            ["Income taxes, principally deferred", "", "35", "30"],
+                        ],
+                        columns=[
+                            "Consolidated Balance Sheets",
+                            "Consolidated Balance Sheets",
+                            "Dec. 31, 2025",
+                            "Dec. 31, 2024",
+                        ],
+                    ),
+                )
+            ],
+        ),
+        segments=BrkSegmentsBundle(company=None, filings=[]),
+    )
+
+    bridge = build_market_implied_sotp_bridge_table(bundle, reference, yahoo_client=FakeYahooClient())
+    deferred_row = bridge[bridge["metric"] == "deferred_tax_on_equity_context"]
+    assert not deferred_row.empty
+    assert deferred_row.iloc[0]["value_usd"] == pytest.approx(35.0 * M)
 
 
 def test_build_operating_business_context_table_compares_residual_to_segment_earnings():

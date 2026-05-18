@@ -685,6 +685,19 @@ def run_brk_valuation_report(outdir: str, period: str, segment_filings: int = 4)
                 pass
     fixed_maturity_note = _fmt_currency(fixed_maturity_raw) if fixed_maturity_raw else "~$25B"
 
+    # Deferred tax figure for methodology notes — pull from SOTP bridge context row.
+    deferred_tax_raw = None
+    if not sotp_bridge.empty:
+        dt_rows = sotp_bridge[sotp_bridge["metric"] == "deferred_tax_on_equity_context"]
+        if not dt_rows.empty:
+            v = dt_rows.iloc[0].get("value_usd")
+            if v is not None and str(v) not in {"nan", "None", ""}:
+                try:
+                    deferred_tax_raw = float(v)
+                except (TypeError, ValueError):
+                    pass
+    deferred_tax_note = _fmt_currency(deferred_tax_raw) if deferred_tax_raw else "~$35B"
+
     # Print key numbers to terminal so the user sees results without opening the file.
     print("\n## Key Valuation Summary\n")
     print(render_terminal_table(summary))
@@ -764,10 +777,11 @@ def run_brk_valuation_report(outdir: str, period: str, segment_filings: int = 4)
         " an interest-free funding source. Do not subtract float at face value if you are"
         " also valuing the investment portfolio at market — the portfolio already reflects"
         " float-funded investments.",
-        "- **Deferred tax on unrealized equity gains (~$35B).** The 13F portfolio is valued"
-        " at current market prices (pre-tax). A sale of the entire equity portfolio would"
-        " trigger capital-gains tax on the embedded gain. A conservative view haircuts the"
-        " 13F value by roughly (unrealized gain × 21%) to reach an after-tax net value.",
+        f"- **Deferred tax on unrealized equity gains ({deferred_tax_note} per latest balance sheet).**"
+        " The 13F portfolio is valued at current market prices (pre-tax). A sale of the"
+        " entire equity portfolio would trigger capital-gains tax on the embedded gain. A"
+        " conservative view haircuts the 13F value by roughly (unrealized gain × 21%) to"
+        " reach an after-tax net value. This context row is also shown in the SOTP bridge.",
         "- **Subsidiary debt is not separately deducted.** BNSF (~$24B) and BHE (~$40B+)"
         " carry their own debt. Since we value the operating businesses via the market-implied"
         " residual, subsidiary debt is already reflected in how the market prices those"

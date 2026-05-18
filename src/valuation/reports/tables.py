@@ -60,6 +60,7 @@ DISPLAY_VALUE_ALIASES = {
     "quoted_holdings_plus_net_cash": "13F + net cash/T-bills",
     "net_cash_and_treasury_bills": "net cash + T-bills",
     "fixed_maturity_securities_context": "fixed maturity (context)",
+    "deferred_tax_on_equity_context": "deferred tax on equities (context)",
     "residual_operating_and_other": "residual opco + other",
     "deferred_income_taxes_usd": "deferred taxes",
     "equity_method_investments_usd": "equity method",

@@ -1114,9 +1114,10 @@ def build_market_implied_sotp_bridge_table(
         yahoo_client=yahoo_client,
         enriched_holdings=enriched_holdings,
     )
-    liquidity_snapshot = build_latest_liquidity_snapshot_table(
-        build_liquidity_bridge_table(bundle.liquidity.filings)
-    )
+    liquidity_bridge = build_liquidity_bridge_table(bundle.liquidity.filings)
+    liquidity_snapshot = build_latest_liquidity_snapshot_table(liquidity_bridge)
+    bs_context = _balance_sheet_context_summary_table(liquidity_bridge)
+    deferred_tax = float(bs_context.iloc[0]["deferred_income_taxes_usd"]) if not bs_context.empty and "deferred_income_taxes_usd" in bs_context.columns and pd.notna(bs_context.iloc[0].get("deferred_income_taxes_usd")) else None
 
     cash_and_equivalents = _frame_row_value(liquidity_snapshot, "cash_and_equivalents_usd")
     short_term_t_bills = _frame_row_value(liquidity_snapshot, "short_term_us_treasury_bills_usd")
@@ -1201,6 +1202,13 @@ def build_market_implied_sotp_bridge_table(
             "per_brk_b_share_usd": _per_share_value(fixed_maturity, share_count),
             "market_cap_weight": _ratio(fixed_maturity, market_cap),
             "note": "Context only — included in residual above; insurance-reserve-backed bond portfolio, not freely deployable capital",
+        },
+        {
+            "metric": "deferred_tax_on_equity_context",
+            "value_usd": deferred_tax,
+            "per_brk_b_share_usd": _per_share_value(deferred_tax, share_count),
+            "market_cap_weight": _ratio(deferred_tax, market_cap),
+            "note": "Context only — contingent tax liability on unrealized equity gains (~21% capital gains tax if portfolio sold); 13F values are pre-tax market prices, so after-tax realizable value is lower by roughly this amount",
         },
     ]
     return pd.DataFrame(rows)
