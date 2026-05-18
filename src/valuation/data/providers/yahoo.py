@@ -7,8 +7,11 @@ from pathlib import Path
 from typing import Any, Dict
 import hashlib
 import json
+import logging
 import os
 import time
+
+_log = logging.getLogger(__name__)
 
 from valuation.config import cache_dir
 
@@ -269,7 +272,8 @@ def _load_yfinance():
 def _safe_fast_info(instrument):
     try:
         return instrument.fast_info or {}
-    except Exception:
+    except Exception as exc:
+        _log.debug("fast_info unavailable: %s", exc)
         return {}
 
 
@@ -280,7 +284,8 @@ def _safe_mapping_get(mapping: Any, key: str, default: Any = None) -> Any:
         if hasattr(mapping, "get"):
             return mapping.get(key, default)
         return mapping[key]
-    except Exception:
+    except Exception as exc:
+        _log.debug("mapping get %r failed: %s", key, exc)
         return default
 
 
@@ -289,7 +294,8 @@ def _safe_history(instrument, **kwargs):
 
     try:
         return instrument.history(**kwargs)
-    except Exception:
+    except Exception as exc:
+        _log.debug("history fetch failed: %s", exc)
         return pd.DataFrame()
 
 

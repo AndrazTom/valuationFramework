@@ -365,7 +365,7 @@ def _parse_span_count(raw_value: object) -> int:
         value = int(raw_value)
     except (TypeError, ValueError):
         return 1
-    return max(value, 1)
+    return max(1, min(value, 30))
 
 
 def _cache_path(root: Path, url: str) -> Path:

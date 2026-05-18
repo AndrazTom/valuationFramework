@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Mapping, Optional
+import logging
 
 import pandas as pd
 
 from valuation.data.providers.yahoo import YahooFinanceClient
+
+_log = logging.getLogger(__name__)
 
 PRICE_CHANGE_WINDOWS = ("1D", "5D", "1M", "3M", "YTD", "1Y", "5Y", "ALL")
 
@@ -213,7 +216,8 @@ def _fetch_price_snapshots(
             ticker = futures[future]
             try:
                 results[ticker] = future.result()
-            except Exception:
+            except Exception as exc:
+                _log.debug("price snapshot failed for %s: %s", ticker, exc)
                 results[ticker] = {"ticker": ticker.upper(), "source": "yfinance"}
     return results
 
@@ -237,7 +241,8 @@ def _fetch_price_histories(
             ticker = futures[future]
             try:
                 results[ticker] = future.result()
-            except Exception:
+            except Exception as exc:
+                _log.debug("price history failed for %s: %s", ticker, exc)
                 results[ticker] = pd.DataFrame()
     return results
 
@@ -354,7 +359,8 @@ def _history_period_for_change_window(window: str) -> str:
 def _safe_fetch_price_snapshot(yahoo: YahooFinanceClient, ticker: str) -> dict[str, object]:
     try:
         return yahoo.fetch_price_snapshot(ticker)
-    except Exception:
+    except Exception as exc:
+        _log.debug("price snapshot fetch failed for %s: %s", ticker, exc)
         return {"ticker": str(ticker).upper(), "source": "yfinance"}
 
 
@@ -370,5 +376,6 @@ def _safe_fetch_history(
             period=period,
             interval="1d",
         )
-    except Exception:
+    except Exception as exc:
+        _log.debug("price history fetch failed for %s: %s", ticker, exc)
         return pd.DataFrame()
