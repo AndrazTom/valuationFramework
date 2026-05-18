@@ -38,6 +38,7 @@ Long-term direction:
 - keep `claude.md` current so a new chat can resume work quickly
 - coding agents should update root `claude.md` whenever meaningful backend behavior, priorities, branch state, or workflow assumptions change
 - coding agents should also update relevant subtree `CLAUDE.md` files regularly when module-local contracts or workflow expectations change
+- **this is a constant, non-negotiable instruction**: every code change must be accompanied by updates to all affected subtree `CLAUDE.md` files; do not close a task without doing this
 - create a new subtree `CLAUDE.md` when a module has enough local context that future chats would otherwise have to rediscover it
 - add subtree `CLAUDE.md` files only when module-specific context is genuinely useful
 - after implementation work is complete, a separate Codex/Claude review pass should inspect the patch, run tests, and verify the basic README-listed workflows before the branch is considered ready to merge
@@ -411,6 +412,19 @@ Completed on 2026-05-18 (generic company research tools):
   - D&A now also surfaces in Key Financials section of `./vf company` with proper `$X.XXB` formatting
 - `humanize_frame` formatting extended: `depreciation` and `amortization` token → currency format
 - full test suite at 257 tests (was 224 before this session)
+
+## First Task for Next Session
+
+**CLAUDE.md audit — do this before any other work:**
+
+- scan the entire repo for all existing `CLAUDE.md` files and identify every module that has meaningful local context but no `CLAUDE.md` yet
+- update all existing subtree `CLAUDE.md` files to reflect the current state of the code (many were last updated before the valuation report, summary table, and liability-context work)
+- add new subtree `CLAUDE.md` files where missing and genuinely useful (candidates: `src/valuation/company/`, `src/valuation/data/providers/`, `src/valuation/reports/`, `src/valuation/securities/`)
+- cross-check every `CLAUDE.md` against the actual code: remove stale claims, add anything a new chat would need to avoid rediscovering
+
+This is required before any feature work so the repo is fully navigable from a cold start.
+
+---
 
 Completed on 2026-05-18 (valuation report):
 
