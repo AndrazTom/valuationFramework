@@ -11,7 +11,7 @@ Rules:
 - when adding a new `company` section, test both file outputs and JSON bundle keys
 - CLI tests should stay offline and use monkeypatches or fixtures rather than live providers
 - keep assertions focused on backend behavior and stable contracts, not incidental table formatting
-- current full-suite baseline after hardening batch: `324 passed`
+- current full-suite baseline after hardening batch: `353 passed`
 
 Coverage map:
 
@@ -41,3 +41,4 @@ Coverage map:
 - `test_yahoo_provider.py` covers `latest_price_date` populated from fast-info path, and missing Close column safe degradation
 - `test_ratios.py` Yahoo path `oe_per_share` uses correct capex sign (abs normalization)
 - `test_brk_tables.py` covers `build_opco_segment_industry_multiples_table`: basic structure, correct multiples per segment, total sums, empty-on-no-segments
+- `test_portfolio.py` covers IBKR CSV parser (multi-section format, BOM, thousand separators), FIFO lot engine (single buy, full/partial sell, spanning lots, multi-symbol, gain calculation, non-EUR/FX flag), and Slovenian CGT (rates, tax, threshold helper)
