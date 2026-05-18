@@ -20,7 +20,7 @@ Current branch priority:
 - as of 2026-05-18, `brk` is mature; all prior hardening complete (liquidity, segments, SOTP, holdings history, price windows, diagnostics, valuation tables, valuation report, public-equity tax sensitivity)
 - 2026-05-18 live QA sweep passed for `./vf brk holdings --history --filings-limit 2 --limit 10`, `./vf brk sotp --details`, and `./vf brk sotp --price-change 1M`
 - `./vf brk valuation-report` now functional: self-contained Markdown artifact, findings-first order, terminal key-numbers preview, dynamic methodology notes, `--segment-filings`, selectable public-equity basis (`--equity-valuation-basis reported|live`), and public-equity tax context/sensitivity
-- 289 tests passing as of 2026-05-18
+- 307 tests passing as of 2026-05-18 (post-hardening batch)
 - temporary hardening branches should be merged back quickly, then deleted
 
 Long-term direction:
@@ -449,23 +449,49 @@ Completed on 2026-05-18 (valuation report):
   - 288 tests passing
 - `_metric_per_share()` and `_metric_weight()` helpers added to `brk/tables.py` for SOTP bridge row extraction
 
-Next concrete tasks:
+Next concrete tasks (updated 2026-05-18):
 
-1. Tax sensitivity / deferred-tax refinement remains planned, but is intentionally not part of the current report-hardening pass
-2. Cached universe/index layer:
-   - build a small security/filer index before any top-500/top-1000 downloader
-   - for updated SEC filings after long gaps, refresh submissions first, compare latest accession/report dates to local index, then fetch only new immutable filing artifacts
-3. Yahoo Europe hardening:
-   - collect specific issuer failures before changing mappings; bank/insurance statement shapes can be legitimately sparse
-4. Generic company improvements:
-   - statement concept coverage: consider sector-specific concept additions for energy/utility/insurance companies
-   - filing quality: ensure `8-K` and proxy filings are surfaced cleanly in the company view
-4. QA sweep completed on 2026-05-18:
-   - `./vf brk sotp`, `./vf brk sotp --price-change 1M`, `./vf brk holdings --history --filings-limit 2`, `./vf company AAPL`, `./vf company BRK-B`, `./vf company BNP.PA` all exited 0
-   - `Operating Business Reverse DCF` confirmed present in SOTP output
-   - `Implied Value Range` and `Reverse DCF` confirmed for both AAPL and BRK-B
-   - note: BRK-B owner earnings ARE available from SEC TTM (D&A + capex + net income all in Q1 2026 10-Q); earlier assumption of suppression was incorrect
-   - BRK quarterly diagnostics confirmed: diluted_eps and diluted_shares absent from SEC companyfacts; operating_income stale since 2013
+### Tier 1 — BRK analytical completeness (highest decision value)
+
+**1. Share repurchase history** (lowest effort, fills an obvious gap)
+- `PaymentsForRepurchaseOfCommonStock` is in companyfacts; shares outstanding is already tracked
+- Add `build_buyback_history_table` to `brk/tables.py`: annual buyback $ and implied price paid (buyback $ / shares retired)
+- Surface in `./vf brk sotp --details` and the valuation report
+- Gives concrete data on capital allocation discipline and buyback pace relative to book value
+
+**2. Explicit intrinsic value estimate** (most actionable addition)
+- The SOTP bridge gives the market-implied residual but no bottom-up "what is it worth" output
+- Add `build_intrinsic_value_estimate_table`: for given P/E multiples on operating earnings, compute implied total value → divide by BRK.B equivalent shares → show vs current price (upside/downside %)
+- Pairs with `build_opco_valuation_sensitivity_table` already in place; this is the per-share output row
+- Should emit in both `./vf brk sotp` and the valuation report
+
+**3. Insurance float quantification** (analytical completeness)
+- Float (~$170B) is currently only a hardcoded methodology note
+- Float is recoverable from the balance sheet: insurance liabilities lines (losses/LAE payable, unearned premiums, life/annuity benefits)
+- Add float extraction to `brk/service.py` and a display row in the valuation report methodology section
+- Track float growth rate across filings — float growth rate is a key indicator of BRK insurance franchise health
+
+### Tier 2 — Generic tool improvements
+
+**4. Per-share owner earnings in `./vf ratios`** (low effort)
+- `build_historical_ratios_table` has `owner_earnings` but not `oe_per_share`
+- Shares outstanding across years is already in companyfacts
+- Small addition; makes the ratios table more useful for any company
+
+**5. QA sweep completed on 2026-05-18:**
+- `./vf brk sotp`, `./vf brk sotp --price-change 1M`, `./vf brk holdings --history --filings-limit 2`, `./vf company AAPL`, `./vf company BRK-B`, `./vf company BNP.PA` all exited 0
+- `Operating Business Reverse DCF` confirmed present in SOTP output
+- `Implied Value Range` and `Reverse DCF` confirmed for both AAPL and BRK-B
+- note: BRK-B owner earnings ARE available from SEC TTM (D&A + capex + net income all in Q1 2026 10-Q); earlier assumption of suppression was incorrect
+- BRK quarterly diagnostics confirmed: diluted_eps and diluted_shares absent from SEC companyfacts; operating_income stale since 2013
+
+### Deferred / lower priority
+
+- Cached universe/index layer: build a small security/filer index before any top-500/top-1000 downloader
+- Yahoo Europe hardening: collect specific issuer failures before changing mappings
+- IBKR/Slovenia portfolio module (FIFO lots, realized gains, withholding tax): separate module, tackle when BRK analysis is done enough
+- Sector-specific SEC concept additions (energy/utility/insurance)
+- `8-K` and proxy filings surfaced in company view
 
 ## Statement Debug Notes
 
