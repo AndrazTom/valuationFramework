@@ -87,8 +87,9 @@ class YahooFinanceClient:
             )
             if not history.empty:
                 latest_row = history.tail(1).iloc[0]
-                latest_close = float(latest_row.get("Close"))
-                latest_date = history.tail(1).index[0]
+                latest_close = _coerce_float(latest_row.get("Close"))
+                _idx = history.tail(1).index[0]
+                latest_date = _idx if hasattr(_idx, "strftime") else None
 
         shares = _coerce_float(_safe_mapping_get(info, "shares"))
         raw_market_cap = _coerce_float(
@@ -126,7 +127,11 @@ class YahooFinanceClient:
                 _safe_mapping_get(info, "two_hundred_day_average")
             ),
             "latest_price_date": (
-                latest_date.strftime("%Y-%m-%d") if latest_date is not None else None
+                latest_date.strftime("%Y-%m-%d")
+                if latest_date is not None
+                else __import__("datetime").date.today().isoformat()
+                if last_price is not None
+                else None
             ),
             "source": "yfinance",
         }

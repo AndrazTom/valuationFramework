@@ -91,9 +91,13 @@ def fetch_company_snapshot(
         if not _is_viable_yahoo_profile(company_profile):
             company_profile = None
         if company_bundle_future is not None:
-            company_bundle = company_bundle_future.result()
-            submissions = company_bundle["submissions"]
-            company_facts = company_bundle["company_facts"]
+            try:
+                company_bundle = company_bundle_future.result()
+                submissions = company_bundle["submissions"]
+                company_facts = company_bundle.get("company_facts")
+            except Exception:
+                submissions = None
+                company_facts = None
         else:
             submissions = None
             company_facts = None

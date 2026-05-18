@@ -252,3 +252,19 @@ def test_resolve_non_us_isin_does_not_require_sec_lookup():
 
     assert resolution.ticker == "MC.PA"
     assert resolution.sec_company is None
+
+
+def test_fetch_company_snapshot_sec_failure_does_not_crash():
+    """SEC bundle fetch failure should be isolated — Yahoo market data still returned."""
+    class BrokenSecClient(FakeSecClient):
+        def fetch_company_bundle(self, ticker, include_company_facts=False):
+            raise RuntimeError("SEC unavailable")
+
+    bundle = fetch_company_snapshot(
+        "AAPL",
+        sec_client=BrokenSecClient(),
+        yahoo_client=FakeYahooClient(),
+    )
+    assert bundle.market_snapshot is not None
+    assert bundle.submissions is None
+    assert bundle.company_facts is None

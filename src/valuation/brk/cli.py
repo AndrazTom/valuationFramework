@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import re
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from valuation.brk.holdings import aggregate_13f_holdings
 from valuation.brk.service import (
@@ -1031,7 +1031,7 @@ def _brk_share_count_for_report(market_snapshot: dict) -> float | None:
     return _implied_brk_b_equivalent_shares(market_snapshot)
 
 
-def _emit_sections(sections: Iterable[tuple[str, object]], output_dir: Path) -> None:
+def _emit_sections(sections: Sequence[tuple[str, object]], output_dir: Path) -> None:
     for title, frame in sections:
         print(f"\n## {title}\n")
         print(render_terminal_table(frame))
@@ -1043,7 +1043,7 @@ def _emit_sections(sections: Iterable[tuple[str, object]], output_dir: Path) -> 
     print(f"\nWrote tables to {output_dir}")
 
 
-def _named_tables(sections: Iterable[tuple[str, object]]):
+def _named_tables(sections: Sequence[tuple[str, object]]):
     for title, frame in sections:
         slug = re.sub(r"[^a-z0-9]+", "_", title.lower()).strip("_")
         yield slug, frame

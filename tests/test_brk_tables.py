@@ -1830,6 +1830,30 @@ def test_build_book_value_history_table_shows_equity_and_bvps():
     assert bv_row[fy_col] == pytest.approx(400 * M / (2.0 * M))  # $200/share
 
 
+def test_build_book_value_history_table_cagr_positive_for_growing_equity():
+    """CAGR must be positive when equity grows year-over-year (period cols newest-first bug guard)."""
+    from valuation.brk.tables import build_book_value_history_table
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "StockholdersEquity": {
+                    "units": {
+                        "USD": [
+                            {"form": "10-K", "end": "2024-12-31", "val": 200 * M, "accn": "a1", "fy": 2024, "fp": "FY", "filed": "2025-02-21"},
+                            {"form": "10-K", "end": "2022-12-31", "val": 100 * M, "accn": "a2", "fy": 2022, "fp": "FY", "filed": "2023-02-21"},
+                        ]
+                    }
+                }
+            }
+        },
+        "entityName": "Test Corp",
+    }
+    table = build_book_value_history_table(company_facts, share_count=None, limit=5)
+    eq_row = table[table["metric"] == "stockholders_equity_usd"].iloc[0]
+    # equity doubled over 2 years → CAGR ~41%; must be positive, not negative
+    assert eq_row["cagr_pct"] > 0
+
+
 # ---------------------------------------------------------------------------
 # build_buyback_history_table
 # ---------------------------------------------------------------------------

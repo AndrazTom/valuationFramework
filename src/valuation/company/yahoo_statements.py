@@ -166,7 +166,7 @@ def _add_yahoo_free_cash_flow_row(frame: pd.DataFrame) -> pd.DataFrame:
         capex = capex_row[col]
         if not pd.isna(ocf) and not pd.isna(capex):
             try:
-                fcf_values[col] = float(ocf) - float(capex)
+                fcf_values[col] = float(ocf) - abs(float(capex))
                 any_value = True
             except (TypeError, ValueError):
                 fcf_values[col] = None
@@ -340,25 +340,26 @@ def _append_yahoo_owner_earnings_row(table: pd.DataFrame) -> pd.DataFrame:
             "form": None,
             "frame": None,
         })
-    if ocf is not None and capex is not None:
+    capex_abs = abs(capex) if capex is not None else None
+    if ocf is not None and capex_abs is not None:
         new_rows.append({
             "metric": "free_cash_flow",
             "taxonomy": "derived",
             "concept": "operating_cash_flow - capex",
             "unit": _unit("operating_cash_flow"),
-            "value": ocf - capex,
+            "value": ocf - capex_abs,
             "end": _end("operating_cash_flow"),
             "filed": None,
             "form": None,
             "frame": None,
         })
-    if net_income is not None and da is not None and capex is not None:
+    if net_income is not None and da is not None and capex_abs is not None:
         new_rows.append({
             "metric": "owner_earnings",
             "taxonomy": "derived",
             "concept": "net_income + depreciation_amortization - capex",
             "unit": _unit("net_income"),
-            "value": net_income + da - capex,
+            "value": net_income + da - capex_abs,
             "end": _end("net_income"),
             "filed": None,
             "form": None,

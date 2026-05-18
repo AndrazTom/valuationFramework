@@ -664,7 +664,8 @@ def extract_financials_from_yahoo_frames(
             for timestamp, row in transposed.iterrows():
                 _, value = _resolve_yahoo_value_with_label(row, candidates=candidates)
                 if value is not None:
-                    result[metric] = value
+                    # Yahoo reports capex as a cash outflow (negative); normalize to positive magnitude
+                    result[metric] = abs(value) if metric == "capex" else value
                     break
     return result
 
@@ -706,7 +707,9 @@ def extract_financials_ttm_from_yahoo_frames(
         for _, row in cf_ttm_frame.iterrows():
             m = str(row["metric"])
             if m not in result:
-                result[m] = _to_float(row.get(cf_ttm_col))
+                val = _to_float(row.get(cf_ttm_col))
+                # Yahoo reports capex as negative; normalize to positive magnitude
+                result[m] = abs(val) if m == "capex" and val is not None else val
 
     # Balance: latest quarterly snapshot (instant items, TTM not meaningful)
     from valuation.company.yahoo_statements import build_yahoo_statement_table

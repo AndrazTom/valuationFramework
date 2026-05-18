@@ -1991,9 +1991,9 @@ def build_book_value_history_table(
         rows.append({"metric": "book_value_per_brk_b_usd", "unit": "USD", **bvps})
 
     result = pd.DataFrame(rows)
-    # Compute CAGR on the equity row
+    cagr_cols = sorted(period_cols, key=_period_col_sort_key)
     result["cagr_pct"] = result.apply(
-        lambda row: _row_cagr([row.get(c) for c in period_cols]), axis=1
+        lambda row: _row_cagr([row.get(c) for c in cagr_cols]), axis=1
     )
     return result
 
@@ -2053,7 +2053,7 @@ def build_insurance_float_table(
     # Only keep rows that have at least one non-null period value
     component_rows = []
     for _, row in float_wide.iterrows():
-        vals = [_safe_float(row.get(c)) for c in out_period_cols]
+        vals = [_none_if_nan_float(row.get(c)) for c in out_period_cols]
         if any(v is not None for v in vals):
             component_rows.append(row.to_dict())
 
@@ -2063,7 +2063,7 @@ def build_insurance_float_table(
     # Build totals row
     total_row: dict = {"metric": "total_float_usd", "unit": "USD"}
     for col in out_period_cols:
-        component_vals = [_safe_float(r.get(col)) for r in component_rows]
+        component_vals = [_none_if_nan_float(r.get(col)) for r in component_rows]
         valid = [v for v in component_vals if v is not None]
         total_row[col] = sum(valid) if valid else None
 
@@ -2072,7 +2072,7 @@ def build_insurance_float_table(
 
     cagr_cols = sorted(out_period_cols, key=_period_col_sort_key)
     result["cagr_pct"] = result.apply(
-        lambda row: _row_cagr([_safe_float(row.get(c)) for c in cagr_cols]),
+        lambda row: _row_cagr([_none_if_nan_float(row.get(c)) for c in cagr_cols]),
         axis=1,
     )
     return result
@@ -2130,8 +2130,8 @@ def build_buyback_history_table(
         implied: dict = {"metric": "implied_price_per_share_usd", "unit": "USD"}
         has_any = False
         for col in out_period_cols:
-            b = _safe_float(buyback_row.get(col))
-            s = _safe_float(shares_row.get(col))
+            b = _none_if_nan_float(buyback_row.get(col))
+            s = _none_if_nan_float(shares_row.get(col))
             if b is not None and s is not None and s > 0:
                 implied[col] = b / s
                 has_any = True
@@ -2144,7 +2144,7 @@ def build_buyback_history_table(
     if share_count is not None and share_count > 0:
         per_share: dict = {"metric": "buyback_per_brk_b_usd", "unit": "USD"}
         for col in out_period_cols:
-            b = _safe_float(buyback_row.get(col))
+            b = _none_if_nan_float(buyback_row.get(col))
             per_share[col] = b / share_count if b is not None else None
         rows.append(per_share)
 
@@ -2152,20 +2152,10 @@ def build_buyback_history_table(
     # CAGR: pass values oldest-first (out_period_cols are newest-first from statement table)
     cagr_cols = sorted(out_period_cols, key=_period_col_sort_key)
     result["cagr_pct"] = result.apply(
-        lambda row: _row_cagr([_safe_float(row.get(c)) for c in cagr_cols]),
+        lambda row: _row_cagr([_none_if_nan_float(row.get(c)) for c in cagr_cols]),
         axis=1,
     )
     return result
-
-
-def _safe_float(v) -> float | None:
-    if v is None:
-        return None
-    try:
-        f = float(v)
-        return None if pd.isna(f) else f
-    except (TypeError, ValueError):
-        return None
 
 
 def _period_col_sort_key(label: str) -> tuple[int, int]:

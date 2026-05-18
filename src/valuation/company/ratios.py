@@ -156,7 +156,8 @@ def build_historical_ratios_table_from_yahoo(
         net_income = _yahoo_value(income_annual, "income", "net_income", ts)
         revenue = _yahoo_value(income_annual, "income", "revenue", ts)
         da = _yahoo_value(cashflow_annual, "cashflow", "depreciation_amortization", ts)
-        capex = _yahoo_value(cashflow_annual, "cashflow", "capex", ts)
+        capex_raw = _yahoo_value(cashflow_annual, "cashflow", "capex", ts)
+        capex = abs(capex_raw) if capex_raw is not None else None
         equity = _yahoo_value(balance_annual, "balance", "stockholders_equity", ts)
         cash = _yahoo_value(balance_annual, "balance", "cash_and_equivalents", ts)
         ltd = _yahoo_value(balance_annual, "balance", "long_term_debt", ts)
@@ -245,7 +246,7 @@ def _price_by_month_map(price_history: pd.DataFrame) -> dict[tuple[int, int], fl
     if price_history is None or price_history.empty:
         return {}
     result: dict[tuple[int, int], float] = {}
-    date_col = next((c for c in ("date", "Date", "index") if c in price_history.columns), None)
+    date_col = next((c for c in ("date", "datetime", "index") if c in price_history.columns), None)
     close_col = next((c for c in ("close", "Close", "adj close", "Adj Close") if c in price_history.columns), None)
     if not date_col or not close_col:
         return {}

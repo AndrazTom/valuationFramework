@@ -228,3 +228,50 @@ def test_fetch_history_uses_persistent_cache(monkeypatch, tmp_path):
     assert second_history.iloc[0]["close"] == 10.0
     assert second_history.iloc[0]["date"] == "2026-01-02T00:00:00"
     assert calls["count"] == 1
+
+
+def test_fetch_price_snapshot_latest_price_date_populated_from_fast_info(monkeypatch):
+    """latest_price_date must not be None when fast_info provides last_price."""
+    import datetime
+
+    class FakeTicker:
+        def __init__(self, ticker):
+            self.fast_info = {"last_price": 200.0, "market_cap": None, "shares": 1_000}
+
+        def history(self, **kwargs):
+            raise AssertionError("history() should not be called")
+
+    class FakeYahooModule:
+        Ticker = FakeTicker
+
+    monkeypatch.setattr("valuation.data.providers.yahoo._load_yfinance", lambda: FakeYahooModule)
+
+    client = YahooFinanceClient(use_cache=False)
+    snapshot = client.fetch_price_snapshot("AAPL")
+
+    assert snapshot["last_price"] == 200.0
+    assert snapshot["latest_price_date"] is not None
+    assert snapshot["latest_price_date"] == datetime.date.today().isoformat()
+
+
+def test_fetch_price_snapshot_missing_close_column_does_not_crash(monkeypatch):
+    """When history() returns a frame without 'Close', latest_close should be None (not crash)."""
+    import pandas as pd
+
+    class FakeTicker:
+        def __init__(self, ticker):
+            self.fast_info = {"last_price": None, "market_cap": None, "shares": None}
+
+        def history(self, **kwargs):
+            return pd.DataFrame([{"Volume": 1000}])
+
+    class FakeYahooModule:
+        Ticker = FakeTicker
+
+    monkeypatch.setattr("valuation.data.providers.yahoo._load_yfinance", lambda: FakeYahooModule)
+
+    client = YahooFinanceClient(use_cache=False)
+    snapshot = client.fetch_price_snapshot("AAPL")
+
+    assert snapshot["last_price"] is None
+    assert snapshot["latest_price_date"] is None
