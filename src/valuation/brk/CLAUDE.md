@@ -71,12 +71,16 @@ Recent completed output:
   - `./vf brk sotp --details` now fetches 4 segment filings instead of 1
   - `build_segment_period_sections` already renders one table per period, so history appears automatically
   - default `./vf brk sotp` still fetches only the latest segment filing for the context table
+- Berkshire operating business reverse DCF (2026-05-18):
+  - `build_brk_operating_reverse_dcf_table` added to `brk/tables.py`
+  - uses Gordon Growth solved for g: implied_g = r - (pretax_earnings / residual)
+  - default `./vf brk sotp` now includes `Operating Business Reverse DCF` table after `Operating Business Context`
+  - shows implied growth at 8%/10%/12% required return and zero-growth operating value per BRK-B share
+  - residual is market-implied (includes non-13F assets, debt, taxes); treat implied growth as approximation
 
-Next major output:
+Next concrete Berkshire tasks:
 
-- improve Berkshire SOTP by separating more non-13F assets/liabilities and making segment earnings history more valuation-ready
-- next concrete Berkshire tasks:
-  - inspect BRK filing statement tables for EPS and weighted-average share rows missing from current SEC companyfacts statements; requires live exploration to identify correct report short names
+- inspect BRK filing statement tables for EPS and weighted-average share rows missing from current SEC companyfacts statements; requires live exploration to identify correct report short names
   - keep any BRK-specific statement fallback in this subtree unless it proves generic
   - split fixed maturity securities and other non-13F assets more explicitly if filing tables support it
   - run live QA sweep including `./vf brk sotp --price-change 1M` and `./vf brk holdings --history --filings-limit 2`

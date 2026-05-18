@@ -1145,6 +1145,70 @@ def build_operating_business_context_table(
     )
 
 
+_BRK_DEFAULT_REQUIRED_RETURNS = (0.08, 0.10, 0.12)
+
+
+def _context_field_value(context: pd.DataFrame, field: str) -> float | None:
+    if context.empty or "field" not in context.columns or "value" not in context.columns:
+        return None
+    rows = context[context["field"] == field]
+    if rows.empty:
+        return None
+    v = rows.iloc[0]["value"]
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def build_brk_operating_reverse_dcf_table(
+    context_table: pd.DataFrame,
+    market_snapshot: dict,
+    *,
+    required_returns: tuple[float, ...] | list[float] = _BRK_DEFAULT_REQUIRED_RETURNS,
+) -> pd.DataFrame:
+    """Return implied perpetual growth rates for Berkshire operating businesses.
+
+    Uses the Gordon Growth model solved for g:
+      residual = pretax_earnings / (r - g)  →  g = r - pretax_earnings / residual
+
+    ``residual`` is the market-implied operating-and-other residual from the SOTP
+    bridge (includes non-13F assets, debt, deferred taxes, and other items, so treat
+    the implied growth as an approximation, not a precise business appraisal).
+    ``pretax_earnings`` are the latest reported top-level segment pre-tax earnings.
+    ``zero_growth_operating_value_usd`` is what the residual would be worth at that
+    required return with zero growth assumed: pretax_earnings / r.
+
+    Returns empty DataFrame when residual or pretax earnings are unavailable or ≤ 0.
+
+    Columns: assumed_return, implied_growth, zero_growth_operating_value_usd,
+             zero_growth_per_brk_b_usd
+    ``assumed_return`` and ``implied_growth`` are 0-1 decimals.
+    """
+    residual = _context_field_value(context_table, "residual_operating_and_other_usd")
+    pretax_earnings = _context_field_value(context_table, "operating_segment_pretax_earnings_usd")
+    if residual is None or pretax_earnings is None or residual <= 0 or pretax_earnings <= 0:
+        return pd.DataFrame()
+
+    share_count = _implied_brk_b_equivalent_shares(market_snapshot)
+    earnings_yield = pretax_earnings / residual
+    rows = []
+    for r in required_returns:
+        implied_g = r - earnings_yield
+        zero_growth_value = pretax_earnings / r
+        rows.append(
+            {
+                "assumed_return": r,
+                "implied_growth": implied_g,
+                "zero_growth_operating_value_usd": zero_growth_value,
+                "zero_growth_per_brk_b_usd": _per_share_value(zero_growth_value, share_count),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def build_segment_report_summary_table(filings: Sequence[BrkSegmentFiling]) -> pd.DataFrame:
     """Summarize the Berkshire segment filings included in the current output."""
     return pd.DataFrame(

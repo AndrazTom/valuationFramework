@@ -27,6 +27,7 @@ from valuation.brk.tables import (
     build_liquidity_summary_table,
     build_market_implied_sotp_bridge_table,
     build_market_anchor_table,
+    build_brk_operating_reverse_dcf_table,
     build_operating_business_context_table,
     build_top_level_operating_segments_summary_table,
     build_share_class_table,
@@ -1002,3 +1003,65 @@ def test_build_operating_business_context_table_compares_residual_to_segment_ear
     assert pretax == 50 * M
     assert residual == pytest.approx((1000.0 * M) - (300.0 * M) - 40.0)
     assert multiple == pytest.approx(residual / pretax)
+
+
+def test_build_brk_operating_reverse_dcf_table_basic():
+    # residual = 500M, pretax_earnings = 50M
+    # oe_yield = 50/500 = 0.10
+    # at r=0.10: implied_g = 0.10 - 0.10 = 0.00
+    # zero_growth_value = 50M / 0.10 = 500M
+    context = pd.DataFrame([
+        {"field": "residual_operating_and_other_usd", "value": 500.0 * M},
+        {"field": "operating_segment_pretax_earnings_usd", "value": 50.0 * M},
+    ])
+    snapshot = {"market_cap": 1000.0 * M, "last_price": 500.0}
+    table = build_brk_operating_reverse_dcf_table(context, snapshot, required_returns=[0.10])
+    assert len(table) == 1
+    row = table.iloc[0]
+    assert row["assumed_return"] == pytest.approx(0.10)
+    assert row["implied_growth"] == pytest.approx(0.0)
+    assert row["zero_growth_operating_value_usd"] == pytest.approx(500.0 * M)
+
+
+def test_build_brk_operating_reverse_dcf_table_default_returns():
+    context = pd.DataFrame([
+        {"field": "residual_operating_and_other_usd", "value": 400.0 * M},
+        {"field": "operating_segment_pretax_earnings_usd", "value": 20.0 * M},
+    ])
+    snapshot = {"market_cap": 800.0 * M, "last_price": 400.0}
+    table = build_brk_operating_reverse_dcf_table(context, snapshot)
+    assert list(table["assumed_return"]) == pytest.approx([0.08, 0.10, 0.12])
+
+
+def test_build_brk_operating_reverse_dcf_table_computes_per_share():
+    # residual=400M, pretax=40M, oe_yield=0.10
+    # at r=0.10: implied_g=0, zero_growth=400M
+    # market_cap=1000M, last_price=500 → shares=2M BRK-B equiv
+    # zero_growth_per_brk_b = 400M / 2M = $200
+    context = pd.DataFrame([
+        {"field": "residual_operating_and_other_usd", "value": 400.0 * M},
+        {"field": "operating_segment_pretax_earnings_usd", "value": 40.0 * M},
+    ])
+    snapshot = {"market_cap": 1000.0 * M, "last_price": 500.0}
+    table = build_brk_operating_reverse_dcf_table(context, snapshot, required_returns=[0.10])
+    row = table.iloc[0]
+    assert row["zero_growth_per_brk_b_usd"] == pytest.approx(200.0)
+
+
+def test_build_brk_operating_reverse_dcf_table_returns_empty_when_residual_zero():
+    context = pd.DataFrame([
+        {"field": "residual_operating_and_other_usd", "value": 0.0},
+        {"field": "operating_segment_pretax_earnings_usd", "value": 50.0 * M},
+    ])
+    snapshot = {"market_cap": 1000.0 * M, "last_price": 500.0}
+    table = build_brk_operating_reverse_dcf_table(context, snapshot)
+    assert table.empty
+
+
+def test_build_brk_operating_reverse_dcf_table_returns_empty_when_pretax_missing():
+    context = pd.DataFrame([
+        {"field": "residual_operating_and_other_usd", "value": 500.0 * M},
+    ])
+    snapshot = {"market_cap": 1000.0 * M, "last_price": 500.0}
+    table = build_brk_operating_reverse_dcf_table(context, snapshot)
+    assert table.empty

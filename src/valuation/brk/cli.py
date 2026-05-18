@@ -25,6 +25,7 @@ from valuation.brk.tables import (
     build_13f_portfolio_change_summary_table,
     build_13f_summary_table,
     build_13f_live_price_summary_table,
+    build_brk_operating_reverse_dcf_table,
     build_brk_valuation_assumptions_table,
     build_key_facts_table,
     build_holdings_vs_brk_price_change_table,
@@ -490,6 +491,16 @@ def run_brk_sotp(
         if price_change_window is not None
         else None
     )
+    operating_context = build_operating_business_context_table(
+        bundle,
+        reference,
+        period=period,
+        yahoo_client=yahoo,
+        enriched_holdings=enriched_holdings,
+    )
+    reverse_dcf = build_brk_operating_reverse_dcf_table(
+        operating_context, bundle.overview.market_snapshot
+    )
     sections = [
         (
             "Market-Implied SOTP Bridge",
@@ -500,17 +511,10 @@ def run_brk_sotp(
                 enriched_holdings=enriched_holdings,
             ),
         ),
-        (
-            "Operating Business Context",
-            build_operating_business_context_table(
-                bundle,
-                reference,
-                period=period,
-                yahoo_client=yahoo,
-                enriched_holdings=enriched_holdings,
-            ),
-        ),
+        ("Operating Business Context", operating_context),
     ]
+    if not reverse_dcf.empty:
+        sections.append(("Operating Business Reverse DCF", reverse_dcf))
     if details:
         liquidity_bridge = build_liquidity_bridge_table(bundle.liquidity.filings)
         sections[0:0] = [
