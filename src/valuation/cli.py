@@ -35,6 +35,7 @@ from valuation.company.ratios import (
     build_historical_ratios_table,
     build_historical_ratios_table_from_yahoo,
 )
+from valuation.watchlist import add_ticker, load_tickers, remove_ticker, watchlist_path
 from valuation.company.yahoo_statements import build_yahoo_statement_table
 from valuation.data.normalize.tables import (
     CORE_COMPANY_FILING_FORMS,
@@ -151,6 +152,20 @@ def build_parser() -> argparse.ArgumentParser:
     comps_parser.add_argument("tickers", nargs="+", help="Two or more tickers to compare.")
     comps_parser.add_argument("--outdir", default="outputs/tables")
     comps_parser.add_argument("--format", choices=("table", "json"), default="table")
+
+    watchlist_parser = subparsers.add_parser(
+        "watchlist",
+        help="Manage a persistent ticker watchlist and compare all tickers side-by-side.",
+    )
+    watchlist_sub = watchlist_parser.add_subparsers(dest="watchlist_command", required=True)
+    wl_add = watchlist_sub.add_parser("add", help="Add one or more tickers to the watchlist.")
+    wl_add.add_argument("tickers", nargs="+")
+    wl_remove = watchlist_sub.add_parser("remove", help="Remove one or more tickers from the watchlist.")
+    wl_remove.add_argument("tickers", nargs="+")
+    watchlist_sub.add_parser("list", help="Print the current watchlist.")
+    wl_show = watchlist_sub.add_parser("show", help="Run comps on all watchlist tickers.")
+    wl_show.add_argument("--outdir", default="outputs/tables")
+    wl_show.add_argument("--format", choices=("table", "json"), default="table")
 
     register_brk_parser(subparsers)
     return parser
@@ -411,6 +426,40 @@ def run_comps(tickers: list[str], outdir: str, output_format: str) -> int:
     return 0
 
 
+def run_watchlist(args: argparse.Namespace, outdir: str = "outputs/tables", output_format: str = "table") -> int:
+    """Manage the watchlist or run comps on all watchlist tickers."""
+    cmd = args.watchlist_command
+    if cmd == "add":
+        for t in args.tickers:
+            add_ticker(t)
+        tickers = load_tickers()
+        print(f"Watchlist ({len(tickers)}): {', '.join(tickers)}")
+        return 0
+    if cmd == "remove":
+        for t in args.tickers:
+            remove_ticker(t)
+        tickers = load_tickers()
+        print(f"Watchlist ({len(tickers)}): {', '.join(tickers) or '(empty)'}")
+        return 0
+    if cmd == "list":
+        tickers = load_tickers()
+        if not tickers:
+            print(f"Watchlist is empty. Add tickers with: ./vf watchlist add AAPL MSFT")
+            print(f"Stored at: {watchlist_path()}")
+        else:
+            print(f"Watchlist ({len(tickers)}):")
+            for t in tickers:
+                print(f"  {t}")
+        return 0
+    if cmd == "show":
+        tickers = load_tickers()
+        if not tickers:
+            print("Watchlist is empty. Add tickers with: ./vf watchlist add AAPL MSFT", file=sys.stderr)
+            return 1
+        return run_comps(tickers=tickers, outdir=outdir, output_format=output_format)
+    return 1
+
+
 def run_statements(
     identifier: str,
     identifier_kind: str,
@@ -609,6 +658,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 outdir=args.outdir,
                 output_format=args.format,
             )
+        if args.command == "watchlist":
+            outdir = getattr(args, "outdir", "outputs/tables")
+            output_format = getattr(args, "format", "table")
+            return run_watchlist(args, outdir=outdir, output_format=output_format)
         if args.command == "brk":
             return run_brk_command(args)
     except (LookupError, RuntimeError, ValueError) as exc:
