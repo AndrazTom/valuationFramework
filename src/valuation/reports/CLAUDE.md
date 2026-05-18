@@ -13,7 +13,7 @@ This package should stay thin and generic.
 - when period/history columns make a terminal table too wide, split them into repeated period blocks; Markdown/CSV/JSON should remain complete
 - keep security identity columns such as `issuer` readable on one terminal row where practical; wrapping them into continuation lines can look like extra rows
 - use display aliases for long field/metric labels when terminal readability is the only concern; do not rename backend columns just to shorten table output
-- BRK selected/reported/live 13F labels are display aliases only; backend fields stay explicit (`reported_13f_value_usd`, `selected_13f_value_usd`, `blended_13f_value_usd`, `live_value_delta_usd`)
+- BRK selected/reported/live 13F and public-equity tax labels are display aliases only; backend fields stay explicit (`reported_13f_value_usd`, `selected_13f_value_usd`, `blended_13f_value_usd`, `live_value_delta_usd`, `estimated_tax_usd`, `after_tax_selected_13f_value_usd`, `tax_as_pct_of_selected_13f`)
 - when adding a new `company` section, keep JSON bundle naming stable and make the section export alongside the table outputs
 - prefer small generic helpers over command-specific formatting branches
 - current export pattern is one `bundle.json` plus one file per section slug
@@ -33,6 +33,7 @@ This package should stay thin and generic.
 - `_multiple` column suffix → `Nx` format (e.g. `5.0x`)
 - `_yield` or `_pct` suffix → percent format
 - `_change_pct` / `_yoy_change_pct` suffix → signed percent (`+12.5%` / `-3.2%`)
+- `_rate`, `_rate_`, `_pct`, and `_pct_` field/name tokens → percent format for report context and sensitivity tables
 - `per_share_` prefix → currency format (respects `unit` column for non-USD)
 - `unit="USD"` row sentinel → currency for period columns
 - `unit="PCT"` row sentinel → percent for period columns

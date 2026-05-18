@@ -54,6 +54,8 @@ DISPLAY_COLUMN_ALIASES = {
     # Segment history and implied allocation
     "revenues_usd": "revenues",
     "capex_usd": "capex",
+    "after_tax_selected_13f_value_usd": "after-tax selected 13F",
+    "estimated_tax_usd": "estimated tax",
     "pretax_earnings_usd": "pre-tax earnings",
     "owner_earnings_usd": "owner earnings",
     "pretax_share_pct": "% of total",
@@ -68,6 +70,8 @@ DISPLAY_COLUMN_ALIASES = {
     "implied_brk_b_price_usd": "implied BRK.B price",
     "vs_current_price_pct": "vs current price",
     "scenario": "scenario",
+    "tax_as_pct_of_selected_13f": "tax / selected 13F",
+    "tax_rate": "tax rate",
     "cagr_pct": "CAGR",
 }
 
@@ -80,7 +84,7 @@ DISPLAY_VALUE_ALIASES = {
     "quoted_holdings_plus_net_cash": "13F + net cash/T-bills",
     "net_cash_and_treasury_bills": "net cash + T-bills",
     "fixed_maturity_securities_context": "fixed maturity (context)",
-    "deferred_tax_on_equity_context": "deferred tax on equities (context)",
+    "deferred_income_taxes_context": "deferred taxes (context)",
     "residual_operating_and_other": "residual opco + other",
     "deferred_income_taxes_usd": "deferred taxes",
     "equity_method_investments_usd": "equity method",
@@ -99,6 +103,7 @@ DISPLAY_VALUE_ALIASES = {
     "13f_live_coverage_pct": "13F live coverage",
     "13f_selected_basis": "13F basis",
     "13f_selected_value_usd": "13F selected value",
+    "after_tax_selected_13f_value_usd": "after-tax selected 13F",
     "blended_13f_value_usd": "13F blended value",
     "brk_b_last_price": "BRK.B last price",
     "brk_b_price_change_pct": "BRK.B change",
@@ -110,6 +115,7 @@ DISPLAY_VALUE_ALIASES = {
     "net_core_liquidity_usd": "net cash + T-bills",
     "positions_without_live_price": "without live price",
     "price_brk_b": "BRK.B price",
+    "reported_13f_value_usd": "13F reported value",
     "reported_value_resolved_usd": "reported resolved value",
     "resolved_holdings_weighted_change_pct": "holdings change",
     "residual_per_brk_b_usd": "residual / BRK.B",
@@ -127,6 +133,20 @@ DISPLAY_VALUE_ALIASES = {
     "selected_13f_value_usd": "selected 13F value",
     "equity_valuation_basis": "equity basis",
     "equity_live_pricing_limit": "live pricing limit",
+    "estimated_selected_13f_cost_basis_usd": "est. selected 13F cost",
+    "estimated_selected_13f_unrealized_gain_usd": "est. selected 13F gain",
+    "estimated_tax_usd": "estimated tax",
+    "equity_note_cost_basis_usd": "equity note cost",
+    "equity_note_fair_value_usd": "equity note fair value",
+    "equity_note_unrealized_gain_ratio": "equity note gain %",
+    "equity_note_unrealized_gain_usd": "equity note gain",
+    "federal_corporate_tax_rate": "federal corporate tax rate",
+    "investment_deferred_tax_liability_usd": "investment deferred tax",
+    "latest_effective_tax_rate": "latest effective tax rate",
+    "scaled_investment_deferred_tax_liability_usd": "scaled investment deferred tax",
+    "state_local_rate_net_federal_benefit": "state/local tax rate",
+    "tax_as_pct_of_selected_13f": "tax / selected 13F",
+    "tax_rate": "tax rate",
 }
 
 TERMINAL_SECONDARY_COLUMNS = [

@@ -270,3 +270,4 @@ def test_fetch_brk_valuation_bundle_assembles_inputs():
     assert bundle.holdings.filing_date == "2026-02-14"
     assert len(bundle.liquidity.filings) == 1
     assert len(bundle.segments.filings) == 1
+    assert bundle.tax_context is None

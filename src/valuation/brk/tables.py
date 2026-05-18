@@ -11,6 +11,7 @@ from valuation.brk.service import (
     Brk13FBundle,
     BrkLiquidityFiling,
     BrkSegmentFiling,
+    BrkTaxContextBundle,
     BrkValuationBundle,
 )
 from valuation.brk.service import BRK_A_TICKER, BRK_A_TO_B_CONVERSION, BRK_B_TICKER
@@ -21,6 +22,7 @@ from valuation.notation import MILLION
 from valuation.securities.pricing import enrich_holdings_with_market_prices, fetch_price_change_snapshot
 
 PUBLIC_EQUITY_VALUATION_BASES = ("reported", "live")
+BRK_FEDERAL_CORPORATE_TAX_RATE = 0.21
 
 BRK_FACT_DEFINITIONS: Sequence[CompanyFactQuery] = (
     CompanyFactQuery(
@@ -965,6 +967,128 @@ def build_public_equity_revaluation_detail_table(
     return selected.head(max(0, limit)).reset_index(drop=True)
 
 
+def build_public_equity_tax_context_table(
+    tax_context: BrkTaxContextBundle | None,
+    equity_portfolio: pd.DataFrame,
+) -> pd.DataFrame:
+    """Estimate embedded tax context for the selected public-equity value.
+
+    The filing note gives cost/fair value for Berkshire's equity securities in
+    aggregate, not cost basis for each 13F row. For live 13F values, scale that
+    aggregate cost ratio onto the selected 13F value and treat the result as an
+    approximation.
+    """
+    if tax_context is None:
+        return pd.DataFrame(columns=["field", "value"])
+    selected_value = _context_field_value(equity_portfolio, "selected_13f_value_usd")
+    reported_value = _context_field_value(equity_portfolio, "reported_13f_value_usd")
+    equity_note = _extract_equity_securities_tax_basis(tax_context.equity_securities)
+    deferred_note = _extract_deferred_tax_context(tax_context.deferred_income_taxes)
+    reconciliation = _extract_tax_reconciliation_rates(tax_context.income_tax_reconciliation)
+
+    fair_value = equity_note.get("fair_value_usd")
+    cost_basis = equity_note.get("cost_basis_usd")
+    unrealized_gain = equity_note.get("unrealized_gain_usd")
+    cost_ratio = _ratio(cost_basis, fair_value)
+    unrealized_gain_ratio = _ratio(unrealized_gain, fair_value)
+
+    estimated_cost_basis = None
+    estimated_unrealized_gain = None
+    if selected_value is not None and cost_ratio is not None:
+        estimated_cost_basis = selected_value * cost_ratio
+        estimated_unrealized_gain = max(0.0, selected_value - estimated_cost_basis)
+
+    investment_deferred_tax = deferred_note.get("investment_deferred_tax_liability_usd")
+    scaled_investment_deferred_tax = None
+    if investment_deferred_tax is not None and selected_value is not None and fair_value:
+        scaled_investment_deferred_tax = investment_deferred_tax * (selected_value / fair_value)
+
+    rows = [
+        {"field": "equity_note_filing_date", "value": tax_context.equity_filing_date},
+        {"field": "equity_note_accession", "value": tax_context.equity_accession_number},
+        {"field": "equity_note_fair_value_usd", "value": fair_value},
+        {"field": "equity_note_cost_basis_usd", "value": cost_basis},
+        {"field": "equity_note_unrealized_gain_usd", "value": unrealized_gain},
+        {"field": "equity_note_unrealized_gain_ratio", "value": unrealized_gain_ratio},
+        {"field": "selected_13f_value_usd", "value": selected_value},
+        {"field": "reported_13f_value_usd", "value": reported_value},
+        {"field": "estimated_selected_13f_cost_basis_usd", "value": estimated_cost_basis},
+        {"field": "estimated_selected_13f_unrealized_gain_usd", "value": estimated_unrealized_gain},
+        {"field": "federal_corporate_tax_rate", "value": BRK_FEDERAL_CORPORATE_TAX_RATE},
+        {
+            "field": "state_local_rate_net_federal_benefit",
+            "value": reconciliation.get("state_local_rate_net_federal_benefit"),
+        },
+        {"field": "latest_effective_tax_rate", "value": reconciliation.get("latest_effective_tax_rate")},
+        {"field": "tax_note_filing_date", "value": tax_context.tax_filing_date},
+        {"field": "tax_note_accession", "value": tax_context.tax_accession_number},
+        {"field": "investment_deferred_tax_liability_usd", "value": investment_deferred_tax},
+        {"field": "scaled_investment_deferred_tax_liability_usd", "value": scaled_investment_deferred_tax},
+        {
+            "field": "tax_context_note",
+            "value": "Estimated 13F cost basis scales Berkshire's aggregate equity-securities cost/fair-value ratio onto the selected 13F value; tax is a sensitivity, not a precise sale model",
+        },
+    ]
+    return pd.DataFrame(rows)
+
+
+def build_public_equity_tax_sensitivity_table(
+    tax_context_table: pd.DataFrame,
+) -> pd.DataFrame:
+    """Return after-tax selected 13F sensitivity rows from filing-derived tax context."""
+    if tax_context_table.empty:
+        return pd.DataFrame()
+    selected_value = _context_field_value(tax_context_table, "selected_13f_value_usd")
+    estimated_gain = _context_field_value(tax_context_table, "estimated_selected_13f_unrealized_gain_usd")
+    if selected_value is None or estimated_gain is None:
+        return pd.DataFrame()
+    rows = []
+
+    def add_rate_case(scenario: str, tax_rate: float | None, note: str) -> None:
+        if tax_rate is None:
+            return
+        tax = max(0.0, estimated_gain * tax_rate)
+        rows.append(
+            {
+                "scenario": scenario,
+                "tax_rate": tax_rate,
+                "estimated_tax_usd": tax,
+                "after_tax_selected_13f_value_usd": selected_value - tax,
+                "tax_as_pct_of_selected_13f": _ratio(tax, selected_value),
+                "note": note,
+            }
+        )
+
+    federal_rate = _context_field_value(tax_context_table, "federal_corporate_tax_rate")
+    state_rate = _context_field_value(tax_context_table, "state_local_rate_net_federal_benefit")
+    effective_rate = _context_field_value(tax_context_table, "latest_effective_tax_rate")
+    add_rate_case("federal_statutory", federal_rate, "21% U.S. federal C-corporation rate applied to estimated unrealized gain")
+    add_rate_case(
+        "federal_plus_state_local",
+        (federal_rate or 0.0) + state_rate if state_rate is not None else None,
+        "Federal statutory rate plus Berkshire's latest annual state/local reconciliation effect, net of federal benefit",
+    )
+    add_rate_case(
+        "latest_effective_tax_rate",
+        effective_rate,
+        "Latest annual company-wide effective tax rate; included for context, not a pure capital-gains rate",
+    )
+
+    scaled_dtl = _context_field_value(tax_context_table, "scaled_investment_deferred_tax_liability_usd")
+    if scaled_dtl is not None:
+        rows.append(
+            {
+                "scenario": "scaled_reported_investment_deferred_tax",
+                "tax_rate": _ratio(scaled_dtl, estimated_gain),
+                "estimated_tax_usd": scaled_dtl,
+                "after_tax_selected_13f_value_usd": selected_value - scaled_dtl,
+                "tax_as_pct_of_selected_13f": _ratio(scaled_dtl, selected_value),
+                "note": "Scales Berkshire's reported investment deferred-tax liability by selected 13F value / filing equity fair value",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def build_market_anchor_table(market_snapshot: dict) -> pd.DataFrame:
     """Return the market anchor for Berkshire valuation work."""
     market_cap = _market_cap_from_snapshot(market_snapshot)
@@ -1284,11 +1408,11 @@ def build_market_implied_sotp_bridge_table(
             "note": "Context only — included in residual above; insurance-reserve-backed bond portfolio, not freely deployable capital",
         },
         {
-            "metric": "deferred_tax_on_equity_context",
+            "metric": "deferred_income_taxes_context",
             "value_usd": deferred_tax,
             "per_brk_b_share_usd": _per_share_value(deferred_tax, share_count),
             "market_cap_weight": _ratio(deferred_tax, market_cap),
-            "note": "Context only — contingent tax liability on unrealized equity gains (~21% capital gains tax if portfolio sold); 13F values are pre-tax market prices, so after-tax realizable value is lower by roughly this amount",
+            "note": "Context only — latest balance-sheet deferred income tax liability; not deducted from the bridge unless the residual definition changes. Use the public-equity tax sensitivity table for an embedded-gain estimate on selected 13F holdings",
         },
     ]
     return pd.DataFrame(rows)
@@ -2089,6 +2213,85 @@ def normalize_public_equity_valuation_basis(value: str | None) -> str:
         allowed = ", ".join(PUBLIC_EQUITY_VALUATION_BASES)
         raise ValueError(f"Unsupported public equity valuation basis '{value}'. Use one of: {allowed}")
     return normalized
+
+
+def _extract_equity_securities_tax_basis(frame: pd.DataFrame) -> dict[str, float | None]:
+    return {
+        "cost_basis_usd": _first_report_value_for_label(frame, "Cost Basis"),
+        "unrealized_gain_usd": _first_report_value_for_label(frame, "Net Unrealized Gains"),
+        "fair_value_usd": _first_report_value_for_label(frame, "Fair Value"),
+    }
+
+
+def _extract_deferred_tax_context(frame: pd.DataFrame) -> dict[str, float | None]:
+    return {
+        "investment_deferred_tax_liability_usd": _first_report_value_for_label(
+            frame,
+            "Investments, including unrealized appreciation",
+        ),
+        "net_deferred_tax_liability_usd": _first_report_value_for_label(
+            frame,
+            "Net deferred income tax liability",
+        ),
+    }
+
+
+def _extract_tax_reconciliation_rates(frame: pd.DataFrame) -> dict[str, float | None]:
+    return {
+        "state_local_rate_net_federal_benefit": _first_report_percent_for_label(
+            frame,
+            "State and local income taxes, net of U.S. federal effect, percentage",
+        ),
+        "latest_effective_tax_rate": _first_report_percent_for_label(
+            frame,
+            "Effective income tax rate percentage",
+        ),
+    }
+
+
+def _first_report_value_for_label(frame: pd.DataFrame, label: str) -> float | None:
+    if frame.empty:
+        return None
+    label_values = frame.iloc[:, 0].astype(str).str.strip()
+    matches = frame[label_values == label]
+    if matches.empty:
+        return None
+    for idx in range(1, len(frame.columns)):
+        value = _parse_balance_sheet_value(matches.iloc[0, idx])
+        if value is not None:
+            return value
+    return None
+
+
+def _first_report_percent_for_label(frame: pd.DataFrame, label: str) -> float | None:
+    if frame.empty:
+        return None
+    label_values = frame.iloc[:, 0].astype(str).str.strip()
+    matches = frame[label_values == label]
+    if matches.empty:
+        return None
+    for idx in range(1, len(frame.columns)):
+        value = _parse_percent(matches.iloc[0, idx])
+        if value is not None:
+            return value
+    return None
+
+
+def _parse_percent(value: object) -> float | None:
+    if value is None or pd.isna(value):
+        return None
+    text = str(value).replace("\xa0", " ").strip()
+    if not text:
+        return None
+    negative = text.startswith("(") and text.endswith(")")
+    cleaned = text.replace("%", "").replace(",", "").replace("(", "").replace(")", "").strip()
+    if cleaned in {"", "NaN", "nan"}:
+        return None
+    try:
+        numeric = float(cleaned) / 100.0
+    except ValueError:
+        return None
+    return -numeric if negative else numeric
 
 
 def _public_equity_note(metrics: dict[str, object]) -> str:

@@ -9,6 +9,7 @@ from valuation.brk.service import (
     BrkOverviewBundle,
     BrkSegmentFiling,
     BrkSegmentsBundle,
+    BrkTaxContextBundle,
     BrkValuationBundle,
 )
 from valuation.brk.segments import BrkSegmentReportSet
@@ -32,6 +33,8 @@ from valuation.brk.tables import (
     build_market_anchor_table,
     build_public_equity_portfolio_summary_table,
     build_public_equity_revaluation_detail_table,
+    build_public_equity_tax_context_table,
+    build_public_equity_tax_sensitivity_table,
     build_brk_operating_reverse_dcf_table,
     build_operating_business_context_table,
     build_top_level_operating_segments_summary_table,
@@ -981,7 +984,7 @@ def test_build_market_implied_sotp_bridge_table():
     # fixed maturity appears as a context row, not subtracted
     assert bridge[bridge["metric"] == "fixed_maturity_securities_context"].iloc[0]["value_usd"] == pytest.approx(50.0 * M)
     # deferred tax row is absent when balance sheet has no deferred tax entry
-    assert bridge[bridge["metric"] == "deferred_tax_on_equity_context"]["value_usd"].isna().all()
+    assert bridge[bridge["metric"] == "deferred_income_taxes_context"]["value_usd"].isna().all()
 
 
 def test_build_market_implied_sotp_bridge_table_can_use_reported_13f_value():
@@ -1096,8 +1099,68 @@ def test_build_public_equity_revaluation_detail_table_shows_live_replacements():
     assert detail.iloc[0]["live_value_delta_pct"] == pytest.approx(-0.6)
 
 
+def test_build_public_equity_tax_context_and_sensitivity_table():
+    tax_context = BrkTaxContextBundle(
+        company=None,
+        equity_filing_date="2026-05-04",
+        equity_accession_number="0001",
+        equity_securities=pd.DataFrame(
+            [
+                ["Summary of Investment Holdings [Line Items]", "", ""],
+                ["Cost Basis", "80", "70"],
+                ["Net Unrealized Gains", "220", "180"],
+                ["Fair Value", "300", "250"],
+            ],
+            columns=["Investments in equity securities (Detail) - USD ($) $ in Millions", "Mar. 31, 2026", "Dec. 31, 2025"],
+        ),
+        tax_filing_date="2026-03-02",
+        tax_accession_number="0002",
+        deferred_income_taxes=pd.DataFrame(
+            [
+                ["Deferred income tax liabilities:", "", ""],
+                ["Investments, including unrealized appreciation", "50", "45"],
+                ["Net deferred income tax liability", "85", "80"],
+            ],
+            columns=["Income taxes - Deferred income taxes (Detail) - USD ($) $ in Millions", "Dec. 31, 2025", "Dec. 31, 2024"],
+        ),
+        income_tax_reconciliation=pd.DataFrame(
+            [
+                ["Income tax expense reconciliation, percentage", "", ""],
+                ["State and local income taxes, net of U.S. federal effect, percentage", "0.90%", "0.50%"],
+                ["Effective income tax rate percentage", "18.40%", "18.90%"],
+            ],
+            columns=["Income taxes - Income tax expense (benefit) reconciliation (Detail) - USD ($) $ in Millions", "12 Months Ended Dec. 31, 2025", "12 Months Ended Dec. 31, 2024"],
+        ),
+    )
+    equity_portfolio = pd.DataFrame(
+        [
+            {"field": "reported_13f_value_usd", "value": 250.0 * M},
+            {"field": "selected_13f_value_usd", "value": 330.0 * M},
+        ]
+    )
+
+    context = build_public_equity_tax_context_table(tax_context, equity_portfolio)
+    values = dict(zip(context["field"], context["value"]))
+    assert values["equity_note_fair_value_usd"] == 300.0 * M
+    assert values["equity_note_cost_basis_usd"] == 80.0 * M
+    assert values["estimated_selected_13f_cost_basis_usd"] == pytest.approx(88.0 * M)
+    assert values["estimated_selected_13f_unrealized_gain_usd"] == pytest.approx(242.0 * M)
+    assert values["state_local_rate_net_federal_benefit"] == pytest.approx(0.009)
+    assert values["latest_effective_tax_rate"] == pytest.approx(0.184)
+    assert values["scaled_investment_deferred_tax_liability_usd"] == pytest.approx(55.0 * M)
+
+    sensitivity = build_public_equity_tax_sensitivity_table(context)
+    scenarios = set(sensitivity["scenario"])
+    assert "federal_statutory" in scenarios
+    assert "federal_plus_state_local" in scenarios
+    assert "scaled_reported_investment_deferred_tax" in scenarios
+    federal = sensitivity[sensitivity["scenario"] == "federal_statutory"].iloc[0]
+    assert federal["tax_rate"] == pytest.approx(0.21)
+    assert federal["estimated_tax_usd"] == pytest.approx(50.82 * M)
+
+
 def test_build_market_implied_sotp_bridge_table_deferred_tax_context():
-    """Deferred tax on equity shows as a context row when present in the balance sheet."""
+    """Deferred income taxes show as a context row when present in the balance sheet."""
     reference = pd.DataFrame([{"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"}])
     bundle = BrkValuationBundle(
         overview=BrkOverviewBundle(
@@ -1144,7 +1207,7 @@ def test_build_market_implied_sotp_bridge_table_deferred_tax_context():
     )
 
     bridge = build_market_implied_sotp_bridge_table(bundle, reference, yahoo_client=FakeYahooClient())
-    deferred_row = bridge[bridge["metric"] == "deferred_tax_on_equity_context"]
+    deferred_row = bridge[bridge["metric"] == "deferred_income_taxes_context"]
     assert not deferred_row.empty
     assert deferred_row.iloc[0]["value_usd"] == pytest.approx(35.0 * M)
 

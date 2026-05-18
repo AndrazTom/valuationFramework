@@ -79,7 +79,13 @@ def _infer_format_kind(column: str, row: pd.Series) -> Optional[str]:
         "two_hundred_day_average",
     }:
         return "currency"
-    if column_name in {"coverage_ratio"} or column_name.endswith("_pct"):
+    if (
+        column_name in {"coverage_ratio"}
+        or column_name.endswith("_pct")
+        or "_pct_" in column_name
+        or column_name.endswith("_rate")
+        or "_rate_" in column_name
+    ):
         return "percent"
     if column_name in {"assumed_return", "implied_growth"}:
         return "percent"
@@ -132,7 +138,13 @@ def _infer_kind_from_field(field_name: str) -> Optional[str]:
     normalized_field = field_name.strip().lower().replace(" ", "_").replace("-", "_")
     if normalized_field in _VALUATION_RATIO_FIELDS:
         return "multiple"
-    if normalized_field.endswith("_pct") or normalized_field.endswith("_ratio"):
+    if (
+        normalized_field.endswith("_pct")
+        or "_pct_" in normalized_field
+        or normalized_field.endswith("_ratio")
+        or normalized_field.endswith("_rate")
+        or "_rate_" in normalized_field
+    ):
         return "percent"
     if normalized_field.endswith("_yield") or normalized_field.endswith("_margin"):
         return "percent"

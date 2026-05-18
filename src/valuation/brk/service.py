@@ -17,6 +17,9 @@ BRK_B_TICKER = "BRK-B"
 BRK_A_TICKER = "BRK-A"
 BRK_A_TO_B_CONVERSION = 1500
 BALANCE_SHEET_REPORT_SHORT_NAME = "Consolidated Balance Sheets"
+EQUITY_SECURITIES_REPORT_SHORT_NAME = "Investments in equity securities (Detail)"
+DEFERRED_INCOME_TAXES_REPORT_SHORT_NAME = "Income taxes - Deferred income taxes (Detail)"
+INCOME_TAX_RECONCILIATION_REPORT_SHORT_NAME = "Income taxes - Income tax expense (benefit) reconciliation (Detail)"
 SEGMENT_REVENUES_REPORT_SHORT_NAME = "Business segment data - Revenues (Detail)"
 SEGMENT_PRETAX_REPORT_SHORT_NAME = "Business segment data - Earnings before income taxes (Detail)"
 
@@ -88,6 +91,20 @@ class BrkSegmentsBundle:
 
 
 @dataclass
+class BrkTaxContextBundle:
+    """Berkshire filing tables needed for public-equity tax context."""
+
+    company: SecCompany
+    equity_filing_date: str | None
+    equity_accession_number: str | None
+    equity_securities: pd.DataFrame
+    tax_filing_date: str | None
+    tax_accession_number: str | None
+    deferred_income_taxes: pd.DataFrame
+    income_tax_reconciliation: pd.DataFrame
+
+
+@dataclass
 class BrkValuationBundle:
     """Core Berkshire inputs for a first transparent SOTP bridge."""
 
@@ -95,6 +112,7 @@ class BrkValuationBundle:
     holdings: Brk13FBundle
     liquidity: BrkLiquidityBundle
     segments: BrkSegmentsBundle
+    tax_context: BrkTaxContextBundle | None = None
 
 
 def fetch_brk_overview(
@@ -204,6 +222,57 @@ def fetch_brk_13f_history(
     return Brk13FHistoryBundle(
         company=company,
         filings=[_fetch_brk_13f_filing(sec, company, filing) for filing in filings],
+    )
+
+
+def fetch_brk_tax_context(sec_client: Optional[SecClient] = None) -> BrkTaxContextBundle:
+    """Fetch filing note tables used to estimate embedded public-equity tax context."""
+    sec = sec_client or SecClient()
+    company_bundle = sec.fetch_company_bundle(BRK_B_TICKER)
+    company = company_bundle["company"]
+    submissions = company_bundle["submissions"]
+
+    latest_filing = find_recent_filings(submissions, forms=("10-K", "10-Q"), limit=1)[0]
+    latest_reports = sec.fetch_filing_summary_reports(company.cik, latest_filing["accession_number"])
+    equity_report = _find_report(latest_reports, EQUITY_SECURITIES_REPORT_SHORT_NAME)
+    equity_securities = sec.fetch_report_table(
+        company.cik,
+        latest_filing["accession_number"],
+        equity_report.html_file_name,
+    )
+
+    annual_filing = find_recent_filings(submissions, forms=("10-K",), limit=1)[0]
+    annual_reports = sec.fetch_filing_summary_reports(company.cik, annual_filing["accession_number"])
+    deferred_income_taxes = pd.DataFrame()
+    income_tax_reconciliation = pd.DataFrame()
+    try:
+        deferred_report = _find_report(annual_reports, DEFERRED_INCOME_TAXES_REPORT_SHORT_NAME)
+        deferred_income_taxes = sec.fetch_report_table(
+            company.cik,
+            annual_filing["accession_number"],
+            deferred_report.html_file_name,
+        )
+    except LookupError:
+        pass
+    try:
+        reconciliation_report = _find_report(annual_reports, INCOME_TAX_RECONCILIATION_REPORT_SHORT_NAME)
+        income_tax_reconciliation = sec.fetch_report_table(
+            company.cik,
+            annual_filing["accession_number"],
+            reconciliation_report.html_file_name,
+        )
+    except LookupError:
+        pass
+
+    return BrkTaxContextBundle(
+        company=company,
+        equity_filing_date=latest_filing.get("filing_date"),
+        equity_accession_number=latest_filing.get("accession_number"),
+        equity_securities=equity_securities,
+        tax_filing_date=annual_filing.get("filing_date"),
+        tax_accession_number=annual_filing.get("accession_number"),
+        deferred_income_taxes=deferred_income_taxes,
+        income_tax_reconciliation=income_tax_reconciliation,
     )
 
 
@@ -322,6 +391,7 @@ def fetch_brk_valuation_bundle(
     *,
     period: str = "annual",
     segment_limit: int = 1,
+    include_tax_context: bool = False,
 ) -> BrkValuationBundle:
     """Fetch the current Berkshire inputs needed for a first SOTP bridge."""
     sec = sec_client or SecClient()
@@ -331,6 +401,7 @@ def fetch_brk_valuation_bundle(
         holdings=fetch_latest_brk_13f(sec_client=sec),
         liquidity=fetch_brk_liquidity(sec_client=sec, period="latest", limit=1),
         segments=fetch_brk_segments(sec_client=sec, period=period, limit=segment_limit),
+        tax_context=fetch_brk_tax_context(sec_client=sec) if include_tax_context else None,
     )
 
 

@@ -42,6 +42,8 @@ from valuation.brk.tables import (
     build_opco_valuation_sensitivity_table,
     build_public_equity_portfolio_summary_table,
     build_public_equity_revaluation_detail_table,
+    build_public_equity_tax_context_table,
+    build_public_equity_tax_sensitivity_table,
     build_segment_earnings_history_table,
     build_segment_implied_allocation_table,
     build_segment_owner_earnings_history_table,
@@ -718,7 +720,12 @@ def run_brk_valuation_report(
     equity_valuation_basis = normalize_public_equity_valuation_basis(equity_valuation_basis)
     live_pricing_limit = equity_live_limit if equity_valuation_basis == "live" else None
     yahoo = YahooFinanceClient()
-    bundle = fetch_brk_valuation_bundle(period=period, yahoo_client=yahoo, segment_limit=segment_filings)
+    bundle = fetch_brk_valuation_bundle(
+        period=period,
+        yahoo_client=yahoo,
+        segment_limit=segment_filings,
+        include_tax_context=True,
+    )
     reference = build_brk_security_reference()
     enriched_holdings = None
     if equity_valuation_basis == "live":
@@ -797,7 +804,7 @@ def run_brk_valuation_report(
     # Deferred tax figure for methodology notes — pull from SOTP bridge context row.
     deferred_tax_raw = None
     if not sotp_bridge.empty:
-        dt_rows = sotp_bridge[sotp_bridge["metric"] == "deferred_tax_on_equity_context"]
+        dt_rows = sotp_bridge[sotp_bridge["metric"] == "deferred_income_taxes_context"]
         if not dt_rows.empty:
             v = dt_rows.iloc[0].get("value_usd")
             if v is not None and str(v) not in {"nan", "None", ""}:
@@ -829,6 +836,11 @@ def run_brk_valuation_report(
         max_live_holdings=live_pricing_limit,
         limit=20,
     )
+    equity_tax_context = build_public_equity_tax_context_table(
+        getattr(bundle, "tax_context", None),
+        equity_portfolio,
+    )
+    equity_tax_sensitivity = build_public_equity_tax_sensitivity_table(equity_tax_context)
     support_md = [
         ("Market Anchor", build_market_anchor_table(bundle.overview.market_snapshot)),
         ("Public Equity Portfolio", equity_portfolio),
@@ -837,6 +849,10 @@ def run_brk_valuation_report(
     ]
     if not equity_revaluation_detail.empty:
         support_md.insert(2, ("Equity Revaluation Detail", equity_revaluation_detail))
+    if not equity_tax_context.empty:
+        support_md.append(("Public Equity Tax Context", equity_tax_context))
+    if not equity_tax_sensitivity.empty:
+        support_md.append(("Public Equity Tax Sensitivity", equity_tax_sensitivity))
 
     segment_md = build_segment_period_sections(bundle.segments.filings, period=period)
     segment_history_md: list[tuple[str, "pd.DataFrame"]] = []
@@ -934,11 +950,14 @@ def run_brk_valuation_report(
         " an interest-free funding source. Do not subtract float at face value if you are"
         " also valuing the investment portfolio at market — the portfolio already reflects"
         " float-funded investments.",
-        f"- **Deferred tax on unrealized equity gains ({deferred_tax_note} per latest balance sheet).**"
-        " The 13F portfolio is valued at current market prices (pre-tax). A sale of the"
-        " entire equity portfolio would trigger capital-gains tax on the embedded gain. A"
-        " conservative view haircuts the 13F value by roughly (unrealized gain × 21%) to"
-        " reach an after-tax net value. This context row is also shown in the SOTP bridge.",
+        f"- **Deferred income-tax context ({deferred_tax_note} per latest balance sheet).**"
+        " The balance-sheet liability is broad context and is not deducted again from"
+        " the bridge. For public equities specifically, the 13F portfolio is valued at"
+        " current market prices (pre-tax), and tax applies to unrealized gain, not gross"
+        " portfolio value. The tax sensitivity uses Berkshire's equity-securities"
+        " cost/fair-value note to approximate embedded gain in the selected 13F value,"
+        " then applies simple rate scenarios. Treat it as a stress test, not an exact"
+        " liquidation model.",
         "- **Subsidiary debt is not separately deducted.** BNSF (~$24B) and BHE (~$40B+)"
         " carry their own debt. Since we value the operating businesses via the market-implied"
         " residual, subsidiary debt is already reflected in how the market prices those"

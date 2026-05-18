@@ -667,6 +667,8 @@ def test_brk_sotp_cli_writes_expected_sections(monkeypatch, tmp_path: Path):
         "build_public_equity_revaluation_detail_table",
         lambda holdings, reference, yahoo_client=None, enriched_holdings=None, **kwargs: pd.DataFrame(),
     )
+    monkeypatch.setattr(brk_cli, "build_public_equity_tax_context_table", lambda tax_context, equity_portfolio: pd.DataFrame())
+    monkeypatch.setattr(brk_cli, "build_public_equity_tax_sensitivity_table", lambda tax_context_table: pd.DataFrame())
     monkeypatch.setattr(
         brk_cli,
         "build_13f_live_price_summary_table",
@@ -761,7 +763,7 @@ def test_brk_valuation_report_cli_writes_markdown_file(monkeypatch, tmp_path: Pa
     monkeypatch.setattr(
         brk_cli,
         "fetch_brk_valuation_bundle",
-        lambda period="annual", yahoo_client=None, segment_limit=4: type(
+        lambda period="annual", yahoo_client=None, segment_limit=4, include_tax_context=False: type(
             "Bundle",
             (),
             {
@@ -769,6 +771,7 @@ def test_brk_valuation_report_cli_writes_markdown_file(monkeypatch, tmp_path: Pa
                 "holdings": type("Holdings", (), {"holdings": pd.DataFrame(), "filing_date": None, "accession_number": None})(),
                 "liquidity": type("Liquidity", (), {"filings": []})(),
                 "segments": type("Segments", (), {"filings": []})(),
+                "tax_context": None,
             },
         )(),
     )
@@ -780,6 +783,8 @@ def test_brk_valuation_report_cli_writes_markdown_file(monkeypatch, tmp_path: Pa
     monkeypatch.setattr(brk_cli, "build_market_implied_sotp_bridge_table", lambda bundle, reference, yahoo_client=None, enriched_holdings=None, **kwargs: empty_df)
     monkeypatch.setattr(brk_cli, "build_public_equity_portfolio_summary_table", lambda holdings, reference, yahoo_client=None, enriched_holdings=None, **kwargs: empty_df)
     monkeypatch.setattr(brk_cli, "build_public_equity_revaluation_detail_table", lambda holdings, reference, yahoo_client=None, enriched_holdings=None, **kwargs: empty_df)
+    monkeypatch.setattr(brk_cli, "build_public_equity_tax_context_table", lambda tax_context, equity_portfolio: empty_df)
+    monkeypatch.setattr(brk_cli, "build_public_equity_tax_sensitivity_table", lambda tax_context_table: empty_df)
     monkeypatch.setattr(brk_cli, "build_operating_business_context_table", lambda bundle, reference, period="annual", yahoo_client=None, enriched_holdings=None, **kwargs: empty_df)
     monkeypatch.setattr(brk_cli, "build_brk_operating_reverse_dcf_table", lambda context, market_snapshot: empty_df)
     monkeypatch.setattr(brk_cli, "build_brk_valuation_summary_table", lambda market_snapshot, sotp_bridge, operating_context, reverse_dcf, equity_portfolio: empty_df)

@@ -11,7 +11,7 @@ Rules:
 - when adding a new `company` section, test both file outputs and JSON bundle keys
 - CLI tests should stay offline and use monkeypatches or fixtures rather than live providers
 - keep assertions focused on backend behavior and stable contracts, not incidental table formatting
-- current full-suite baseline after BRK public-equity report-hardening work: `288 passed`
+- current full-suite baseline after BRK public-equity tax-sensitivity work: `289 passed`
 
 Coverage map:
 
@@ -26,5 +26,5 @@ Coverage map:
 - `test_cli.py` covers section wiring and output artifacts
 - `test_security_pricing.py` covers reusable price-change enrichment and graceful degradation on quote/history failures
 - `test_security_pricing.py` also covers bounded live quote enrichment via `max_holdings`
-- `test_brk_tables.py` covers reported vs live selected 13F equity values and live revaluation detail rows for the BRK SOTP/report tables
+- `test_brk_tables.py` covers reported vs live selected 13F equity values, live revaluation detail rows, and public-equity tax context/sensitivity tables for the BRK SOTP/report tables
 - `test_yahoo_provider.py` covers Yahoo provider fallbacks when fast-info or history calls fail

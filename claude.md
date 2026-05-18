@@ -17,10 +17,10 @@ Project posture:
 Current branch priority:
 
 - `brk` is the Berkshire-specific proving ground layered on top of the generic base from `main`
-- as of 2026-05-18, `brk` is mature; all prior hardening complete (liquidity, segments, SOTP, holdings history, price windows, diagnostics, valuation tables, valuation report)
+- as of 2026-05-18, `brk` is mature; all prior hardening complete (liquidity, segments, SOTP, holdings history, price windows, diagnostics, valuation tables, valuation report, public-equity tax sensitivity)
 - 2026-05-18 live QA sweep passed for `./vf brk holdings --history --filings-limit 2 --limit 10`, `./vf brk sotp --details`, and `./vf brk sotp --price-change 1M`
-- `./vf brk valuation-report` now functional: self-contained Markdown artifact, findings-first order, terminal key-numbers preview, dynamic methodology notes, `--segment-filings`, and selectable public-equity basis (`--equity-valuation-basis reported|live`)
-- 288 tests passing as of 2026-05-18
+- `./vf brk valuation-report` now functional: self-contained Markdown artifact, findings-first order, terminal key-numbers preview, dynamic methodology notes, `--segment-filings`, selectable public-equity basis (`--equity-valuation-basis reported|live`), and public-equity tax context/sensitivity
+- 289 tests passing as of 2026-05-18
 - temporary hardening branches should be merged back quickly, then deleted
 
 Long-term direction:
@@ -62,6 +62,7 @@ Long-term direction:
 - Yahoo price snapshots persist under `~/.cache/valuationFramework/yahoo/snapshots` for 1h
 - Yahoo history frames persist under `~/.cache/valuationFramework/yahoo/history` for 24h
 - live holding quote enrichment fetches Yahoo quotes in parallel and can be bounded to the top N holdings; BRK SOTP and valuation report default to live revaluation for all mapped holdings unless `--equity-live-limit N` is supplied
+- BRK valuation report public-equity tax sensitivity uses Berkshire filing-note cost/fair-value data to estimate embedded gain in the selected 13F value; tax applies to unrealized gain, not gross portfolio value, and remains context unless the SOTP residual definition changes
 - use `./vf --refresh-cache ...` to force provider refresh for one run
 
 ## Current Architecture
@@ -157,6 +158,7 @@ Keep `main` generic. Do not leak Berkshire assumptions into generic modules.
 
 - latest 13F holdings with live-price revaluation and price-change windows
 - BRK valuation report can keep the old reported-13F equity value or use a bounded current-price estimate from shares × quote for top holdings
+- BRK valuation report includes public-equity tax context/sensitivity using federal statutory, federal + state/local, effective-rate, and scaled reported investment deferred-tax cases
 - 13F holdings history across recent filings with portfolio-level change summaries
 - liquidity bridge from filing balance-sheet tables
 - operating segment history

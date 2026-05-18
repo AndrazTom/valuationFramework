@@ -42,6 +42,8 @@ Berkshire-specific commands:
 - `build_holdings_vs_brk_price_change_table` — BRK-B price vs holdings weighted return
 - `build_public_equity_portfolio_summary_table` — reported 13F value, selected 13F value, and optional live-price coverage
 - `build_public_equity_revaluation_detail_table` — live-priced holdings detail: reported value, live value, delta, shares, quote/date
+- `build_public_equity_tax_context_table` — filing-derived equity-securities cost/fair-value context and selected-13F embedded-gain estimate
+- `build_public_equity_tax_sensitivity_table` — after-tax selected-13F sensitivity using federal statutory, federal + state/local, effective-rate, and scaled reported investment DTL cases
 
 **Liquidity and balance sheet:**
 - `build_liquidity_bridge_table` — multi-filing liquidity bridge from balance-sheet tables
@@ -75,7 +77,7 @@ Produces a self-contained Markdown artifact. Section order (findings-first):
 2. **Market-Implied SOTP Bridge** — market cap − selected 13F value − net cash/T-bills = residual
 3. **Operating Business Context** — residual vs segment earnings
 4. **Operating Business Reverse DCF** — implied growth scenarios (when positive earnings)
-5. **Supporting Detail** — market anchor, public-equity portfolio, equity revaluation detail, cash/T-bills and fixed maturity context, balance-sheet context
+5. **Supporting Detail** — market anchor, public-equity portfolio, equity revaluation detail, cash/T-bills and fixed maturity context, balance-sheet context, public-equity tax context/sensitivity
 6. **Segment History** — one section per period fetched plus history pivots
 7. **Methodology Notes** — assumptions table, dynamic fixed-maturity figure, float explanation, deferred tax haircut, debt distinction
 
@@ -85,6 +87,7 @@ Produces a self-contained Markdown artifact. Section order (findings-first):
 `--equity-valuation-basis reported` keeps the old report behavior: public equities equal latest reported 13F values from the filing.
 The report methodology explicitly states the live formula: reported total minus reported value of live-priced holdings plus `shares held × current price`; it keeps both reported and selected 13F values in the key summary and public-equity portfolio tables.
 Fixed maturities should be framed as insurance investment-portfolio context, not deployable liquidity. The SOTP bridge subtracts only cash + T-bills - T-bill purchase payable as core liquidity; fixed maturities remain inside the residual with insurance businesses and other non-13F items.
+Public-equity tax sensitivity is included in the full valuation report only. It fetches Berkshire's equity-securities note from the latest 10-K/10-Q and deferred-tax / tax-reconciliation notes from the latest 10-K. The selected 13F cost basis is estimated by scaling Berkshire's aggregate equity-securities cost/fair-value ratio onto the selected 13F value. Tax is applied to estimated unrealized gain, not gross portfolio value; this is a sensitivity/stress test, not an exact liquidation model.
 Accession numbers included in report header for 13F and liquidity filings.
 
 ## BRK EPS/Share Filing Fallback (`brk/statements.py`)
@@ -102,13 +105,16 @@ This fallback runs only for BRK income statements; generic SEC companyfacts path
 
 ## Deferred Tax Context
 
-The SOTP bridge shows deferred tax on equities as a context row when the filing balance sheet exposes a deferred income tax liability. Selling the equity portfolio triggers ~21% capital gains tax, so the 13F value is pre-tax and not the same as fully realizable after-tax value. The context row is not deducted from the bridge unless the residual definition is changed.
+The SOTP bridge shows balance-sheet deferred income taxes as a context row when the filing balance sheet exposes it. This broad liability is not deducted from the bridge unless the residual definition changes.
+
+For public equities, use the valuation-report tax context/sensitivity tables instead of the broad balance-sheet deferred-tax row. Selling appreciated equities would tax unrealized gain rather than gross market value; the report approximates embedded gain from Berkshire's equity-securities cost/fair-value filing note and keeps federal statutory, federal + state/local, effective-rate, and scaled reported investment-DTL scenarios side by side.
 
 ## Rules
 
 - prefer explicit bridge tables over opaque model outputs
 - separate reported values from live-revalued values
 - keep BRK SOTP and valuation report default on live current-price equity estimation for all mapped holdings; use `--equity-valuation-basis reported` for old filing-date 13F values
+- keep public-equity tax as report context/sensitivity unless the user explicitly changes the SOTP residual definition; do not silently subtract it from selected 13F value
 - keep `BRK.B` as the default share unit unless the user changes that
 - keep Berkshire-specific logic in this subtree rather than leaking it into generic modules
 - for liquidity / fixed maturities:
