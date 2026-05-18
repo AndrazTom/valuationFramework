@@ -20,6 +20,8 @@ from valuation.brk.holdings import aggregate_13f_holdings
 from valuation.notation import MILLION
 from valuation.securities.pricing import enrich_holdings_with_market_prices, fetch_price_change_snapshot
 
+PUBLIC_EQUITY_VALUATION_BASES = ("reported", "live")
+
 BRK_FACT_DEFINITIONS: Sequence[CompanyFactQuery] = (
     CompanyFactQuery(
         "cash_and_equivalents",
@@ -869,41 +871,42 @@ def build_public_equity_portfolio_summary_table(
     *,
     yahoo_client=None,
     enriched_holdings: pd.DataFrame | None = None,
+    equity_valuation_basis: str = "live",
+    max_live_holdings: int | None = None,
 ) -> pd.DataFrame:
     """Summarize Berkshire's latest public-equity block for valuation work."""
     if holdings.empty:
         return pd.DataFrame(columns=["field", "value"])
-    enriched = _enriched_holdings_frame(
+    holdings_metrics = _live_holdings_metrics(
         holdings,
         reference,
         yahoo_client=yahoo_client,
         enriched_holdings=enriched_holdings,
+        equity_valuation_basis=equity_valuation_basis,
+        max_live_holdings=max_live_holdings,
     )
-    resolved = enriched["market_value_live_usd"].notna()
-    reported_total = enriched["value_usd"].dropna().sum()
-    live_resolved = enriched.loc[resolved, "market_value_live_usd"].dropna().sum()
-    unresolved_reported = enriched.loc[~resolved, "value_usd"].dropna().sum()
-    blended_value = _sum_defined(live_resolved, unresolved_reported)
-    latest_price_date = None
-    if "latest_price_date" in enriched.columns:
-        dates = [value for value in enriched["latest_price_date"].dropna().tolist() if value]
-        if dates:
-            latest_price_date = max(dates)
+    reported_total = holdings_metrics["reported_value_usd"]
+    live_resolved = holdings_metrics["live_value_usd"]
+    unresolved_reported = holdings_metrics["unresolved_reported_value_usd"]
+    blended_value = holdings_metrics["blended_value_usd"]
     rows = [
         {"field": "reported_13f_value_usd", "value": reported_total},
         {"field": "live_resolved_13f_value_usd", "value": live_resolved},
         {"field": "unresolved_13f_value_reported_usd", "value": unresolved_reported},
         {"field": "blended_13f_value_usd", "value": blended_value},
+        {"field": "selected_13f_value_usd", "value": holdings_metrics["selected_value_usd"]},
+        {"field": "selected_13f_basis", "value": holdings_metrics["selected_basis"]},
         {
             "field": "live_price_coverage_pct",
-            "value": (live_resolved / reported_total) if reported_total else None,
+            "value": holdings_metrics["coverage_ratio"],
         },
-        {"field": "positions_total", "value": int(len(enriched))},
-        {"field": "positions_live_priced", "value": int(resolved.sum())},
-        {"field": "positions_unresolved", "value": int((~resolved).sum())},
-        {"field": "latest_price_date", "value": latest_price_date},
+        {"field": "positions_total", "value": holdings_metrics["positions_total"]},
+        {"field": "positions_live_priced", "value": holdings_metrics["resolved_positions"]},
+        {"field": "positions_unresolved", "value": holdings_metrics["unresolved_positions"]},
+        {"field": "live_pricing_limit", "value": holdings_metrics["live_pricing_limit"]},
+        {"field": "latest_price_date", "value": holdings_metrics["latest_price_date"]},
     ]
-    if int(resolved.sum()) == 0:
+    if holdings_metrics["resolved_positions"] == 0 and holdings_metrics["selected_basis"] != "reported_13f":
         rows.append(
             {
                 "field": "live_price_status",
@@ -911,6 +914,55 @@ def build_public_equity_portfolio_summary_table(
             }
         )
     return pd.DataFrame(rows)
+
+
+def build_public_equity_revaluation_detail_table(
+    holdings: pd.DataFrame,
+    reference: pd.DataFrame,
+    *,
+    yahoo_client=None,
+    enriched_holdings: pd.DataFrame | None = None,
+    equity_valuation_basis: str = "live",
+    max_live_holdings: int | None = None,
+    limit: int = 20,
+) -> pd.DataFrame:
+    """Show which 13F holdings were replaced with live share-count based values."""
+    if holdings.empty or normalize_public_equity_valuation_basis(equity_valuation_basis) != "live":
+        return pd.DataFrame()
+    enriched = _enriched_holdings_frame(
+        holdings,
+        reference,
+        yahoo_client=yahoo_client,
+        enriched_holdings=enriched_holdings,
+        max_live_holdings=max_live_holdings,
+    )
+    if enriched.empty or "market_value_live_usd" not in enriched.columns:
+        return pd.DataFrame()
+    detail = enriched[
+        enriched["market_value_live_usd"].notna() & enriched["value_usd"].notna()
+    ].copy()
+    if detail.empty:
+        return pd.DataFrame()
+    detail["live_value_delta_usd"] = detail["market_value_live_usd"] - detail["value_usd"]
+    detail["live_value_delta_pct"] = detail.apply(
+        lambda row: _ratio(row.get("live_value_delta_usd"), row.get("value_usd")),
+        axis=1,
+    )
+    columns = [
+        "issuer",
+        "ticker",
+        "cusip",
+        "value_usd",
+        "market_value_live_usd",
+        "live_value_delta_usd",
+        "live_value_delta_pct",
+        "shares_or_principal",
+        "last_price",
+        "latest_price_date",
+    ]
+    selected = detail[[column for column in columns if column in detail.columns]].copy()
+    selected = selected.rename(columns={"value_usd": "reported_value_usd"})
+    return selected.head(max(0, limit)).reset_index(drop=True)
 
 
 def build_market_anchor_table(market_snapshot: dict) -> pd.DataFrame:
@@ -933,8 +985,24 @@ def build_market_anchor_table(market_snapshot: dict) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def build_brk_valuation_assumptions_table(*, period: str) -> pd.DataFrame:
+def build_brk_valuation_assumptions_table(
+    *,
+    period: str,
+    equity_valuation_basis: str = "live",
+    max_live_holdings: int | None = None,
+) -> pd.DataFrame:
     """Return the assumptions used in the first Berkshire bridge."""
+    equity_basis = normalize_public_equity_valuation_basis(equity_valuation_basis)
+    if equity_basis == "reported":
+        public_equities_basis = "Latest 13F reported market values from the filing"
+        residual_definition = "Market cap less reported 13F public equities less net cash/T-bills"
+    else:
+        limit_text = "all mapped holdings" if max_live_holdings is None else f"top {max_live_holdings} mapped holdings"
+        public_equities_basis = (
+            f"Latest 13F, revaluing {limit_text} at current prices where resolved "
+            "and using reported values for unresolved positions"
+        )
+        residual_definition = "Market cap less selected 13F public equities less net cash/T-bills"
     return pd.DataFrame(
         [
             {"field": "valuation_unit", "value": BRK_B_TICKER},
@@ -942,19 +1010,21 @@ def build_brk_valuation_assumptions_table(*, period: str) -> pd.DataFrame:
             {"field": "market_anchor", "value": "Yahoo market snapshot market cap"},
             {
                 "field": "public_equities_basis",
-                "value": "Latest 13F with live prices where resolved and reported values for unresolved positions",
+                "value": public_equities_basis,
             },
+            {"field": "equity_valuation_basis", "value": equity_basis},
+            {"field": "equity_live_pricing_limit", "value": max_live_holdings if equity_basis == "live" else None},
             {
                 "field": "public_equities_scope",
                 "value": "13F positions only; excludes non-13F public equities and controlled subsidiaries",
             },
             {
                 "field": "liquidity_basis",
-                "value": "Latest filing balance-sheet bridge including cash, Treasury Bills, and fixed maturity securities",
+                "value": "Latest filing cash and Treasury bills for deployable core liquidity; fixed maturity securities shown separately as insurance investment context",
             },
             {
                 "field": "residual_definition",
-                "value": "Market cap less blended 13F public equities less net liquid investments",
+                "value": residual_definition,
             },
             {
                 "field": "residual_circularity_note",
@@ -984,7 +1054,9 @@ def build_brk_component_bridge_table(
     """
     market_cap = _market_cap_from_snapshot(market_snapshot)
     shares = market_snapshot.get("shares")
-    public_equities = _field_value(public_equity_summary, "blended_13f_value_usd")
+    public_equities = _field_value(public_equity_summary, "selected_13f_value_usd")
+    if public_equities is None:
+        public_equities = _field_value(public_equity_summary, "blended_13f_value_usd")
 
     # Pull individual liquidity components for explicit breakdown
     fixed_maturity = _frame_row_value(latest_liquidity_snapshot, "fixed_maturity_securities_usd")
@@ -1062,6 +1134,8 @@ def build_brk_valuation_context_table(
     *,
     yahoo_client=None,
     enriched_holdings: pd.DataFrame | None = None,
+    equity_valuation_basis: str = "live",
+    max_live_holdings: int | None = None,
 ) -> pd.DataFrame:
     """Return the key inputs behind Berkshire's current valuation bridge."""
     holdings_metrics = _live_holdings_metrics(
@@ -1069,6 +1143,8 @@ def build_brk_valuation_context_table(
         reference,
         yahoo_client=yahoo_client,
         enriched_holdings=enriched_holdings,
+        equity_valuation_basis=equity_valuation_basis,
+        max_live_holdings=max_live_holdings,
     )
     liquidity_summary = build_liquidity_summary_table(
         build_liquidity_bridge_table(bundle.liquidity.filings)
@@ -1090,6 +1166,8 @@ def build_brk_valuation_context_table(
             {"field": "13f_reported_value_usd", "value": holdings_metrics["reported_value_usd"]},
             {"field": "13f_live_resolved_value_usd", "value": holdings_metrics["live_value_usd"]},
             {"field": "13f_live_coverage_ratio", "value": holdings_metrics["coverage_ratio"]},
+            {"field": "13f_selected_value_usd", "value": holdings_metrics["selected_value_usd"]},
+            {"field": "13f_selected_basis", "value": holdings_metrics["selected_basis"]},
             {"field": "liquidity_period_end", "value": latest_liquidity.get("period_end")},
             {"field": "net_liquidity_total_usd", "value": _net_liquidity_total(latest_liquidity)},
             {"field": "segment_period_end", "value": segment_period_end},
@@ -1103,6 +1181,8 @@ def build_market_implied_sotp_bridge_table(
     *,
     yahoo_client=None,
     enriched_holdings: pd.DataFrame | None = None,
+    equity_valuation_basis: str = "live",
+    max_live_holdings: int | None = None,
 ) -> pd.DataFrame:
     """Return a first explicit Berkshire market-implied SOTP bridge."""
     market_snapshot = bundle.overview.market_snapshot
@@ -1113,6 +1193,8 @@ def build_market_implied_sotp_bridge_table(
         reference,
         yahoo_client=yahoo_client,
         enriched_holdings=enriched_holdings,
+        equity_valuation_basis=equity_valuation_basis,
+        max_live_holdings=max_live_holdings,
     )
     liquidity_bridge = build_liquidity_bridge_table(bundle.liquidity.filings)
     liquidity_snapshot = build_latest_liquidity_snapshot_table(liquidity_bridge)
@@ -1129,15 +1211,13 @@ def build_market_implied_sotp_bridge_table(
     # Fixed maturity securities are insurance-reserve-backed and sit inside the insurance
     # business; they are not freely deployable capital and must not be subtracted here.
     net_core_liquidity = _sum_defined(cash_and_equivalents, short_term_t_bills, payable_component)
-    public_equities = holdings_metrics["blended_value_usd"]
+    public_equities = holdings_metrics["selected_value_usd"]
     quoted_plus_core_liquidity = _sum_defined(public_equities, net_core_liquidity)
     residual = None
     if market_cap is not None and quoted_plus_core_liquidity is not None and pd.notna(market_cap):
         residual = float(market_cap) - float(quoted_plus_core_liquidity)
 
-    coverage_text = None
-    if holdings_metrics["coverage_ratio"] is not None:
-        coverage_text = f"Live 13F price coverage {holdings_metrics['coverage_ratio'] * 100:.1f}%"
+    coverage_text = _public_equity_note(holdings_metrics)
 
     rows = [
         {
@@ -1145,7 +1225,7 @@ def build_market_implied_sotp_bridge_table(
             "value_usd": public_equities,
             "per_brk_b_share_usd": _per_share_value(public_equities, share_count),
             "market_cap_weight": _ratio(public_equities, market_cap),
-            "note": coverage_text or "Latest 13F using live prices where resolved and reported values otherwise",
+            "note": coverage_text,
         },
         {
             "metric": "cash_and_equivalents",
@@ -1180,7 +1260,7 @@ def build_market_implied_sotp_bridge_table(
             "value_usd": quoted_plus_core_liquidity,
             "per_brk_b_share_usd": _per_share_value(quoted_plus_core_liquidity, share_count),
             "market_cap_weight": _ratio(quoted_plus_core_liquidity, market_cap),
-            "note": "Blended 13F public equities plus net cash and T-bills",
+            "note": "Selected 13F public equities plus net cash and T-bills",
         },
         {
             "metric": "market_cap",
@@ -1221,6 +1301,8 @@ def build_operating_business_context_table(
     period: str = "annual",
     yahoo_client=None,
     enriched_holdings: pd.DataFrame | None = None,
+    equity_valuation_basis: str = "live",
+    max_live_holdings: int | None = None,
 ) -> pd.DataFrame:
     """Put the SOTP residual next to latest reported operating segment earnings."""
     bridge = build_market_implied_sotp_bridge_table(
@@ -1228,6 +1310,8 @@ def build_operating_business_context_table(
         reference,
         yahoo_client=yahoo_client,
         enriched_holdings=enriched_holdings,
+        equity_valuation_basis=equity_valuation_basis,
+        max_live_holdings=max_live_holdings,
     )
     residual = _metric_value(bridge, "residual_operating_and_other")
     market_cap = _metric_value(bridge, "market_cap")
@@ -1336,6 +1420,8 @@ def build_brk_valuation_summary_table(
     price = market_snapshot.get("last_price")
     market_cap = _metric_value(sotp_bridge, "market_cap")
     blended_13f = _context_field_value(equity_portfolio, "blended_13f_value_usd")
+    selected_13f = _context_field_value(equity_portfolio, "selected_13f_value_usd")
+    selected_13f_basis = _field_value(equity_portfolio, "selected_13f_basis")
     reported_13f = _context_field_value(equity_portfolio, "reported_13f_value_usd")
     coverage = _context_field_value(equity_portfolio, "live_price_coverage_pct")
     net_liquidity = _metric_value(sotp_bridge, "net_cash_and_treasury_bills")
@@ -1359,7 +1445,9 @@ def build_brk_valuation_summary_table(
         {"field": "price_brk_b", "value": price},
         {"field": "market_cap_usd", "value": market_cap},
         {"field": "13f_reported_value_usd", "value": reported_13f},
+        {"field": "13f_selected_basis", "value": selected_13f_basis},
         {"field": "13f_blended_value_usd", "value": blended_13f},
+        {"field": "13f_selected_value_usd", "value": selected_13f if selected_13f is not None else blended_13f},
         {"field": "13f_live_coverage_pct", "value": coverage},
         {"field": "net_core_liquidity_usd", "value": net_liquidity},
         {"field": "residual_operating_and_other_usd", "value": residual},
@@ -1583,6 +1671,8 @@ def build_segment_implied_allocation_table(
     period: str = "annual",
     yahoo_client=None,
     enriched_holdings: pd.DataFrame | None = None,
+    equity_valuation_basis: str = "live",
+    max_live_holdings: int | None = None,
 ) -> pd.DataFrame:
     """Allocate the SOTP residual proportionally to each segment's pre-tax earnings share.
 
@@ -1590,7 +1680,12 @@ def build_segment_implied_allocation_table(
     Also shows owner earnings columns when available.
     """
     bridge = build_market_implied_sotp_bridge_table(
-        bundle, reference, yahoo_client=yahoo_client, enriched_holdings=enriched_holdings
+        bundle,
+        reference,
+        yahoo_client=yahoo_client,
+        enriched_holdings=enriched_holdings,
+        equity_valuation_basis=equity_valuation_basis,
+        max_live_holdings=max_live_holdings,
     )
     residual = _metric_value(bridge, "residual_operating_and_other")
     share_count = _implied_brk_b_equivalent_shares(bundle.overview.market_snapshot)
@@ -1660,6 +1755,8 @@ def build_opco_valuation_sensitivity_table(
     pe_multiples: tuple[float, ...] = (6.0, 8.0, 10.0, 12.0, 15.0),
     yahoo_client=None,
     enriched_holdings: pd.DataFrame | None = None,
+    equity_valuation_basis: str = "live",
+    max_live_holdings: int | None = None,
 ) -> pd.DataFrame:
     """Show implied BRK.B price at various owner-earnings (or pretax-earnings) multiples.
 
@@ -1667,7 +1764,12 @@ def build_opco_valuation_sensitivity_table(
     Falls back to pretax earnings when OE components are unavailable.
     """
     bridge = build_market_implied_sotp_bridge_table(
-        bundle, reference, yahoo_client=yahoo_client, enriched_holdings=enriched_holdings
+        bundle,
+        reference,
+        yahoo_client=yahoo_client,
+        enriched_holdings=enriched_holdings,
+        equity_valuation_basis=equity_valuation_basis,
+        max_live_holdings=max_live_holdings,
     )
     known_assets = None
     pe_val = _metric_value(bridge, "public_equity_holdings_blended")
@@ -1880,26 +1982,52 @@ def _live_holdings_metrics(
     *,
     yahoo_client=None,
     enriched_holdings: pd.DataFrame | None = None,
-) -> dict[str, float | int | None]:
+    equity_valuation_basis: str = "live",
+    max_live_holdings: int | None = None,
+) -> dict[str, float | int | str | None]:
     if holdings.empty:
         return {
             "positions_total": 0,
             "resolved_positions": 0,
+            "unresolved_positions": 0,
             "reported_value_usd": None,
             "resolved_reported_value_usd": None,
             "unresolved_reported_value_usd": None,
             "live_value_usd": None,
             "blended_value_usd": None,
+            "selected_value_usd": None,
+            "selected_basis": None,
+            "live_pricing_limit": None,
+            "latest_price_date": None,
+            "coverage_ratio": None,
+        }
+    basis = normalize_public_equity_valuation_basis(equity_valuation_basis)
+    aggregated = aggregate_13f_holdings(holdings)
+    reported_value = aggregated["value_usd"].dropna().sum()
+    if basis == "reported":
+        return {
+            "positions_total": int(len(aggregated)),
+            "resolved_positions": 0,
+            "unresolved_positions": int(len(aggregated)),
+            "reported_value_usd": reported_value if pd.notna(reported_value) else None,
+            "resolved_reported_value_usd": None,
+            "unresolved_reported_value_usd": reported_value if pd.notna(reported_value) else None,
+            "live_value_usd": None,
+            "blended_value_usd": reported_value if pd.notna(reported_value) else None,
+            "selected_value_usd": reported_value if pd.notna(reported_value) else None,
+            "selected_basis": "reported_13f",
+            "live_pricing_limit": None,
+            "latest_price_date": None,
             "coverage_ratio": None,
         }
     enriched = _enriched_holdings_frame(
-        holdings,
+        aggregated,
         reference,
         yahoo_client=yahoo_client,
         enriched_holdings=enriched_holdings,
+        max_live_holdings=max_live_holdings,
     )
     resolved = enriched[enriched["market_value_live_usd"].notna()].copy()
-    reported_value = enriched["value_usd"].dropna().sum()
     resolved_reported_value = resolved["value_usd"].dropna().sum()
     live_value = resolved["market_value_live_usd"].dropna().sum()
     unresolved_reported_value = enriched.loc[
@@ -1910,14 +2038,24 @@ def _live_holdings_metrics(
     coverage_ratio = None
     if reported_value:
         coverage_ratio = resolved_reported_value / reported_value
+    latest_price_date = None
+    if "latest_price_date" in enriched.columns:
+        dates = [value for value in enriched["latest_price_date"].dropna().tolist() if value]
+        if dates:
+            latest_price_date = max(dates)
     return {
         "positions_total": int(len(enriched)),
         "resolved_positions": int(len(resolved)),
+        "unresolved_positions": int(len(enriched) - len(resolved)),
         "reported_value_usd": reported_value if pd.notna(reported_value) else None,
         "resolved_reported_value_usd": resolved_reported_value if pd.notna(resolved_reported_value) else None,
         "unresolved_reported_value_usd": unresolved_reported_value if pd.notna(unresolved_reported_value) else None,
         "live_value_usd": live_value if pd.notna(live_value) else None,
         "blended_value_usd": blended_value if blended_value is not None and pd.notna(blended_value) else None,
+        "selected_value_usd": blended_value if blended_value is not None and pd.notna(blended_value) else None,
+        "selected_basis": "live_revalued_13f",
+        "live_pricing_limit": max_live_holdings,
+        "latest_price_date": latest_price_date,
         "coverage_ratio": coverage_ratio,
     }
 
@@ -1929,6 +2067,7 @@ def _enriched_holdings_frame(
     yahoo_client=None,
     price_change_window: str | None = None,
     enriched_holdings: pd.DataFrame | None = None,
+    max_live_holdings: int | None = None,
 ) -> pd.DataFrame:
     if enriched_holdings is not None:
         return enriched_holdings.copy()
@@ -1938,7 +2077,29 @@ def _enriched_holdings_frame(
         reference,
         yahoo_client=yahoo_client,
         price_change_window=price_change_window,
+        max_holdings=max_live_holdings,
     )
+
+
+def normalize_public_equity_valuation_basis(value: str | None) -> str:
+    normalized = str(value or "live").strip().lower()
+    if normalized in {"current", "current_price", "market", "market_price"}:
+        normalized = "live"
+    if normalized not in PUBLIC_EQUITY_VALUATION_BASES:
+        allowed = ", ".join(PUBLIC_EQUITY_VALUATION_BASES)
+        raise ValueError(f"Unsupported public equity valuation basis '{value}'. Use one of: {allowed}")
+    return normalized
+
+
+def _public_equity_note(metrics: dict[str, object]) -> str:
+    if metrics.get("selected_basis") == "reported_13f":
+        return "Latest 13F reported market values from the filing"
+    coverage = metrics.get("coverage_ratio")
+    limit = metrics.get("live_pricing_limit")
+    scope = "mapped holdings" if limit is None else f"top {limit} mapped holdings"
+    if coverage is not None:
+        return f"Current-price 13F estimate for {scope}; live price coverage {float(coverage) * 100:.1f}%"
+    return f"Current-price 13F estimate for {scope}; reported values used where prices are unresolved"
 
 
 def _latest_segments_table(

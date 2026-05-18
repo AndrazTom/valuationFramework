@@ -30,6 +30,8 @@ from valuation.brk.tables import (
     build_liquidity_summary_table,
     build_market_implied_sotp_bridge_table,
     build_market_anchor_table,
+    build_public_equity_portfolio_summary_table,
+    build_public_equity_revaluation_detail_table,
     build_brk_operating_reverse_dcf_table,
     build_operating_business_context_table,
     build_top_level_operating_segments_summary_table,
@@ -982,6 +984,118 @@ def test_build_market_implied_sotp_bridge_table():
     assert bridge[bridge["metric"] == "deferred_tax_on_equity_context"]["value_usd"].isna().all()
 
 
+def test_build_market_implied_sotp_bridge_table_can_use_reported_13f_value():
+    reference = pd.DataFrame(
+        [{"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"}]
+    )
+    bundle = BrkValuationBundle(
+        overview=BrkOverviewBundle(
+            company=None,
+            market_snapshot={"ticker": "BRK-B", "last_price": 500.0, "market_cap": 1000.0 * M},
+            submissions={},
+            company_facts={},
+        ),
+        holdings=Brk13FBundle(
+            company=None,
+            filing_date="2026-02-17",
+            accession_number="0001",
+            information_table_filename="info.xml",
+            holdings=pd.DataFrame(
+                [{"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 100.0, "shares_or_principal": 0.2}]
+            ),
+        ),
+        liquidity=BrkLiquidityBundle(
+            company=None,
+            filings=[
+                BrkLiquidityFiling(
+                    filing_date="2026-03-02",
+                    accession_number="0002",
+                    form="10-K",
+                    balance_sheet=pd.DataFrame(
+                        [["Cash and cash equivalents", "", "100", "90"]],
+                        columns=[
+                            "Consolidated Balance Sheets",
+                            "Consolidated Balance Sheets",
+                            "Dec. 31, 2025",
+                            "Dec. 31, 2024",
+                        ],
+                    ),
+                )
+            ],
+        ),
+        segments=BrkSegmentsBundle(company=None, filings=[]),
+    )
+
+    bridge = build_market_implied_sotp_bridge_table(
+        bundle,
+        reference,
+        yahoo_client=FakeYahooClient(),
+        equity_valuation_basis="reported",
+    )
+
+    row = bridge[bridge["metric"] == "public_equity_holdings_blended"].iloc[0]
+    assert row["value_usd"] == 100.0
+    assert "reported" in row["note"].lower()
+
+
+def test_build_public_equity_portfolio_summary_table_live_limit_blends_top_holding_only():
+    holdings = pd.DataFrame(
+        [
+            {"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 100.0, "shares_or_principal": 0.2},
+            {"security_id": "cusip:025816109", "issuer": "AMERICAN EXPRESS CO", "class_title": "COM", "cusip": "025816109", "value_usd": 90.0, "shares_or_principal": 0.1},
+        ]
+    )
+    reference = pd.DataFrame(
+        [
+            {"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"},
+            {"security_id": "cusip:025816109", "ticker": "AXP", "exchange": "NYSE"},
+        ]
+    )
+
+    summary = build_public_equity_portfolio_summary_table(
+        holdings,
+        reference,
+        yahoo_client=FakeYahooClient(),
+        equity_valuation_basis="live",
+        max_live_holdings=1,
+    )
+
+    values = dict(zip(summary["field"], summary["value"]))
+    assert values["reported_13f_value_usd"] == 190.0
+    assert values["live_resolved_13f_value_usd"] == 40.0
+    assert values["unresolved_13f_value_reported_usd"] == 90.0
+    assert values["selected_13f_value_usd"] == 130.0
+    assert values["live_pricing_limit"] == 1
+
+
+def test_build_public_equity_revaluation_detail_table_shows_live_replacements():
+    holdings = pd.DataFrame(
+        [
+            {"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 100.0, "shares_or_principal": 0.2},
+            {"security_id": "cusip:025816109", "issuer": "AMERICAN EXPRESS CO", "class_title": "COM", "cusip": "025816109", "value_usd": 90.0, "shares_or_principal": 0.1},
+        ]
+    )
+    reference = pd.DataFrame(
+        [
+            {"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"},
+            {"security_id": "cusip:025816109", "ticker": "AXP", "exchange": "NYSE"},
+        ]
+    )
+
+    detail = build_public_equity_revaluation_detail_table(
+        holdings,
+        reference,
+        yahoo_client=FakeYahooClient(),
+        max_live_holdings=1,
+    )
+
+    assert list(detail["ticker"]) == ["AAPL"]
+    assert detail.iloc[0]["reported_value_usd"] == 100.0
+    assert detail.iloc[0]["market_value_live_usd"] == 40.0
+    assert detail.iloc[0]["live_value_delta_usd"] == -60.0
+    assert detail.iloc[0]["live_value_delta_pct"] == pytest.approx(-0.6)
+
+
 def test_build_market_implied_sotp_bridge_table_deferred_tax_context():
     """Deferred tax on equity shows as a context row when present in the balance sheet."""
     reference = pd.DataFrame([{"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"}])
@@ -1258,6 +1372,8 @@ def _make_equity_portfolio(reported=300.0 * B, blended=305.0 * B, coverage=0.85)
     return pd.DataFrame([
         {"field": "reported_13f_value_usd", "value": reported},
         {"field": "blended_13f_value_usd", "value": blended},
+        {"field": "selected_13f_value_usd", "value": blended},
+        {"field": "selected_13f_basis", "value": "live_revalued_13f"},
         {"field": "live_price_coverage_pct", "value": coverage},
     ])
 
@@ -1288,7 +1404,10 @@ def test_build_brk_valuation_summary_table_happy_path():
 
     assert _val("price_brk_b") == pytest.approx(500.0)
     assert _val("market_cap_usd") == pytest.approx(700.0 * B)
+    assert _val("13f_reported_value_usd") == pytest.approx(300.0 * B)
+    assert _val("13f_selected_basis") == "live_revalued_13f"
     assert _val("13f_blended_value_usd") == pytest.approx(305.0 * B)
+    assert _val("13f_selected_value_usd") == pytest.approx(305.0 * B)
     assert _val("13f_live_coverage_pct") == pytest.approx(0.85)
     assert _val("residual_operating_and_other_usd") == pytest.approx(350.0 * B)
     assert _val("residual_market_cap_weight") == pytest.approx(350.0 / 700.0)

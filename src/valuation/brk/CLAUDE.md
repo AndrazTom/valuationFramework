@@ -16,8 +16,8 @@ Berkshire-specific commands:
 - `./vf brk holdings [--live-prices] [--history --filings-limit N] [--price-change WINDOW] [--limit N]`
 - `./vf brk liquidity [--period annual|quarterly] [--limit N]`
 - `./vf brk segments [--period annual|quarterly] [--limit N]`
-- `./vf brk sotp [--details] [--price-change WINDOW]`
-- `./vf brk valuation-report [--segment-filings N] [--outdir DIR]`
+- `./vf brk sotp [--details] [--price-change WINDOW] [--equity-valuation-basis reported|live] [--equity-live-limit N]`
+- `./vf brk valuation-report [--segment-filings N] [--equity-valuation-basis reported|live] [--equity-live-limit N] [--outdir DIR]`
 
 ## Module Ownership
 
@@ -40,7 +40,8 @@ Berkshire-specific commands:
 - `build_13f_issuer_change_summary_table` — new/increased/decreased/eliminated categorisation
 - `build_13f_portfolio_change_summary_table` — portfolio-level value and count changes
 - `build_holdings_vs_brk_price_change_table` — BRK-B price vs holdings weighted return
-- `build_public_equity_portfolio_summary_table` — blended 13F value with live-price coverage
+- `build_public_equity_portfolio_summary_table` — reported 13F value, selected 13F value, and optional live-price coverage
+- `build_public_equity_revaluation_detail_table` — live-priced holdings detail: reported value, live value, delta, shares, quote/date
 
 **Liquidity and balance sheet:**
 - `build_liquidity_bridge_table` — multi-filing liquidity bridge from balance-sheet tables
@@ -51,13 +52,13 @@ Berkshire-specific commands:
 
 **SOTP and valuation:**
 - `build_market_anchor_table` — current market cap and price reference
-- `build_brk_valuation_assumptions_table` — stated assumptions (insurance float, float cost, etc.)
-- `build_market_implied_sotp_bridge_table` — main SOTP bridge: market cap − 13F − net liquidity = residual
+- `build_brk_valuation_assumptions_table` — stated assumptions, including selected public-equity basis and live-pricing limit
+- `build_market_implied_sotp_bridge_table` — main SOTP bridge: market cap − selected 13F value − net cash/T-bills = residual
 - `build_brk_valuation_context_table` — bridge + residual context rows
 - `build_operating_business_context_table` — residual vs segment pre-tax earnings, P/B, OE
 - `build_brk_operating_reverse_dcf_table` — Gordon Growth implied growth at 8%/10%/12% required return
 - `build_brk_valuation_summary_table` — compact key-numbers summary for valuation report front page
-  - fields: price, market cap, 13F reported/blended, live coverage %, net liquidity, residual + per-share + weight, pretax earnings, multiple, implied growth at 10%, zero-growth per-share
+  - fields: price, market cap, 13F reported/selected basis/blended/selected, live coverage %, net cash/T-bills, residual + per-share + weight, pretax earnings, multiple, implied growth at 10%, zero-growth per-share
 
 **Segments:**
 - `build_segment_report_summary_table` — filing metadata for included segments
@@ -71,18 +72,19 @@ Berkshire-specific commands:
 
 Produces a self-contained Markdown artifact. Section order (findings-first):
 1. **Key Valuation Summary** — compact numbers table printed to terminal before writing file
-2. **Valuation Assumptions** — stated methodology assumptions
-3. **Market Anchor** — current price and market cap
-4. **Public Equity Portfolio** — 13F blended value with live-price coverage
-5. **Liquidity Snapshot** — net liquidity from balance-sheet filing
-6. **Balance Sheet Context** — residual-context rows (not deducted from bridge)
-7. **Market-Implied SOTP Bridge** — market cap − 13F − net liquidity = residual
-8. **Operating Business Context** — residual vs segment earnings
-9. **Operating Business Reverse DCF** — implied growth scenarios (when positive earnings)
-10. **Segment periods** — one section per period fetched
-11. **Methodology Notes** — dynamic fixed-maturity figure, float explanation, deferred tax haircut, debt distinction
+2. **Market-Implied SOTP Bridge** — market cap − selected 13F value − net cash/T-bills = residual
+3. **Operating Business Context** — residual vs segment earnings
+4. **Operating Business Reverse DCF** — implied growth scenarios (when positive earnings)
+5. **Supporting Detail** — market anchor, public-equity portfolio, equity revaluation detail, cash/T-bills and fixed maturity context, balance-sheet context
+6. **Segment History** — one section per period fetched plus history pivots
+7. **Methodology Notes** — assumptions table, dynamic fixed-maturity figure, float explanation, deferred tax haircut, debt distinction
 
 `--segment-filings N` controls segment history depth (default 4).
+`--equity-valuation-basis live` is the default and revalues all mapped holdings as shares × current Yahoo quote, then blends unresolved holdings at reported value.
+`--equity-live-limit N` bounds live pricing to the top N mapped holdings if runtime or provider behavior becomes a concern.
+`--equity-valuation-basis reported` keeps the old report behavior: public equities equal latest reported 13F values from the filing.
+The report methodology explicitly states the live formula: reported total minus reported value of live-priced holdings plus `shares held × current price`; it keeps both reported and selected 13F values in the key summary and public-equity portfolio tables.
+Fixed maturities should be framed as insurance investment-portfolio context, not deployable liquidity. The SOTP bridge subtracts only cash + T-bills - T-bill purchase payable as core liquidity; fixed maturities remain inside the residual with insurance businesses and other non-13F items.
 Accession numbers included in report header for 13F and liquidity filings.
 
 ## BRK EPS/Share Filing Fallback (`brk/statements.py`)
@@ -98,19 +100,21 @@ This fallback runs only for BRK income statements; generic SEC companyfacts path
 
 `build_balance_sheet_context_table` rows (equity securities, equity-method investments, deferred income taxes, notes payable, total liabilities, total assets) are **context only**. Do not add them to net liquidity or subtract them again from the SOTP bridge without redefining the residual — they are already priced into the market cap.
 
-## Deferred Tax Context (Planned)
+## Deferred Tax Context
 
-The SOTP bridge does not explicitly show the deferred tax liability on unrealized equity gains (~$35B). Selling the equity portfolio triggers ~21% capital gains tax. This is a real contingent liability. Planned: add `deferred_tax_haircut_on_equity` as a context row sourced from `DeferredIncomeTaxLiabilitiesNet` or `DeferredTaxLiabilitiesInvestments`.
+The SOTP bridge shows deferred tax on equities as a context row when the filing balance sheet exposes a deferred income tax liability. Selling the equity portfolio triggers ~21% capital gains tax, so the 13F value is pre-tax and not the same as fully realizable after-tax value. The context row is not deducted from the bridge unless the residual definition is changed.
 
 ## Rules
 
 - prefer explicit bridge tables over opaque model outputs
 - separate reported values from live-revalued values
+- keep BRK SOTP and valuation report default on live current-price equity estimation for all mapped holdings; use `--equity-valuation-basis reported` for old filing-date 13F values
 - keep `BRK.B` as the default share unit unless the user changes that
 - keep Berkshire-specific logic in this subtree rather than leaking it into generic modules
-- for liquidity:
+- for liquidity / fixed maturities:
   - prefer the filing balance-sheet report over SEC companyfacts
   - keep the U.S. Treasury Bill line explicit
+  - do not describe fixed maturity securities as freely deployable liquidity; they are insurance-reserve-backed investment-portfolio context unless the bridge definition changes
   - filing parser accepts both `Payable for purchase of U.S. Treasury Bills` and `Payable for purchases of U.S. Treasury Bills`
 - for quarterly segments:
   - prefer the 3-month columns over 6/9-month YTD columns when the command asks for quarterly history

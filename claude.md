@@ -19,8 +19,8 @@ Current branch priority:
 - `brk` is the Berkshire-specific proving ground layered on top of the generic base from `main`
 - as of 2026-05-18, `brk` is mature; all prior hardening complete (liquidity, segments, SOTP, holdings history, price windows, diagnostics, valuation tables, valuation report)
 - 2026-05-18 live QA sweep passed for `./vf brk holdings --history --filings-limit 2 --limit 10`, `./vf brk sotp --details`, and `./vf brk sotp --price-change 1M`
-- `./vf brk valuation-report` now functional: self-contained Markdown artifact, findings-first order, terminal key-numbers preview, dynamic methodology notes, `--segment-filings` arg
-- 275 tests passing as of 2026-05-18
+- `./vf brk valuation-report` now functional: self-contained Markdown artifact, findings-first order, terminal key-numbers preview, dynamic methodology notes, `--segment-filings`, and selectable public-equity basis (`--equity-valuation-basis reported|live`)
+- 288 tests passing as of 2026-05-18
 - temporary hardening branches should be merged back quickly, then deleted
 
 Long-term direction:
@@ -59,9 +59,10 @@ Long-term direction:
   - SEC provider payloads persist under `~/.cache/valuationFramework/sec` by default, or `VALUATION_CACHE_DIR/sec`
   - mutable SEC endpoints auto-expire: company ticker map 24h, submissions 12h, companyfacts 24h
   - immutable filing artifacts such as filing indexes, `FilingSummary.xml`, report HTML, and 13F XML cache indefinitely
-  - Yahoo price snapshots persist under `~/.cache/valuationFramework/yahoo/snapshots` for 1h
-  - Yahoo history frames persist under `~/.cache/valuationFramework/yahoo/history` for 24h
-  - use `./vf --refresh-cache ...` to force provider refresh for one run
+- Yahoo price snapshots persist under `~/.cache/valuationFramework/yahoo/snapshots` for 1h
+- Yahoo history frames persist under `~/.cache/valuationFramework/yahoo/history` for 24h
+- live holding quote enrichment fetches Yahoo quotes in parallel and can be bounded to the top N holdings; BRK SOTP and valuation report default to live revaluation for all mapped holdings unless `--equity-live-limit N` is supplied
+- use `./vf --refresh-cache ...` to force provider refresh for one run
 
 ## Current Architecture
 
@@ -155,6 +156,7 @@ Keep `main` generic. Do not leak Berkshire assumptions into generic modules.
 `brk` contains:
 
 - latest 13F holdings with live-price revaluation and price-change windows
+- BRK valuation report can keep the old reported-13F equity value or use a bounded current-price estimate from shares × quote for top holdings
 - 13F holdings history across recent filings with portfolio-level change summaries
 - liquidity bridge from filing balance-sheet tables
 - operating segment history
@@ -168,6 +170,7 @@ As of 2026-05-18, `brk` is ahead of `main`; the live QA sweep and EPS/share fall
 - keep Berkshire-specific logic in `src/valuation/brk/`
 - `src/valuation/brk/statements.py` fills BRK Class B EPS/equivalent-share rows from filing report tables for annual and direct quarterly income statements when companyfacts omits them
 - SOTP `--details` emits balance-sheet context rows for major assets/liabilities that remain inside the residual; these rows are context only and should not be added to net liquidity without redefining the bridge
+- fixed maturity securities should be framed as insurance investment-portfolio context, not deployable liquidity; BRK SOTP subtracts only cash + Treasury bills - T-bill purchase payable as core liquidity
 - keep Berkshire assumptions out of generic modules unless they are reusable and parameterized cleanly
 
 Reusable pieces discovered there should be extracted back into `main`.
@@ -240,6 +243,8 @@ As of 2026-05-18, `main` contains (on `brk`, pending merge):
 - `./vf brk sotp --price-change 1M`
 - `./vf brk valuation-report`
 - `./vf brk valuation-report --segment-filings 4`
+- `./vf brk valuation-report --equity-valuation-basis reported`
+- `./vf brk valuation-report --equity-live-limit 20`
 - `./vf brk liquidity --period annual --limit 4`
 - `./vf brk liquidity --period quarterly --limit 4`
 - `./vf brk segments --period annual --limit 4`
@@ -295,19 +300,20 @@ Steps 1-4 done. Next hardening pass:
 These are the highest-value next steps for improving the quality and trust of the BRK valuation output:
 
 **Liability awareness in the SOTP bridge (highest priority conceptual improvement):**
-- The current bridge does not explicitly show the deferred tax liability on unrealized equity gains (~$35B as of latest balance sheet)
+- The current bridge shows deferred tax on unrealized equity gains as a context row when the balance-sheet filing exposes it
   - This is a real contingent liability: selling the equity portfolio triggers ~21% capital gains tax on the unrealized gain
-  - The 13F portfolio is valued at current market prices (pre-tax), so the "true" after-tax value is lower
-  - Add a `deferred_tax_haircut_on_equity` context row to the SOTP bridge (shown as a context row, not deducted from the bridge, so the user can apply their own judgment)
-  - This would require fetching `DeferredIncomeTaxLiabilitiesNet` or `DeferredTaxLiabilitiesInvestments` from SEC companyfacts
+  - The 13F portfolio is valued pre-tax, so the "true" after-tax value is lower if realized
+  - Future refinement: split deferred tax attributable to equity gains from broader deferred tax liabilities where filing detail allows it
 - Insurance float treatment: the methodology notes now explain this correctly; no code change needed unless a separate float-funded investment yield table becomes worthwhile
 - Holding-company debt vs subsidiary debt: balance sheet context already shows `notes_payable_and_other_borrowings`; consider splitting into holding-company debt (Senior notes issued by BRK parent) vs consolidated debt in a future pass
 
 **Valuation report quality:**
 - Run `./vf brk valuation-report` live and QA the output Markdown for:
   - Fixed maturity figure is pulled from actual data (not hardcoded ~$25B)
+  - Fixed maturities are framed as insurance investment context, not deployable liquidity
   - All sections render without empty tables
   - Methodology notes are factually accurate with actual balance sheet context values
+- Use `--equity-valuation-basis reported` for old filing-date 13F values; default live mode prices all mapped holdings, or use `--equity-live-limit N` for a bounded current-price estimate
 - Consider adding a `--price-change` flag to the valuation report so holdings can be revalued with a window (e.g. 1M price change context)
 
 **Independent operating business valuation (medium-term):**
@@ -431,17 +437,19 @@ Completed on 2026-05-18 (valuation report):
 - `./vf brk valuation-report` now fully functional
   - findings-first section order: Key Valuation Summary → SOTP Bridge → Operating Context → Reverse DCF → Supporting Detail → Segment History → Methodology
   - terminal key-numbers preview (prints `Key Valuation Summary` table before writing file)
-  - `build_brk_valuation_summary_table` added to `brk/tables.py`: compact summary over already-computed tables (price, mktcap, 13F blended, net liquidity, residual + per-share + weight, pretax earnings, multiple, implied growth at 10%, zero-growth per-share)
+  - Key Valuation Summary and Public Equity Portfolio keep both reported 13F value and selected 13F value/basis
+  - `build_brk_valuation_summary_table` added to `brk/tables.py`: compact summary over already-computed tables (price, mktcap, 13F blended/selected, net cash/T-bills, residual + per-share + weight, pretax earnings, multiple, implied growth at 10%, zero-growth per-share)
   - dynamic methodology notes: fixed maturity note pulled from actual liquidity data
   - improved liability context in methodology notes: float explained correctly (not a simple deduction), deferred tax haircut on equity flagged, subsidiary vs holdco debt distinction made explicit
   - `--segment-filings` arg (default 4) controls segment history depth
+  - `--equity-valuation-basis reported|live` selects old reported-13F equity value vs current-price estimate; live mode defaults to all mapped holdings and can be bounded via `--equity-live-limit`
   - accession numbers included in report header for both 13F and liquidity filings
-  - 275 tests passing (was 257)
+  - 288 tests passing
 - `_metric_per_share()` and `_metric_weight()` helpers added to `brk/tables.py` for SOTP bridge row extraction
 
 Next concrete tasks:
 
-1. Deferred tax context row in SOTP bridge (see Berkshire Priorities → Next SOTP/Valuation Hardening Tasks)
+1. Tax sensitivity / deferred-tax refinement remains planned, but is intentionally not part of the current report-hardening pass
 2. Cached universe/index layer:
    - build a small security/filer index before any top-500/top-1000 downloader
    - for updated SEC filings after long gaps, refresh submissions first, compare latest accession/report dates to local index, then fetch only new immutable filing artifacts
