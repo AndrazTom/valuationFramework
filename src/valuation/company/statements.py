@@ -113,6 +113,13 @@ CASH_FLOW_DEFINITIONS = (
         (("us-gaap", "NetCashProvidedByUsedInOperatingActivities"),),
     ),
     CompanyFactQuery(
+        "depreciation_amortization",
+        (
+            ("us-gaap", "DepreciationDepletionAndAmortization"),
+            ("us-gaap", "DepreciationAndAmortization"),
+        ),
+    ),
+    CompanyFactQuery(
         "capex",
         (("us-gaap", "PaymentsToAcquirePropertyPlantAndEquipment"),),
     ),

@@ -102,7 +102,7 @@ def test_build_sec_statement_availability_table_marks_missing_rows_with_reason()
         "missing gross_profit, operating_income, pretax_income, net_income, +2 more"
     )
     assert cashflow_quarterly["status"] == "unavailable"
-    assert cashflow_quarterly["expected_metric_count"] == 5
+    assert cashflow_quarterly["expected_metric_count"] == 6
     assert cashflow_quarterly["coverage_ratio"] == 0.0
     assert cashflow_quarterly["reason"] == "No matching concepts found in SEC companyfacts"
 

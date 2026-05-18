@@ -31,6 +31,10 @@ from valuation.company.tables import (
     resolution_to_table,
 )
 from valuation.company.comps import build_comps_table, fetch_comps_entries
+from valuation.company.ratios import (
+    build_historical_ratios_table,
+    build_historical_ratios_table_from_yahoo,
+)
 from valuation.company.yahoo_statements import build_yahoo_statement_table
 from valuation.data.normalize.tables import (
     CORE_COMPANY_FILING_FORMS,
@@ -125,6 +129,20 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include a diagnostic table explaining expected statement rows that are missing or stale.",
     )
+
+    ratios_parser = subparsers.add_parser(
+        "ratios",
+        help="Show historical per-fiscal-year valuation ratios (P/E, P/OE, EV/EBITDA, ...).",
+    )
+    ratios_parser.add_argument("identifier")
+    ratios_parser.add_argument(
+        "--identifier-kind",
+        choices=("auto", "ticker", "cik", "cusip", "isin"),
+        default="auto",
+    )
+    ratios_parser.add_argument("--limit", type=_non_negative_int, default=10)
+    ratios_parser.add_argument("--outdir", default="outputs/tables")
+    ratios_parser.add_argument("--format", choices=("table", "json"), default="table")
 
     comps_parser = subparsers.add_parser(
         "comps",
@@ -315,6 +333,58 @@ def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limi
         Path(outdir) / bundle.resolution.ticker.upper().replace(".", "-"),
         output_format=output_format,
         command="company",
+    )
+    return 0
+
+
+def run_ratios(
+    identifier: str,
+    identifier_kind: str,
+    limit: int,
+    outdir: str,
+    output_format: str,
+) -> int:
+    """Fetch historical annual financials + price history and render per-year valuation ratios."""
+    bundle = fetch_company_snapshot(identifier, identifier_kind=identifier_kind)
+    ticker = bundle.resolution.ticker
+    yahoo = YahooFinanceClient()
+
+    price_history = yahoo.fetch_history(ticker, period="max", interval="1mo")
+
+    if bundle.company_facts:
+        table = build_historical_ratios_table(bundle.company_facts, price_history, limit=limit)
+    elif bundle.company_profile:
+        requests = [
+            ("income", "annual"),
+            ("balance", "annual"),
+            ("cashflow", "annual"),
+        ]
+        with ThreadPoolExecutor(max_workers=len(requests)) as executor:
+            futures = {
+                r: executor.submit(yahoo.fetch_statement_frame, ticker, statement=r[0], period=r[1])
+                for r in requests
+            }
+        frames = {r: f.result() for r, f in futures.items()}
+        table = build_historical_ratios_table_from_yahoo(
+            income_annual=frames[("income", "annual")],
+            balance_annual=frames[("balance", "annual")],
+            cashflow_annual=frames[("cashflow", "annual")],
+            price_history=price_history,
+        )
+    else:
+        print(f"Error: could not resolve {identifier!r}", file=sys.stderr)
+        return 1
+
+    if table.empty:
+        print("Error: no historical ratio data available", file=sys.stderr)
+        return 1
+
+    slug = ticker.upper().replace(".", "-")
+    _emit_sections(
+        [("Historical Ratios", table)],
+        Path(outdir) / slug,
+        output_format=output_format,
+        command="ratios",
     )
     return 0
 
@@ -524,6 +594,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 outdir=args.outdir,
                 output_format=args.format,
                 diagnostics=args.diagnostics,
+            )
+        if args.command == "ratios":
+            return run_ratios(
+                identifier=args.identifier,
+                identifier_kind=args.identifier_kind,
+                limit=args.limit,
+                outdir=args.outdir,
+                output_format=args.format,
             )
         if args.command == "comps":
             return run_comps(

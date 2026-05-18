@@ -164,6 +164,8 @@ def _infer_kind_from_field(field_name: str) -> Optional[str]:
             "free_cash_flow",
             "owner_earnings",
             "earnings",
+            "depreciation",
+            "amortization",
         )
     ):
         return "currency"
