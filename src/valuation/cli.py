@@ -30,6 +30,7 @@ from valuation.company.tables import (
     extract_period_label_from_company_facts,
     resolution_to_table,
 )
+from valuation.company.comps import build_comps_table, fetch_comps_entries
 from valuation.company.yahoo_statements import build_yahoo_statement_table
 from valuation.data.normalize.tables import (
     CORE_COMPANY_FILING_FORMS,
@@ -124,6 +125,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include a diagnostic table explaining expected statement rows that are missing or stale.",
     )
+
+    comps_parser = subparsers.add_parser(
+        "comps",
+        help="Compare multiple securities side-by-side on TTM valuation metrics.",
+    )
+    comps_parser.add_argument("tickers", nargs="+", help="Two or more tickers to compare.")
+    comps_parser.add_argument("--outdir", default="outputs/tables")
+    comps_parser.add_argument("--format", choices=("table", "json"), default="table")
 
     register_brk_parser(subparsers)
     return parser
@@ -306,6 +315,28 @@ def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limi
         Path(outdir) / bundle.resolution.ticker.upper().replace(".", "-"),
         output_format=output_format,
         command="company",
+    )
+    return 0
+
+
+def run_comps(tickers: list[str], outdir: str, output_format: str) -> int:
+    """Fetch TTM valuation metrics for multiple tickers and render a side-by-side table."""
+    entries = fetch_comps_entries(tickers)
+    table = build_comps_table(entries)
+
+    # Surface any per-ticker errors to stderr; drop the error column from display
+    error_rows = table[table["error"].notna()] if "error" in table.columns else table.iloc[:0]
+    for _, row in error_rows.iterrows():
+        print(f"Warning: {row['ticker']}: {row['error']}", file=sys.stderr)
+
+    display = table.drop(columns=["error"], errors="ignore")
+    slug = "COMPS_" + "_".join(t.upper().replace(".", "-") for t in tickers[:6])
+    out_path = Path(outdir) / slug
+    _emit_sections(
+        [("Comps", display)],
+        out_path,
+        output_format=output_format,
+        command="comps",
     )
     return 0
 
@@ -493,6 +524,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 outdir=args.outdir,
                 output_format=args.format,
                 diagnostics=args.diagnostics,
+            )
+        if args.command == "comps":
+            return run_comps(
+                tickers=args.tickers,
+                outdir=args.outdir,
+                output_format=args.format,
             )
         if args.command == "brk":
             return run_brk_command(args)

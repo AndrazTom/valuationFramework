@@ -74,6 +74,7 @@ def _infer_format_kind(column: str, row: pd.Series) -> Optional[str]:
         "day_high",
         "day_low",
         "market_cap",
+        "price",
         "fifty_day_average",
         "two_hundred_day_average",
     }:
@@ -103,11 +104,17 @@ def _infer_format_kind(column: str, row: pd.Series) -> Optional[str]:
         return _infer_kind_from_field(str(row["metric"]).lower())
     if "ratio" in row and column_name == "value":
         return _infer_kind_from_field(str(row["ratio"]).lower())
+    # Fallback: column-name inference for wide tables (e.g. comps) that lack a
+    # "metric"/"field"/"ratio" structure column. Skip generic names that would
+    # collide with non-numeric columns.
+    if column_name not in {"value", "name", "ticker", "error", "as_of", "note", "status", "source", "form", "field", "reason", "unit", "period", "statement"}:
+        return _infer_kind_from_field(column_name)
     return None
 
 
 _VALUATION_RATIO_FIELDS = frozenset({
-    "pe_ratio", "ps_ratio", "pb_ratio", "price_to_fcf", "price_to_owner_earnings",
+    "pe_ratio", "ps_ratio", "pb_ratio",
+    "price_to_fcf", "price_to_owner_earnings", "price_to_oe",
     "ev_to_revenue", "ev_to_ebitda",
 })
 
@@ -118,7 +125,7 @@ def _infer_kind_from_field(field_name: str) -> Optional[str]:
         return "multiple"
     if normalized_field.endswith("_pct") or normalized_field.endswith("_ratio"):
         return "percent"
-    if normalized_field.endswith("_yield"):
+    if normalized_field.endswith("_yield") or normalized_field.endswith("_margin"):
         return "percent"
     if normalized_field.endswith("_multiple"):
         return "multiple"

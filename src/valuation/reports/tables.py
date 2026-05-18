@@ -252,6 +252,8 @@ def _wrap_terminal_cell(value, *, column: str):
         width = 26
     elif column_name in {"field", "metric"}:
         width = 26
+    elif column_name in {"name"}:
+        width = 36
     elif column_name in {"concept", "primary document", "description", "filing url", "reason", "website"}:
         width = 30
     elif column_name == "accession":
