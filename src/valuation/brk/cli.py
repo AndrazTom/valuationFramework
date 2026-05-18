@@ -48,6 +48,7 @@ from valuation.brk.tables import (
     build_segment_implied_allocation_table,
     build_segment_owner_earnings_history_table,
     build_buyback_history_table,
+    build_insurance_float_table,
     build_segment_period_sections,
     build_segment_pretax_margin_history_table,
     build_segment_revenues_history_table,
@@ -597,6 +598,15 @@ def run_brk_sotp(
     ]
     if not reverse_dcf.empty:
         sections.append(("Operating Business Reverse DCF", reverse_dcf))
+    _append_nonempty(sections, "OpCo Intrinsic Value Estimate", build_opco_valuation_sensitivity_table(
+        bundle,
+        reference,
+        period=period,
+        yahoo_client=yahoo,
+        enriched_holdings=enriched_holdings,
+        equity_valuation_basis=equity_valuation_basis,
+        max_live_holdings=equity_live_limit if equity_valuation_basis == "live" else None,
+    ))
     if details:
         liquidity_bridge = build_liquidity_bridge_table(bundle.liquidity.filings)
         sections[0:0] = [
@@ -690,20 +700,12 @@ def run_brk_sotp(
             equity_valuation_basis=equity_valuation_basis,
             max_live_holdings=equity_live_limit if equity_valuation_basis == "live" else None,
         ))
-        _append_nonempty(sections, "OpCo Valuation Sensitivity", build_opco_valuation_sensitivity_table(
-            bundle,
-            reference,
-            period=period,
-            yahoo_client=yahoo,
-            enriched_holdings=enriched_holdings,
-            equity_valuation_basis=equity_valuation_basis,
-            max_live_holdings=equity_live_limit if equity_valuation_basis == "live" else None,
-        ))
-        # Book value history and share repurchase history from SEC company facts
+        # Book value history, share repurchase history, and insurance float from SEC company facts
         company_facts = getattr(bundle.overview, "company_facts", {}) or {}
         share_count = _brk_share_count_for_report(bundle.overview.market_snapshot)
         _append_nonempty(sections, "Book Value History", build_book_value_history_table(company_facts, share_count=share_count, limit=5))
         _append_nonempty(sections, "Share Repurchase History", build_buyback_history_table(company_facts, share_count=share_count, limit=10))
+        _append_nonempty(sections, "Insurance Float History", build_insurance_float_table(company_facts, limit=10))
     _emit_sections(sections, Path(outdir) / "BRK_SOTP")
     return 0
 
@@ -792,6 +794,9 @@ def run_brk_valuation_report(
         else "unknown"
     )
 
+    company_facts = getattr(bundle.overview, "company_facts", {}) or {}
+    share_count = _brk_share_count_for_report(bundle.overview.market_snapshot)
+
     # Fixed maturity figure for methodology notes — pull from actual data.
     fixed_maturity_raw = None
     if not liquidity_snapshot.empty and "fixed_maturity_securities_usd" in liquidity_snapshot.columns:
@@ -816,9 +821,36 @@ def run_brk_valuation_report(
                     pass
     deferred_tax_note = _fmt_currency(deferred_tax_raw) if deferred_tax_raw else "~$35B"
 
+    # Insurance float figure for methodology notes — pull from float table total row.
+    float_raw = None
+    _float_table = build_insurance_float_table(company_facts, limit=1)
+    if not _float_table.empty:
+        total_rows = _float_table[_float_table["metric"] == "total_float_usd"]
+        if not total_rows.empty:
+            # Newest-first: first period column
+            _float_period_cols = [c for c in total_rows.columns if c not in {"metric", "unit", "cagr_pct"}]
+            if _float_period_cols:
+                v = total_rows.iloc[0].get(_float_period_cols[0])
+                if v is not None and str(v) not in {"nan", "None", ""}:
+                    try:
+                        float_raw = float(v)
+                    except (TypeError, ValueError):
+                        pass
+    float_note = _fmt_currency(float_raw) if float_raw else "~$170B"
+
     # Print key numbers to terminal so the user sees results without opening the file.
     print("\n## Key Valuation Summary\n")
     print(render_terminal_table(summary))
+
+    opco_intrinsic = build_opco_valuation_sensitivity_table(
+        bundle,
+        reference,
+        period=period,
+        yahoo_client=yahoo,
+        enriched_holdings=enriched_holdings,
+        equity_valuation_basis=equity_valuation_basis,
+        max_live_holdings=live_pricing_limit,
+    )
 
     # Assemble Markdown sections in findings-first order.
     core_md = [
@@ -828,6 +860,8 @@ def run_brk_valuation_report(
     ]
     if not reverse_dcf.empty:
         core_md.append(("Operating Business Reverse DCF", reverse_dcf))
+    if not opco_intrinsic.empty:
+        core_md.append(("OpCo Intrinsic Value Estimate", opco_intrinsic))
 
     equity_revaluation_detail = build_public_equity_revaluation_detail_table(
         bundle.holdings.holdings,
@@ -871,14 +905,15 @@ def run_brk_valuation_report(
     if not _ht.empty:
         segment_history_md.append(("Segment Pre-Tax Margin History", _ht))
 
-    company_facts = getattr(bundle.overview, "company_facts", {}) or {}
-    share_count = _brk_share_count_for_report(bundle.overview.market_snapshot)
     _bv = build_book_value_history_table(company_facts, share_count=share_count, limit=5)
     if not _bv.empty:
         segment_history_md.append(("Book Value History", _bv))
     _bb = build_buyback_history_table(company_facts, share_count=share_count, limit=10)
     if not _bb.empty:
         segment_history_md.append(("Share Repurchase History", _bb))
+    _fl = build_insurance_float_table(company_facts, limit=10)
+    if not _fl.empty:
+        segment_history_md.append(("Insurance Float History", _fl))
 
     # Build Markdown document
     lines: list[str] = [
@@ -949,7 +984,7 @@ def run_brk_valuation_report(
         " The bridge subtracts cash and Treasury bills net of T-bill purchase payable;"
         " fixed maturities remain inside the residual above with the insurance businesses"
         " and other non-13F assets/liabilities.",
-        "- **Insurance float (~$170B) is an accounting liability but not a simple deduction.**"
+        f"- **Insurance float ({float_note}) is an accounting liability but not a simple deduction.**"
         " Float is policyholders' money Berkshire holds before paying claims. If underwriting"
         " is break-even or profitable the cost of float is zero or negative, making it"
         " an interest-free funding source. Do not subtract float at face value if you are"

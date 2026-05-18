@@ -1998,6 +1998,86 @@ def build_book_value_history_table(
     return result
 
 
+_INSURANCE_FLOAT_QUERIES: Sequence[CompanyFactQuery] = (
+    CompanyFactQuery(
+        "losses_and_lae",
+        (("us-gaap", "LiabilityForClaimsAndClaimsAdjustmentExpense"),),
+    ),
+    CompanyFactQuery(
+        "unearned_premiums",
+        (("us-gaap", "UnearnedPremiums"),),
+    ),
+    CompanyFactQuery(
+        "life_annuity_benefits",
+        (
+            ("us-gaap", "LifeAnnuityAndHealthInsurancePolicyholdersInterestsAndBenefitsPayable"),
+            ("us-gaap", "PolicyholderFunds"),
+            ("us-gaap", "FuturePolicyBenefitsAndUnpaidClaims"),
+        ),
+    ),
+)
+
+
+def build_insurance_float_table(
+    company_facts: dict,
+    *,
+    limit: int = 10,
+) -> pd.DataFrame:
+    """Estimate Berkshire insurance float from balance-sheet SEC companyfacts.
+
+    Float components (annual balance-sheet instant values):
+    - losses_and_lae: LiabilityForClaimsAndClaimsAdjustmentExpense
+    - unearned_premiums: UnearnedPremiums
+    - life_annuity_benefits: life/annuity policy benefit concepts
+
+    All available components are summed to total_float_usd.
+    Returns empty DataFrame when none of the components are found in companyfacts.
+    Columns: metric, [FY YYYY … newest-first], cagr_pct
+    """
+    from valuation.data.normalize.tables import company_facts_to_statement_table
+
+    float_wide = company_facts_to_statement_table(
+        company_facts,
+        _INSURANCE_FLOAT_QUERIES,
+        period="annual",
+        value_kind="instant",
+        limit=limit,
+    )
+    if float_wide.empty:
+        return pd.DataFrame()
+
+    out_period_cols = [c for c in float_wide.columns if c not in {"metric", "unit"}]
+    if not out_period_cols:
+        return pd.DataFrame()
+
+    # Only keep rows that have at least one non-null period value
+    component_rows = []
+    for _, row in float_wide.iterrows():
+        vals = [_safe_float(row.get(c)) for c in out_period_cols]
+        if any(v is not None for v in vals):
+            component_rows.append(row.to_dict())
+
+    if not component_rows:
+        return pd.DataFrame()
+
+    # Build totals row
+    total_row: dict = {"metric": "total_float_usd", "unit": "USD"}
+    for col in out_period_cols:
+        component_vals = [_safe_float(r.get(col)) for r in component_rows]
+        valid = [v for v in component_vals if v is not None]
+        total_row[col] = sum(valid) if valid else None
+
+    rows = component_rows + [total_row]
+    result = pd.DataFrame(rows)
+
+    cagr_cols = sorted(out_period_cols, key=_period_col_sort_key)
+    result["cagr_pct"] = result.apply(
+        lambda row: _row_cagr([_safe_float(row.get(c)) for c in cagr_cols]),
+        axis=1,
+    )
+    return result
+
+
 def build_buyback_history_table(
     company_facts: dict,
     share_count: float | None = None,

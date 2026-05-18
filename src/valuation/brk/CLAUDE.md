@@ -65,6 +65,9 @@ Berkshire-specific commands:
 **Share repurchase history:**
 - `build_buyback_history_table` — annual `PaymentsForRepurchaseOfCommonStock` series; optionally adds `implied_price_per_share_usd` (buyback $ / `StockRepurchasedAndRetiredDuringPeriodShares`) when share-retirement data is present in companyfacts, and `buyback_per_brk_b_usd` when current `share_count` is supplied; CAGR column computed oldest→newest
 
+**Insurance float history:**
+- `build_insurance_float_table` — annual balance-sheet float components: `losses_and_lae` (`LiabilityForClaimsAndClaimsAdjustmentExpense`), `unearned_premiums`, `life_annuity_benefits`; `total_float_usd` row is sum of available components; CAGR oldest→newest; degrades gracefully to empty if concepts absent
+
 **Segments:**
 - `build_segment_report_summary_table` — filing metadata for included segments
 - `build_top_level_operating_segments_summary_table` — latest period segment data

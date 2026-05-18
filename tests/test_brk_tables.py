@@ -1906,3 +1906,71 @@ def test_build_buyback_history_table_empty_when_no_buyback_data():
     ]}}}}}
     table = build_buyback_history_table(company_facts, limit=5)
     assert table.empty
+
+
+# ---------------------------------------------------------------------------
+# build_insurance_float_table
+# ---------------------------------------------------------------------------
+
+def _make_float_company_facts(years_losses: dict, years_unearned: dict | None = None, years_life: dict | None = None) -> dict:
+    def _entries(vals: dict) -> list[dict]:
+        return [
+            {"end": f"{y}-12-31", "val": v, "fp": "FY", "form": "10-K", "filed": f"{y+1}-02-01", "accn": f"acc-{y}"}
+            for y, v in vals.items()
+        ]
+    gaap: dict = {}
+    gaap["LiabilityForClaimsAndClaimsAdjustmentExpense"] = {"units": {"USD": _entries(years_losses)}}
+    if years_unearned:
+        gaap["UnearnedPremiums"] = {"units": {"USD": _entries(years_unearned)}}
+    if years_life:
+        gaap["PolicyholderFunds"] = {"units": {"USD": _entries(years_life)}}
+    return {"facts": {"us-gaap": gaap}}
+
+
+def test_build_insurance_float_table_basic():
+    from valuation.brk.tables import build_insurance_float_table
+    company_facts = _make_float_company_facts(
+        {2024: 90 * B, 2023: 85 * B},
+        years_unearned={2024: 20 * B, 2023: 19 * B},
+        years_life={2024: 15 * B, 2023: 14 * B},
+    )
+    table = build_insurance_float_table(company_facts, limit=5)
+    assert not table.empty
+    assert any(table["metric"] == "losses_and_lae")
+    assert any(table["metric"] == "unearned_premiums")
+    assert any(table["metric"] == "total_float_usd")
+    # Check total = 90 + 20 + 15 = 125B
+    total_row = table[table["metric"] == "total_float_usd"].iloc[0]
+    fy24_col = next(c for c in table.columns if "2024" in str(c))
+    assert total_row[fy24_col] == pytest.approx(125 * B)
+
+
+def test_build_insurance_float_table_cagr_positive_when_growing():
+    from valuation.brk.tables import build_insurance_float_table
+    company_facts = _make_float_company_facts({2024: 90 * B, 2023: 80 * B, 2022: 70 * B})
+    table = build_insurance_float_table(company_facts, limit=5)
+    assert "cagr_pct" in table.columns
+    total_row = table[table["metric"] == "total_float_usd"].iloc[0]
+    assert total_row["cagr_pct"] > 0
+
+
+def test_build_insurance_float_table_partial_components():
+    from valuation.brk.tables import build_insurance_float_table
+    # Only losses available — table should still return with that component
+    company_facts = _make_float_company_facts({2024: 90 * B})
+    table = build_insurance_float_table(company_facts, limit=5)
+    assert not table.empty
+    assert any(table["metric"] == "losses_and_lae")
+    assert any(table["metric"] == "total_float_usd")
+    total_row = table[table["metric"] == "total_float_usd"].iloc[0]
+    fy24_col = next(c for c in table.columns if "2024" in str(c))
+    assert total_row[fy24_col] == pytest.approx(90 * B)
+
+
+def test_build_insurance_float_table_empty_when_no_insurance_concepts():
+    from valuation.brk.tables import build_insurance_float_table
+    company_facts = {"facts": {"us-gaap": {"NetIncomeLoss": {"units": {"USD": [
+        {"end": "2024-12-31", "val": 10 * B, "fp": "FY", "form": "10-K", "filed": "2025-02-01", "accn": "a1"}
+    ]}}}}}
+    table = build_insurance_float_table(company_facts, limit=5)
+    assert table.empty

@@ -11,7 +11,7 @@ Rules:
 - when adding a new `company` section, test both file outputs and JSON bundle keys
 - CLI tests should stay offline and use monkeypatches or fixtures rather than live providers
 - keep assertions focused on backend behavior and stable contracts, not incidental table formatting
-- current full-suite baseline after hardening batch: `312 passed`
+- current full-suite baseline after hardening batch: `316 passed`
 
 Coverage map:
 
@@ -35,3 +35,4 @@ Coverage map:
 - `test_brk_tables.py` also covers T-bill payable plural variant (`Payable for purchases of U.S. Treasury Bills`)
 - `test_brk_tables.py` covers `build_buyback_history_table`: basic buyback row, CAGR direction (oldest→newest), implied price per share when shares-retired data present, per-current-share row, and empty return when concept absent
 - `test_ratios.py` covers `oe_per_share` in both SEC and Yahoo paths
+- `test_brk_tables.py` covers `build_insurance_float_table`: basic multi-component, positive CAGR direction, partial components (only losses), empty return when concepts absent

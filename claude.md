@@ -20,7 +20,7 @@ Current branch priority:
 - as of 2026-05-18, `brk` is mature; all prior hardening complete (liquidity, segments, SOTP, holdings history, price windows, diagnostics, valuation tables, valuation report, public-equity tax sensitivity)
 - 2026-05-18 live QA sweep passed for `./vf brk holdings --history --filings-limit 2 --limit 10`, `./vf brk sotp --details`, and `./vf brk sotp --price-change 1M`
 - `./vf brk valuation-report` now functional: self-contained Markdown artifact, findings-first order, terminal key-numbers preview, dynamic methodology notes, `--segment-filings`, selectable public-equity basis (`--equity-valuation-basis reported|live`), and public-equity tax context/sensitivity
-- 312 tests passing as of 2026-05-18 (post-hardening batch + buyback/oe-per-share additions)
+- 316 tests passing as of 2026-05-18 (post-hardening batch + buyback/oe-per-share/float/intrinsic additions)
 - temporary hardening branches should be merged back quickly, then deleted
 
 Long-term direction:
@@ -446,17 +446,15 @@ Next concrete tasks (updated 2026-05-18):
 - `build_buyback_history_table` added to `brk/tables.py`: annual `buyback_usd` from `PaymentsForRepurchaseOfCommonStock`, optional `implied_price_per_share_usd` (when `StockRepurchasedAndRetiredDuringPeriodShares` is in companyfacts), `buyback_per_brk_b_usd` when share count supplied; CAGR oldest→newest
 - Surfaced in `./vf brk sotp --details` ("Share Repurchase History" section) and `./vf brk valuation-report` (segment history block)
 
-**2. Explicit intrinsic value estimate** (most actionable addition)
-- The SOTP bridge gives the market-implied residual but no bottom-up "what is it worth" output
-- Add `build_intrinsic_value_estimate_table`: for given P/E multiples on operating earnings, compute implied total value → divide by BRK.B equivalent shares → show vs current price (upside/downside %)
-- Pairs with `build_opco_valuation_sensitivity_table` already in place; this is the per-share output row
-- Should emit in both `./vf brk sotp` and the valuation report
+**2. Explicit intrinsic value estimate** ✓ (shipped 2026-05-18)
+- `build_opco_valuation_sensitivity_table` (already in `brk/tables.py`) now wired into default `./vf brk sotp` output as "OpCo Intrinsic Value Estimate" (after Operating Business Reverse DCF), and into `./vf brk valuation-report` core section
+- Previously was only in `./vf brk sotp --details`; the duplicate `--details` call was removed
 
-**3. Insurance float quantification** (analytical completeness)
-- Float (~$170B) is currently only a hardcoded methodology note
-- Float is recoverable from the balance sheet: insurance liabilities lines (losses/LAE payable, unearned premiums, life/annuity benefits)
-- Add float extraction to `brk/service.py` and a display row in the valuation report methodology section
-- Track float growth rate across filings — float growth rate is a key indicator of BRK insurance franchise health
+**3. Insurance float quantification** ✓ (shipped 2026-05-18)
+- `build_insurance_float_table` added to `brk/tables.py`: queries companyfacts for `LiabilityForClaimsAndClaimsAdjustmentExpense`, `UnearnedPremiums`, and life/annuity benefit concepts; sums available components to `total_float_usd`; annual time series with CAGR
+- Surfaced in `./vf brk sotp --details` ("Insurance Float History") and `./vf brk valuation-report`
+- Valuation report methodology note for float now uses dynamic figure from the table; falls back to `~$170B` when companyfacts lack the concepts
+- Note: BRK may not have all float concepts in standard companyfacts (some are filing-note items); table degrades gracefully to empty when absent
 
 ### Tier 2 — Generic tool improvements
 
