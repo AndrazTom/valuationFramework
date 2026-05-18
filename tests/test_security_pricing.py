@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 
 from valuation.securities.pricing import (
+    calculate_price_change_pct,
     enrich_holdings_with_market_prices,
     fetch_price_change_snapshot,
     normalize_price_change_window,
@@ -112,6 +113,27 @@ def test_fetch_price_change_snapshot_adds_change_fields():
     assert snapshot["ticker"] == "AAPL"
     assert snapshot["price_change_window"] == "1M"
     assert snapshot["price_change_pct"] == pytest.approx((200.0 / 150.0) - 1.0)
+
+
+def test_calculate_price_change_handles_mixed_timezone_history_without_warning(recwarn):
+    history = pd.DataFrame(
+        {
+            "date": [
+                "2026-03-01T00:00:00-05:00",
+                "2026-04-09T00:00:00-04:00",
+            ],
+            "close": [150.0, 200.0],
+        }
+    )
+
+    change = calculate_price_change_pct(
+        snapshot={"last_price": 200.0},
+        history=history,
+        window="1M",
+    )
+
+    assert change == pytest.approx((200.0 / 150.0) - 1.0)
+    assert not [warning for warning in recwarn if issubclass(warning.category, FutureWarning)]
 
 
 def test_pricing_helpers_degrade_gracefully_when_quote_fetch_fails():

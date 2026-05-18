@@ -18,6 +18,9 @@ DISPLAY_COLUMN_ALIASES = {
     "accepted_at": "accepted at",
     "as_of": "as of",
     "cash_and_equivalents_usd": "cash",
+    "deferred_income_taxes_usd": "deferred taxes",
+    "equity_method_investments_usd": "equity method",
+    "equity_securities_usd": "equity securities",
     "coverage_ratio": "coverage",
     "earnings_before_income_taxes_usd": "pre-tax earnings",
     "expected_metric_count": "expected metrics",
@@ -33,6 +36,7 @@ DISPLAY_COLUMN_ALIASES = {
     "liquid_investments_total_usd": "gross liquidity",
     "metric_count": "metrics",
     "net_liquid_investments_usd": "net liquidity",
+    "notes_payable_and_other_borrowings_usd": "notes & borrowings",
     "payable_for_purchase_of_us_treasury_bills_usd": "T-bill payable",
     "period_count": "periods",
     "period_end": "as of",
@@ -55,10 +59,36 @@ DISPLAY_VALUE_ALIASES = {
     "public_equity_holdings_blended": "13F equities",
     "quoted_holdings_plus_net_liquidity": "13F + net liquidity",
     "residual_operating_and_other": "residual opco + other",
+    "deferred_income_taxes_usd": "deferred taxes",
+    "equity_method_investments_usd": "equity method",
+    "equity_securities_usd": "equity securities",
     "payable_for_purchase_of_us_treasury_bills": "T-bill payable",
+    "notes_payable_and_other_borrowings": "notes & borrowings",
+    "notes_payable_and_other_borrowings_usd": "notes & borrowings",
     "short_term_us_treasury_bills": "T-bills",
+    "total_assets_usd": "total assets",
+    "total_liabilities_usd": "total liabilities",
     "fixed_maturity_securities": "fixed maturities",
     "cash_and_equivalents": "cash",
+    "13f_live_resolved_value_usd": "13F live resolved",
+    "13f_reported_value_usd": "13F reported value",
+    "blended_13f_value_usd": "blended 13F value",
+    "brk_b_last_price": "BRK.B last price",
+    "brk_b_price_change_pct": "BRK.B change",
+    "holdings_minus_brk_b_change_pct": "holdings vs BRK.B",
+    "live_price_coverage_pct": "live price coverage",
+    "live_resolved_13f_value_usd": "live 13F value",
+    "market_value_live_resolved_usd": "live resolved value",
+    "positions_without_live_price": "without live price",
+    "reported_value_resolved_usd": "reported resolved value",
+    "resolved_holdings_weighted_change_pct": "holdings change",
+    "resolved_positions_count": "resolved positions",
+    "resolved_positions_live_value_usd": "resolved live value",
+    "resolved_positions_reported_value_usd": "resolved reported value",
+    "top_holdings_minus_brk_b_change_pct": "top holdings vs BRK.B",
+    "top_holdings_reported_value_usd": "top holdings reported",
+    "top_holdings_weighted_change_pct": "top holdings change",
+    "unresolved_13f_value_reported_usd": "unresolved 13F reported",
 }
 
 TERMINAL_SECONDARY_COLUMNS = [
@@ -252,7 +282,7 @@ def _wrap_terminal_cell(value, *, column: str):
         width = 26
     elif column_name in {"field", "metric"}:
         width = 26
-    elif column_name in {"name"}:
+    elif column_name in {"name", "issuer", "top holding"}:
         width = 36
     elif column_name in {"concept", "primary document", "description", "filing url", "reason", "website"}:
         width = 30

@@ -25,11 +25,13 @@ from valuation.brk.tables import (
     build_13f_portfolio_change_summary_table,
     build_13f_summary_table,
     build_13f_live_price_summary_table,
+    build_balance_sheet_context_table,
     build_brk_operating_reverse_dcf_table,
     build_brk_valuation_assumptions_table,
     build_key_facts_table,
     build_holdings_vs_brk_price_change_table,
     build_liquidity_bridge_table,
+    build_liquidity_detail_table,
     build_liquidity_summary_table,
     build_latest_liquidity_snapshot_table,
     build_market_anchor_table,
@@ -50,7 +52,7 @@ from valuation.data.normalize.tables import (
     snapshot_to_table,
 )
 from valuation.data.providers.yahoo import YahooFinanceClient
-from valuation.reports.tables import render_terminal_table, write_csv, write_markdown
+from valuation.reports.tables import render_markdown_table, render_terminal_table, write_csv, write_markdown
 from valuation.securities.pricing import (
     enrich_holdings_with_market_prices,
     fetch_price_change_snapshot,
@@ -182,6 +184,18 @@ def register_brk_parser(subparsers) -> None:
         help="Include supporting assumptions, market anchor, liquidity, holdings, and segment tables.",
     )
 
+    report_parser = brk_subparsers.add_parser(
+        "valuation-report",
+        help="Generate a self-contained Berkshire valuation report as a Markdown file.",
+    )
+    report_parser.add_argument("--outdir", default="outputs/tables")
+    report_parser.add_argument(
+        "--period",
+        choices=("annual", "quarterly"),
+        default="annual",
+        help="Use annual 10-K or quarterly 10-Q inputs for liquidity and segment context.",
+    )
+
 
 def run_brk_command(args: argparse.Namespace) -> int:
     """Dispatch Berkshire subcommands."""
@@ -226,6 +240,8 @@ def run_brk_command(args: argparse.Namespace) -> int:
             price_change_window=args.price_change_window,
             details=args.details,
         )
+    if args.brk_command == "valuation-report":
+        return run_brk_valuation_report(outdir=args.outdir, period=args.period)
     raise ValueError(f"Unknown Berkshire command: {args.brk_command}")
 
 
@@ -408,7 +424,8 @@ def run_brk_liquidity(
     bridge = build_liquidity_bridge_table(bundle.filings)
     sections = [
         ("Liquidity History", build_liquidity_summary_table(bridge)),
-        ("Liquidity Bridge", bridge),
+        ("Liquidity Bridge", build_liquidity_detail_table(bridge)),
+        ("Balance Sheet Context", build_balance_sheet_context_table(bridge)),
     ]
     _emit_sections(sections, Path(outdir) / "BRK_LIQUIDITY")
     return 0
@@ -539,6 +556,10 @@ def run_brk_sotp(
                 "Liquidity Snapshot",
                 build_latest_liquidity_snapshot_table(liquidity_bridge),
             ),
+            (
+                "Balance Sheet Context",
+                build_balance_sheet_context_table(liquidity_bridge),
+            ),
         ]
     if price_change_window is not None:
         sections.append(
@@ -585,6 +606,96 @@ def run_brk_sotp(
             )
         sections.extend(build_segment_period_sections(bundle.segments.filings, period=period))
     _emit_sections(sections, Path(outdir) / "BRK_SOTP")
+    return 0
+
+
+def run_brk_valuation_report(outdir: str, period: str) -> int:
+    """Generate a self-contained Berkshire valuation report as a single Markdown file."""
+    from datetime import datetime as _dt
+
+    yahoo = YahooFinanceClient()
+    bundle = fetch_brk_valuation_bundle(period=period, yahoo_client=yahoo, segment_limit=4)
+    reference = build_brk_security_reference()
+    enriched_holdings = enrich_holdings_with_market_prices(
+        aggregate_13f_holdings(bundle.holdings.holdings),
+        reference,
+        yahoo_client=yahoo,
+    )
+
+    operating_context = build_operating_business_context_table(
+        bundle, reference, period=period, yahoo_client=yahoo, enriched_holdings=enriched_holdings,
+    )
+    reverse_dcf = build_brk_operating_reverse_dcf_table(
+        operating_context, bundle.overview.market_snapshot
+    )
+    liquidity_bridge = build_liquidity_bridge_table(bundle.liquidity.filings)
+
+    sections = [
+        ("Valuation Assumptions", build_brk_valuation_assumptions_table(period=period)),
+        ("Market Anchor", build_market_anchor_table(bundle.overview.market_snapshot)),
+        (
+            "Public Equity Portfolio",
+            build_public_equity_portfolio_summary_table(
+                bundle.holdings.holdings, reference,
+                yahoo_client=yahoo, enriched_holdings=enriched_holdings,
+            ),
+        ),
+        ("Liquidity Snapshot", build_latest_liquidity_snapshot_table(liquidity_bridge)),
+        ("Balance Sheet Context", build_balance_sheet_context_table(liquidity_bridge)),
+        (
+            "Market-Implied SOTP Bridge",
+            build_market_implied_sotp_bridge_table(
+                bundle, reference, yahoo_client=yahoo, enriched_holdings=enriched_holdings,
+            ),
+        ),
+        ("Operating Business Context", operating_context),
+    ]
+    if not reverse_dcf.empty:
+        sections.append(("Operating Business Reverse DCF", reverse_dcf))
+    sections.extend(build_segment_period_sections(bundle.segments.filings, period=period))
+
+    now = _dt.now()
+    price_date = bundle.overview.market_snapshot.get("latest_price_date", "unknown")
+    holdings_date = bundle.holdings.filing_date or "unknown"
+
+    lines = [
+        "# Berkshire Hathaway Valuation Report",
+        "",
+        f"Generated: {now.strftime('%Y-%m-%d %H:%M')}  ",
+        f"Price date: {price_date}  ",
+        f"13F filing date: {holdings_date}  ",
+        f"Segment period type: {period}  ",
+        "",
+        "## Methodology Notes",
+        "",
+        "- **SOTP residual is market-implied (circular):** The operating-business residual is",
+        "  `market cap − public equities − net liquidity`. It reflects what the market is already",
+        "  pricing in, not an independent bottoms-up appraisal of the operating businesses.",
+        "- **Reverse DCF uses pre-tax segment earnings:** Implied growth rates are approximations.",
+        "  Multiply the earnings yield by ~0.75 to estimate an after-tax equivalent.",
+        "- **Fixed maturity securities** (~$25B) are insurance-reserve-backed and not freely",
+        "  deployable excess capital.",
+        "- **Insurance float (~$170B)** is not separately valued in this bridge. Float enables",
+        "  investment of policyholders' funds at near-zero cost and is implicitly captured in the",
+        "  public-equity portfolio value.",
+        "- **Owner earnings** = net income + D&A − capex. For BNSF and other capital-intensive",
+        "  subsidiaries where capex substantially exceeds D&A, this may overstate maintenance-",
+        "  adjusted earnings.",
+        "- **13F lag:** Unresolved holdings use reported values from the 13F filing date, not today.",
+        "",
+    ]
+
+    for title, frame in sections:
+        lines.append(f"## {title}")
+        lines.append("")
+        lines.append(render_markdown_table(frame))
+        lines.append("")
+
+    content = "\n".join(lines)
+    outpath = Path(outdir) / f"brk_valuation_report_{now.strftime('%Y%m%d')}.md"
+    outpath.parent.mkdir(parents=True, exist_ok=True)
+    outpath.write_text(content, encoding="utf-8")
+    print(f"\nValuation report written to: {outpath}")
     return 0
 
 

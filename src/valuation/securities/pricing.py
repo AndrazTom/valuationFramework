@@ -268,7 +268,11 @@ def _normalize_history_frame(history: pd.DataFrame) -> pd.DataFrame:
     if date_column is None or "close" not in history.columns:
         return pd.DataFrame(columns=["price_date", "close"])
     normalized = history[[date_column, "close"]].copy()
-    normalized["price_date"] = pd.to_datetime(normalized[date_column], errors="coerce")
+    normalized["price_date"] = pd.to_datetime(
+        normalized[date_column],
+        errors="coerce",
+        utc=True,
+    )
     normalized["close"] = pd.to_numeric(normalized["close"], errors="coerce")
     normalized = normalized.dropna(subset=["price_date", "close"]).sort_values("price_date")
     return normalized.reset_index(drop=True)

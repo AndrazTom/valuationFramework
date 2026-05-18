@@ -27,8 +27,10 @@ Current Berkshire stack:
 - live-price tables should explain when Yahoo resolved nothing in the current run instead of silently showing blank comparisons
 - liquidity history from SEC filing balance-sheet tables
 - top-level operating segment extraction from filing report tables
+- BRK income statement EPS/share fallback from filing report tables under `brk/statements.py`
 - first Berkshire market-implied SOTP bridge
 - SOTP now includes operating-business context that compares the residual to latest reported segment pre-tax earnings
+- SOTP `--details` includes balance-sheet context rows for major assets/liabilities that remain inside the residual
 - default SOTP output should stay compact; keep supporting assumptions, quoted-holdings, liquidity, and segment-period tables behind `--details`
 - liquidity and segments both support:
   - `--period annual|quarterly`
@@ -77,14 +79,19 @@ Recent completed output:
   - default `./vf brk sotp` now includes `Operating Business Reverse DCF` table after `Operating Business Context`
   - shows implied growth at 8%/10%/12% required return and zero-growth operating value per BRK-B share
   - residual is market-implied (includes non-13F assets, debt, taxes); treat implied growth as approximation
+- Berkshire EPS/share filing-table fallback (2026-05-18):
+  - `./vf statements BRK --statement income --period annual` fills Class B EPS and equivalent-share rows from `Consolidated Statements of Earnings`
+  - `./vf statements BRK --statement income --period quarterly` fills available direct 3-month Class B EPS/share rows from recent 10-Qs
+  - quarterly fallback intentionally ignores 6/9-month YTD columns and leaves Q4 blank instead of deriving per-share figures from annual/YTD disclosures
+- SOTP balance-sheet residual context (2026-05-18):
+  - `./vf brk sotp --details` emits `Balance Sheet Context`
+  - rows include equity securities, equity-method investments, total assets, notes payable and other borrowings, deferred income taxes, and total liabilities
+  - these rows are context only; do not add them to net liquidity or subtract them again in the SOTP bridge without redefining the residual
+  - filing parser accepts both `Payable for purchase of U.S. Treasury Bills` and `Payable for purchases of U.S. Treasury Bills`
 
 Next concrete Berkshire tasks:
 
-- inspect BRK filing statement tables for EPS and weighted-average share rows missing from current SEC companyfacts statements; requires live exploration to identify correct report short names
-  - keep any BRK-specific statement fallback in this subtree unless it proves generic
-  - split fixed maturity securities and other non-13F assets more explicitly if filing tables support it
-  - run live QA sweep including `./vf brk sotp --price-change 1M` and `./vf brk holdings --history --filings-limit 2`
-  - valuation MVP: owner earnings approach using segments + capex
+- valuation MVP: owner earnings approach using segments + capex
 
 Rules:
 

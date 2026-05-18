@@ -114,6 +114,7 @@ def build_historical_ratios_table_from_yahoo(
     price_history: pd.DataFrame,
     *,
     currency: str = "USD",
+    limit: int = 10,
 ) -> pd.DataFrame:
     """Return per-fiscal-year valuation ratios from Yahoo annual statement frames.
 
@@ -130,7 +131,7 @@ def build_historical_ratios_table_from_yahoo(
     period_dates = sorted(
         [c for c in income_annual.columns if hasattr(c, "year")],
         reverse=True,
-    )
+    )[:limit]
     if not period_dates:
         return pd.DataFrame()
 

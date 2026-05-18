@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
 from valuation.brk.cli import register_brk_parser, run_brk_command
+from valuation.brk.statements import supplement_brk_income_statement_eps_shares
 from valuation.company.service import fetch_company_facts, fetch_company_snapshot
 from valuation.company.statements import build_statement_diagnostics_table, build_statement_table, build_statement_table_ttm
 from valuation.company.tables import (
@@ -57,6 +59,11 @@ from valuation.reports.tables import (
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="valuation framework CLI")
+    parser.add_argument(
+        "--refresh-cache",
+        action="store_true",
+        help="Bypass provider cache for this run and overwrite cached SEC/Yahoo payloads.",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     snapshot_parser = subparsers.add_parser(
@@ -385,6 +392,7 @@ def run_ratios(
             balance_annual=frames[("balance", "annual")],
             cashflow_annual=frames[("cashflow", "annual")],
             price_history=price_history,
+            limit=limit,
         )
     else:
         print(f"Error: could not resolve {identifier!r}", file=sys.stderr)
@@ -511,6 +519,18 @@ def run_statements(
                 start_quarter=start_quarter,
                 end_quarter=end_quarter,
             )
+            if (
+                statement == "income"
+                and bundle.resolution.sec_company is not None
+                and bundle.resolution.sec_company.ticker.upper() == "BRK-B"
+            ):
+                statement_table = supplement_brk_income_statement_eps_shares(
+                    statement_table,
+                    sec_client=SecClient(),
+                    company=bundle.resolution.sec_company,
+                    submissions=None,
+                    period=period,
+                )
         if diagnostics and period != "ttm":
             diagnostics_table = build_statement_diagnostics_table(
                 bundle.company_facts,
@@ -612,6 +632,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     load_project_env()
     parser = build_parser()
     args = parser.parse_args(argv)
+    previous_refresh_cache = os.environ.get("VALUATION_REFRESH_CACHE")
+    if args.refresh_cache:
+        os.environ["VALUATION_REFRESH_CACHE"] = "1"
 
     try:
         if args.command == "snapshot":
@@ -667,6 +690,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except (LookupError, RuntimeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    finally:
+        if args.refresh_cache:
+            if previous_refresh_cache is None:
+                os.environ.pop("VALUATION_REFRESH_CACHE", None)
+            else:
+                os.environ["VALUATION_REFRESH_CACHE"] = previous_refresh_cache
     return 1
 
 

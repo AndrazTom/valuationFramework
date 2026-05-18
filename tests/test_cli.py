@@ -69,6 +69,22 @@ def test_cli_rejects_negative_filings_limit():
         cli.main(["snapshot", "BRK-B", "--filings-limit", "-1"])
 
 
+def test_cli_refresh_cache_sets_provider_env(monkeypatch, tmp_path: Path):
+    captured = {}
+
+    def fake_snapshot(ticker, outdir, filings_limit, output_format):
+        captured["refresh"] = __import__("os").environ.get("VALUATION_REFRESH_CACHE")
+        return 0
+
+    monkeypatch.delenv("VALUATION_REFRESH_CACHE", raising=False)
+    monkeypatch.setattr(cli, "run_snapshot", fake_snapshot)
+
+    result = cli.main(["--refresh-cache", "snapshot", "BRK-B", "--outdir", str(tmp_path)])
+
+    assert result == 0
+    assert captured["refresh"] == "1"
+
+
 def test_snapshot_cli_writes_files(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(cli, "SecClient", lambda: FakeSecClient())
     monkeypatch.setattr(cli, "YahooFinanceClient", lambda: FakeYahooClient())
@@ -654,6 +670,7 @@ def test_brk_sotp_cli_writes_expected_sections(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(brk_cli, "build_liquidity_bridge_table", lambda filings: pd.DataFrame())
     monkeypatch.setattr(brk_cli, "build_liquidity_summary_table", lambda bridge: pd.DataFrame())
     monkeypatch.setattr(brk_cli, "build_latest_liquidity_snapshot_table", lambda bridge: pd.DataFrame())
+    monkeypatch.setattr(brk_cli, "build_balance_sheet_context_table", lambda bridge: pd.DataFrame())
     monkeypatch.setattr(
         brk_cli,
         "build_market_implied_sotp_bridge_table",
@@ -717,11 +734,12 @@ def test_brk_sotp_cli_writes_expected_sections(monkeypatch, tmp_path: Path):
         "Valuation Assumptions",
         "Market Anchor",
         "Public Equity Portfolio Summary",
-        "Quoted Holdings Summary",
-        "Liquidity Snapshot",
-        "Market-Implied SOTP Bridge",
-        "Operating Business Context",
-        "BRK vs Holdings Price Change (1M)",
+            "Quoted Holdings Summary",
+            "Liquidity Snapshot",
+            "Balance Sheet Context",
+            "Market-Implied SOTP Bridge",
+            "Operating Business Context",
+            "BRK vs Holdings Price Change (1M)",
     ]
 
 

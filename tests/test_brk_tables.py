@@ -19,11 +19,13 @@ from valuation.brk.tables import (
     build_13f_issuer_change_summary_table,
     build_13f_portfolio_change_summary_table,
     build_13f_live_price_summary_table,
+    build_balance_sheet_context_table,
     build_brk_valuation_context_table,
     build_segment_period_sections,
     build_holdings_vs_brk_price_change_table,
     build_key_facts_table,
     build_liquidity_bridge_table,
+    build_liquidity_detail_table,
     build_liquidity_summary_table,
     build_market_implied_sotp_bridge_table,
     build_market_anchor_table,
@@ -608,6 +610,58 @@ def test_build_liquidity_summary_table():
 
     assert summary.iloc[0]["core_liquidity_total_usd"] == 369.153 * B
     assert summary.iloc[0]["liquid_investments_total_usd"] == 386.969 * B
+
+
+def test_build_balance_sheet_context_table_shows_selected_residual_context():
+    filings = [
+        BrkLiquidityFiling(
+            filing_date="2026-05-04",
+            accession_number="0001",
+            form="10-Q",
+            balance_sheet=pd.DataFrame(
+                [
+                    ["Investments in equity securities", "", "288,034", "297,778"],
+                    ["Equity method investments", "", "19,951", "19,978"],
+                    ["Total assets", "", "1,252,271", "1,222,176"],
+                    ["Income taxes, principally deferred", "", "88,685", "86,955"],
+                    ["Total liabilities", "", "522,821", "502,473"],
+                    ["Notes payable and other borrowings", "", "42,835", "45,763"],
+                    ["Notes payable and other borrowings", "", "86,051", "83,318"],
+                ],
+                columns=[
+                    "Consolidated Balance Sheets",
+                    "Consolidated Balance Sheets",
+                    "Mar. 31, 2026",
+                    "Dec. 31, 2025",
+                ],
+            ),
+        )
+    ]
+
+    bridge = build_liquidity_bridge_table(filings)
+    context = build_balance_sheet_context_table(bridge)
+
+    fields = dict(zip(context["field"], context["value"]))
+    assert fields["period_end"] == "2026-03-31"
+    assert fields["equity_securities_usd"] == 288_034 * M
+    assert fields["equity_method_investments_usd"] == 19_951 * M
+    assert fields["deferred_income_taxes_usd"] == 88_685 * M
+    assert fields["total_liabilities_usd"] == 522_821 * M
+    assert fields["notes_payable_and_other_borrowings_usd"] == (42_835 + 86_051) * M
+
+
+def test_build_liquidity_detail_table_excludes_context_rows():
+    bridge = pd.DataFrame(
+        [
+            {"metric": "cash_and_equivalents", "value_usd": 1.0},
+            {"metric": "equity_securities", "value_usd": 2.0},
+            {"metric": "notes_payable_and_other_borrowings", "value_usd": 3.0},
+        ]
+    )
+
+    detail = build_liquidity_detail_table(bridge)
+
+    assert list(detail["metric"]) == ["cash_and_equivalents"]
 
 
 def test_build_top_level_operating_segments_summary_table_history():

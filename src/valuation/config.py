@@ -29,6 +29,18 @@ def using_default_sec_user_agent() -> bool:
     return get_sec_user_agent() == DEFAULT_SEC_USER_AGENT
 
 
+def cache_dir() -> Path:
+    """Return the persistent cache root for provider payloads."""
+    load_project_env()
+    configured = os.getenv("VALUATION_CACHE_DIR")
+    if configured:
+        return Path(configured).expanduser()
+    xdg_cache = os.getenv("XDG_CACHE_HOME")
+    if xdg_cache:
+        return Path(xdg_cache).expanduser() / "valuationFramework"
+    return Path.home() / ".cache" / "valuationFramework"
+
+
 def _candidate_env_paths() -> list[Path]:
     cwd_env = Path.cwd() / ".env"
     repo_env = Path(__file__).resolve().parents[2] / ".env"

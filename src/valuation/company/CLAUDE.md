@@ -82,6 +82,7 @@ Statement rules:
 - SEC quarterly flows may derive quarter values from YTD/FY facts
 - balance-sheet items should stay instant and avoid subtraction logic
 - diluted EPS / diluted shares should prefer direct-quarter values
+- BRK is the one current generic `statements` special case: `valuation.brk.statements` supplements annual/direct-quarterly Class B EPS and equivalent-share rows from filing report tables because SEC companyfacts omits those concepts for Berkshire
 - missing statement rows should be explainable through an explicit diagnostic path; do not make users infer whether a row is absent because the concept is missing, stale, wrong-unit, or has no usable period
 - `./vf statements ... --diagnostics` / `--include-missing` emits `Statement Diagnostics` for SEC-backed statements; keep default statement output clean
 - cash flow statement appends a derived `free_cash_flow = operating_cash_flow - capex` row when both are present; capex is `PaymentsToAcquirePropertyPlantAndEquipment`, a positive outflow

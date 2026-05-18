@@ -17,8 +17,9 @@ Project posture:
 Current branch priority:
 
 - `brk` is the Berkshire-specific proving ground layered on top of the generic base from `main`
-- as of 2026-05-18, `brk` is mature and the current focus is final QA sweep before merging toward `main`
+- as of 2026-05-18, `brk` is mature; the requested live QA sweep, BRK EPS/share filing-table fallback, and SOTP balance-sheet residual context are complete, with Yahoo Europe hardening left if specific issuers fail
 - all prior hardening work is complete (liquidity, segments, SOTP, holdings history, price windows, diagnostics, valuation tables)
+- 2026-05-18 live QA sweep passed for `./vf brk holdings --history --filings-limit 2 --limit 10`, `./vf brk sotp --details`, and `./vf brk sotp --price-change 1M`; the sweep only found terminal readability issues, now fixed in the report renderer
 - temporary hardening branches should be merged back quickly, then deleted
 
 Long-term direction:
@@ -52,6 +53,13 @@ Long-term direction:
   - support both a repo-local `.env` and explicit exported variables
   - code should load `.env` without relying only on the `vf` shell wrapper
   - exported env vars should keep precedence over `.env`
+- cache note:
+  - SEC provider payloads persist under `~/.cache/valuationFramework/sec` by default, or `VALUATION_CACHE_DIR/sec`
+  - mutable SEC endpoints auto-expire: company ticker map 24h, submissions 12h, companyfacts 24h
+  - immutable filing artifacts such as filing indexes, `FilingSummary.xml`, report HTML, and 13F XML cache indefinitely
+  - Yahoo price snapshots persist under `~/.cache/valuationFramework/yahoo/snapshots` for 1h
+  - Yahoo history frames persist under `~/.cache/valuationFramework/yahoo/history` for 24h
+  - use `./vf --refresh-cache ...` to force provider refresh for one run
 
 ## Current Architecture
 
@@ -78,6 +86,8 @@ Rules:
   - `data/normalize` stabilizes
   - `company` assembles product-facing tables
   - `reports` renders and exports
+- broad universe downloads should be built on a persisted cache/index layer, not by repeatedly hitting providers in ad hoc command loops
+- for a future top-500 US or top-1000 global command, define the universe source, ranking date, and licensing/data-source assumptions before implementation
 
 ## Repo Map
 
@@ -116,6 +126,8 @@ Rules:
   - SEC filing report tables are now parsed in-code from HTML rather than relying on `pandas.read_html` + `lxml`
 - `src/valuation/reports/tables.py`
   - rendering and export helpers
+  - terminal display aliases keep BRK live/resolved 13F and price-change field labels compact without changing backend table keys
+  - security identity columns such as `issuer` should stay on one terminal row; wrapping them can look like false extra holdings
 - `src/valuation/securities/identifiers.py`
   - canonical `security_id` rules
 - `tests/`
@@ -148,10 +160,12 @@ Keep `main` generic. Do not leak Berkshire assumptions into generic modules.
 - operating business reverse DCF (Gordon Growth implied growth at 8%/10%/12% required return)
 - valuation tables (implied value range, reverse DCF) inherited from generic company workflow
 
-As of 2026-05-18, `brk` is ahead of `main` and ready for a QA sweep before merging back.
+As of 2026-05-18, `brk` is ahead of `main`; the live QA sweep and EPS/share fallback are complete before merging back.
 
 - inherit the generic company/snapshot/statements stack from `main`
 - keep Berkshire-specific logic in `src/valuation/brk/`
+- `src/valuation/brk/statements.py` fills BRK Class B EPS/equivalent-share rows from filing report tables for annual and direct quarterly income statements when companyfacts omits them
+- SOTP `--details` emits balance-sheet context rows for major assets/liabilities that remain inside the residual; these rows are context only and should not be added to net liquidity without redefining the bridge
 - keep Berkshire assumptions out of generic modules unless they are reusable and parameterized cleanly
 
 Reusable pieces discovered there should be extracted back into `main`.
@@ -189,6 +203,7 @@ As of 2026-05-18, `main` contains (on `brk`, pending merge):
     - additive flows may derive from YTD/FY
     - balance-sheet items stay instant
     - diluted EPS / diluted shares should prefer direct-quarter facts and avoid subtraction
+  - BRK income statements add a Berkshire-only filing-table fallback for Class B EPS/share rows from `Consolidated Statements of Earnings`; quarterly fallback uses only `3 Months Ended` columns and leaves Q4 blank rather than deriving per-share values from annual/YTD disclosures
 - multi-security comps table: `./vf comps AAPL MSFT GOOG` fetches TTM metrics in parallel and renders side-by-side
 - historical valuation ratios: `./vf ratios AAPL --limit 5` shows annual P/E, P/OE, OE yield, P/B, EV/EBITDA with price from Yahoo monthly history
 - persistent watchlist: `./vf watchlist add/remove/list/show` backed by `~/.config/valuationFramework/watchlist.toml`
@@ -365,14 +380,15 @@ Completed on 2026-05-18 (generic company research tools):
 
 Next concrete tasks:
 
-1. Berkshire statement fallback:
-   - investigate BRK 10-Q/10-K filing statement tables for EPS and weighted-average share rows absent from SEC companyfacts
-   - requires live SEC exploration to identify correct report short names; cannot be done offline
-   - if present, add a Berkshire-specific filing-table fallback under `src/valuation/brk/`
-2. Berkshire SOTP depth:
-   - add more non-13F balance-sheet items explicitly (deferred taxes, pension obligations) where filing tables reliably expose them
-   - confirm the residual is well-defined after all explicit components are separated
-3. Generic company improvements:
+1. Berkshire valuation report:
+   - add `./vf brk valuation-report` that composes the current SOTP, operating context, reverse DCF, balance-sheet context, and assumptions into one Markdown artifact
+   - include generated timestamp, command, filing dates/accessions, price date, and clear caveats
+2. Cached universe/index layer:
+   - build a small security/filer index before any top-500/top-1000 downloader
+   - for updated SEC filings after long gaps, refresh submissions first, compare latest accession/report dates to local index, then fetch only new immutable filing artifacts
+3. Yahoo Europe hardening:
+   - collect specific issuer failures before changing mappings; bank/insurance statement shapes can be legitimately sparse
+4. Generic company improvements:
    - statement concept coverage: consider sector-specific concept additions for energy/utility/insurance companies
    - filing quality: ensure `8-K` and proxy filings are surfaced cleanly in the company view
 4. QA sweep completed on 2026-05-18:

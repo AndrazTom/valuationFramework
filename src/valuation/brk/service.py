@@ -329,7 +329,7 @@ def fetch_brk_valuation_bundle(
     return BrkValuationBundle(
         overview=fetch_brk_overview(sec_client=sec, yahoo_client=yahoo),
         holdings=fetch_latest_brk_13f(sec_client=sec),
-        liquidity=fetch_brk_liquidity(sec_client=sec, period=period, limit=1),
+        liquidity=fetch_brk_liquidity(sec_client=sec, period="latest", limit=1),
         segments=fetch_brk_segments(sec_client=sec, period=period, limit=segment_limit),
     )
 
@@ -394,6 +394,8 @@ def _forms_for_period(period: str) -> tuple[str, ...]:
         return ("10-K",)
     if period == "quarterly":
         return ("10-Q",)
+    if period == "latest":
+        return ("10-K", "10-Q")
     raise ValueError(f"Unsupported Berkshire period: {period}")
 
 
@@ -473,6 +475,7 @@ def _filing_period_key(filing: Mapping[str, str], *, period: str) -> tuple[int, 
         return None
     if period == "annual":
         return (year, 0)
+    # "quarterly" and "latest" both use a quarter-based key
     quarter = ((month - 1) // 3) + 1
     if month == 12 and day == 31 and filing.get("form") == "10-K":
         quarter = 4

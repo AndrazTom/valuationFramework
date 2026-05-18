@@ -11,6 +11,8 @@ Rules:
 - apply display aliases and human-readable formatting only for terminal / markdown / csv presentation
 - terminal rendering may drop low-value metadata columns to fit normal terminal widths, but must not drop requested period/history columns
 - when period/history columns make a terminal table too wide, split them into repeated period blocks; Markdown/CSV/JSON should remain complete
+- keep security identity columns such as `issuer` readable on one terminal row where practical; wrapping them into continuation lines can look like extra rows
+- use display aliases for long field/metric labels when terminal readability is the only concern; do not rename backend columns just to shorten table output
 - when adding a new `company` section, keep JSON bundle naming stable and make the section export alongside the table outputs
 - prefer small generic helpers over command-specific formatting branches
 - current export pattern is one `bundle.json` plus one file per section slug

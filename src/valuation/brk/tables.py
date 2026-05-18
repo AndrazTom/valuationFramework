@@ -101,6 +101,25 @@ BRK_LIQUIDITY_REPORT_LABELS = {
     "payable_for_purchase_of_us_treasury_bills": "Payable for purchase of U.S. Treasury Bills",
 }
 
+BRK_BALANCE_SHEET_CONTEXT_LABELS = {
+    "equity_securities": "Investments in equity securities",
+    "equity_method_investments": "Equity method investments",
+    "total_assets": "Total assets",
+    "deferred_income_taxes": "Income taxes, principally deferred",
+    "total_liabilities": "Total liabilities",
+}
+
+BRK_BALANCE_SHEET_CONTEXT_SUM_LABELS = {
+    "notes_payable_and_other_borrowings": "Notes payable and other borrowings",
+}
+
+BRK_REPORT_LABEL_ALIASES = {
+    "Payable for purchase of U.S. Treasury Bills": (
+        "Payable for purchase of U.S. Treasury Bills",
+        "Payable for purchases of U.S. Treasury Bills",
+    ),
+}
+
 CORE_BRK_FORMS = ("10-K", "10-Q", "8-K", "DEF 14A", "13F-HR", "13F-HR/A")
 
 BRK_13F_HISTORY_SUMMARY_COLUMNS = [
@@ -187,7 +206,7 @@ def build_liquidity_bridge_table(filings: Sequence[BrkLiquidityFiling]) -> pd.Da
                     "period_end": period_end,
                     "accession_number": filing.accession_number,
                     "metric": metric,
-                    "label": BRK_LIQUIDITY_REPORT_LABELS[metric],
+                    "label": _report_label_for_metric(metric),
                     "value_usd": value,
                 }
             )
@@ -260,6 +279,45 @@ def build_liquidity_summary_table(bridge: pd.DataFrame) -> pd.DataFrame:
         by=["filing_date", "period_end"],
         ascending=False,
     ).reset_index(drop=True)
+
+
+def build_liquidity_detail_table(bridge: pd.DataFrame) -> pd.DataFrame:
+    """Return only the rows that make up the liquidity subtotal."""
+    if bridge.empty:
+        return bridge
+    return bridge[bridge["metric"].isin(BRK_LIQUIDITY_REPORT_LABELS)].reset_index(drop=True)
+
+
+def build_balance_sheet_context_table(bridge: pd.DataFrame) -> pd.DataFrame:
+    """Return latest selected Berkshire balance-sheet rows that remain SOTP context."""
+    if bridge.empty:
+        return pd.DataFrame(columns=["field", "value"])
+    summary = _balance_sheet_context_summary_table(bridge)
+    if summary.empty:
+        return pd.DataFrame(columns=["field", "value"])
+    latest = summary.iloc[0]
+    fields = [
+        "period_end",
+        "equity_securities_usd",
+        "equity_method_investments_usd",
+        "total_assets_usd",
+        "notes_payable_and_other_borrowings_usd",
+        "deferred_income_taxes_usd",
+        "total_liabilities_usd",
+    ]
+    rows = [
+        {"field": field, "value": latest.get(field)}
+        for field in fields
+        if field in latest.index and latest.get(field) is not None and pd.notna(latest.get(field))
+    ]
+    if rows:
+        rows.append(
+            {
+                "field": "context_note",
+                "value": "Selected balance-sheet assets and liabilities remain inside the SOTP residual; they are shown for context, not added to the liquidity subtotal",
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def filter_core_filings_table(frame: pd.DataFrame, limit: int = 10) -> pd.DataFrame:
@@ -772,6 +830,39 @@ def build_latest_liquidity_snapshot_table(bridge: pd.DataFrame) -> pd.DataFrame:
     return latest[[column for column in ordered if column in latest.columns]].reset_index(drop=True)
 
 
+def _balance_sheet_context_summary_table(bridge: pd.DataFrame) -> pd.DataFrame:
+    if bridge.empty:
+        return pd.DataFrame()
+    context_metrics = set(BRK_BALANCE_SHEET_CONTEXT_LABELS) | set(BRK_BALANCE_SHEET_CONTEXT_SUM_LABELS)
+    filtered = bridge[bridge["metric"].isin(context_metrics)]
+    if filtered.empty:
+        return pd.DataFrame()
+    summary = (
+        filtered.pivot_table(
+            index=["filing_date", "form", "period_end", "accession_number"],
+            columns="metric",
+            values="value_usd",
+            aggfunc="first",
+        )
+        .reset_index()
+        .rename_axis(columns=None)
+    )
+    summary = summary.rename(
+        columns={
+            "equity_securities": "equity_securities_usd",
+            "equity_method_investments": "equity_method_investments_usd",
+            "total_assets": "total_assets_usd",
+            "deferred_income_taxes": "deferred_income_taxes_usd",
+            "total_liabilities": "total_liabilities_usd",
+            "notes_payable_and_other_borrowings": "notes_payable_and_other_borrowings_usd",
+        }
+    )
+    return summary.sort_values(
+        by=["filing_date", "period_end"],
+        ascending=False,
+    ).reset_index(drop=True)
+
+
 def build_public_equity_portfolio_summary_table(
     holdings: pd.DataFrame,
     reference: pd.DataFrame,
@@ -864,6 +955,18 @@ def build_brk_valuation_assumptions_table(*, period: str) -> pd.DataFrame:
             {
                 "field": "residual_definition",
                 "value": "Market cap less blended 13F public equities less net liquid investments",
+            },
+            {
+                "field": "residual_circularity_note",
+                "value": "Residual is market-implied (circular): it reflects the market's current pricing, not an independent bottoms-up appraisal of operating business value",
+            },
+            {
+                "field": "insurance_float_note",
+                "value": "~$170B insurance float not separately valued in this bridge; float enables investment of policyholders' funds at near-zero cost and is implicitly reflected in the public-equity portfolio value",
+            },
+            {
+                "field": "fixed_maturity_note",
+                "value": "Fixed maturity securities are insurance-reserve-backed; not freely deployable excess capital",
             },
         ]
     )
@@ -1062,7 +1165,7 @@ def build_market_implied_sotp_bridge_table(
             "value_usd": fixed_maturity,
             "per_brk_b_share_usd": _per_share_value(fixed_maturity, share_count),
             "market_cap_weight": _ratio(fixed_maturity, market_cap),
-            "note": "Latest filing fixed maturity securities",
+            "note": "Latest filing fixed maturity securities (insurance-reserve-backed; not freely deployable excess capital)",
         },
         {
             "metric": "payable_for_purchase_of_us_treasury_bills",
@@ -1097,7 +1200,7 @@ def build_market_implied_sotp_bridge_table(
             "value_usd": residual,
             "per_brk_b_share_usd": _per_share_value(residual, share_count),
             "market_cap_weight": _ratio(residual, market_cap),
-            "note": "Residual after blended 13F public equities and net liquidity; includes operating businesses, non-13F assets, debt, and other items",
+            "note": "Market-implied plug (circular): market cap minus public equities and net liquidity. Not an independent appraisal — reflects what the market already prices in for operating businesses, non-13F assets, debt, and deferred taxes",
         },
     ]
     return pd.DataFrame(rows)
@@ -1204,6 +1307,7 @@ def build_brk_operating_reverse_dcf_table(
                 "implied_growth": implied_g,
                 "zero_growth_operating_value_usd": zero_growth_value,
                 "zero_growth_per_brk_b_usd": _per_share_value(zero_growth_value, share_count),
+                "model_note": "Pre-tax earnings / pre-tax return; apply ~0.75 tax-rate factor for after-tax equivalent. Residual is market-implied (circular).",
             }
         )
     return pd.DataFrame(rows)
@@ -1264,7 +1368,9 @@ def build_segment_period_sections(
         table = build_top_level_operating_segments_table(filing.reports, period=period)
         if table.empty:
             continue
-        sections.append((_segment_period_title(filing, table, period=period), table))
+        title = _segment_period_title(filing, table, period=period)
+        table = table.drop(columns=["period_end", "period_type"], errors="ignore")
+        sections.append((title, table))
     return sections
 
 
@@ -1563,15 +1669,47 @@ def _extract_liquidity_values(frame: pd.DataFrame) -> tuple[str | None, dict[str
     if period_end is None:
         return None, {}
     values = {}
-    for metric, label in BRK_LIQUIDITY_REPORT_LABELS.items():
-        matched = frame[labels == label]
+    for metric, label in {
+        **BRK_LIQUIDITY_REPORT_LABELS,
+        **BRK_BALANCE_SHEET_CONTEXT_LABELS,
+    }.items():
+        matched = frame[labels.isin(_label_aliases(label))]
         if matched.empty:
             continue
         parsed_value = _parse_balance_sheet_value(matched.iloc[0, current_column_index])
         if parsed_value is None:
             continue
         values[metric] = parsed_value
+    for metric, label in BRK_BALANCE_SHEET_CONTEXT_SUM_LABELS.items():
+        matched = frame[labels.isin(_label_aliases(label))]
+        if matched.empty:
+            continue
+        parsed_values = [
+            parsed
+            for parsed in (
+                _parse_balance_sheet_value(value)
+                for value in matched.iloc[:, current_column_index].tolist()
+            )
+            if parsed is not None
+        ]
+        if parsed_values:
+            values[metric] = sum(parsed_values)
     return period_end, values
+
+
+def _label_aliases(label: str) -> tuple[str, ...]:
+    return BRK_REPORT_LABEL_ALIASES.get(label, (label,))
+
+
+def _report_label_for_metric(metric: str) -> str:
+    for labels in (
+        BRK_LIQUIDITY_REPORT_LABELS,
+        BRK_BALANCE_SHEET_CONTEXT_LABELS,
+        BRK_BALANCE_SHEET_CONTEXT_SUM_LABELS,
+    ):
+        if metric in labels:
+            return labels[metric]
+    return metric
 
 
 def _latest_date_column_index(columns) -> int | None:
