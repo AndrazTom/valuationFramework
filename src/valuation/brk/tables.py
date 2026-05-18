@@ -1949,6 +1949,121 @@ def build_opco_valuation_sensitivity_table(
     return pd.DataFrame(rows)
 
 
+# EV / pre-tax-earnings multiples (low, mid, high) by BRK reporting segment name.
+# Rail and utilities are capital-intensive; insurance and distribution trade at lower multiples.
+# BHE high end is discounted vs generic utility peers given disclosed wildfire liability.
+_SEGMENT_INDUSTRY_MULTIPLES: dict[str, tuple[float, float, float]] = {
+    "BNSF": (9.0, 12.0, 15.0),
+    "BHE": (8.0, 11.0, 13.0),
+    "Manufacturing": (7.0, 10.0, 13.0),
+    "Service and Retailing": (7.0, 9.0, 12.0),
+    "Pilot": (6.0, 8.0, 11.0),
+    "McLane": (5.0, 7.0, 9.0),
+    "Insurance Group": (8.0, 11.0, 14.0),
+}
+_SEGMENT_INDUSTRY_MULTIPLES_DEFAULT: tuple[float, float, float] = (7.0, 9.0, 12.0)
+
+
+def build_opco_segment_industry_multiples_table(
+    bundle: "BrkValuationBundle",
+    reference: pd.DataFrame,
+    *,
+    period: str = "annual",
+    yahoo_client=None,
+    enriched_holdings: pd.DataFrame | None = None,
+    equity_valuation_basis: str = "live",
+    max_live_holdings: int | None = None,
+) -> pd.DataFrame:
+    """Bottoms-up operating business valuation using industry EV/pre-tax-earnings multiples.
+
+    Applies segment-specific low/mid/high multiples to produce an independent (non-circular)
+    operating business value estimate. Appends the market-implied residual as a context row
+    for direct comparison. Skips segments with zero or negative pre-tax earnings.
+    """
+    segments = _latest_segments_table(bundle.segments.filings, period=period)
+    if segments.empty or "earnings_before_income_taxes_usd" not in segments.columns:
+        return pd.DataFrame()
+
+    bridge = build_market_implied_sotp_bridge_table(
+        bundle,
+        reference,
+        yahoo_client=yahoo_client,
+        enriched_holdings=enriched_holdings,
+        equity_valuation_basis=equity_valuation_basis,
+        max_live_holdings=max_live_holdings,
+    )
+    market_residual = _metric_value(bridge, "residual_operating_and_other")
+    share_count = _implied_brk_b_equivalent_shares(bundle.overview.market_snapshot)
+
+    valid_segs = segments[
+        pd.to_numeric(segments["earnings_before_income_taxes_usd"], errors="coerce").notna()
+    ].copy()
+    if valid_segs.empty:
+        return pd.DataFrame()
+
+    rows: list[dict] = []
+    for _, row in valid_segs.iterrows():
+        seg_name = str(row.get("segment", ""))
+        pretax = float(row["earnings_before_income_taxes_usd"])
+        if pretax <= 0:
+            continue
+        mult_low, mult_mid, mult_high = _SEGMENT_INDUSTRY_MULTIPLES.get(
+            seg_name, _SEGMENT_INDUSTRY_MULTIPLES_DEFAULT
+        )
+        rows.append({
+            "segment": seg_name,
+            "pretax_earnings_usd": pretax,
+            "multiple_low": mult_low,
+            "multiple_mid": mult_mid,
+            "multiple_high": mult_high,
+            "implied_ev_low_usd": pretax * mult_low,
+            "implied_ev_mid_usd": pretax * mult_mid,
+            "implied_ev_high_usd": pretax * mult_high,
+            "implied_ev_mid_per_brk_b_usd": None,
+        })
+
+    if not rows:
+        return pd.DataFrame()
+
+    result = pd.DataFrame(rows)
+    total_pretax = float(result["pretax_earnings_usd"].sum())
+    total_low = float(result["implied_ev_low_usd"].sum())
+    total_mid = float(result["implied_ev_mid_usd"].sum())
+    total_high = float(result["implied_ev_high_usd"].sum())
+
+    def _ps(v: float | None) -> float | None:
+        return v / share_count if v is not None and share_count and share_count > 0 else None
+
+    total_row: dict = {
+        "segment": "Total Operating Businesses",
+        "pretax_earnings_usd": total_pretax,
+        "multiple_low": None,
+        "multiple_mid": None,
+        "multiple_high": None,
+        "implied_ev_low_usd": total_low,
+        "implied_ev_mid_usd": total_mid,
+        "implied_ev_high_usd": total_high,
+        "implied_ev_mid_per_brk_b_usd": _ps(total_mid),
+    }
+    result = pd.concat([result, pd.DataFrame([total_row])], ignore_index=True)
+
+    if market_residual is not None:
+        context_row: dict = {
+            "segment": "Market-Implied Residual (context)",
+            "pretax_earnings_usd": None,
+            "multiple_low": None,
+            "multiple_mid": None,
+            "multiple_high": None,
+            "implied_ev_low_usd": market_residual,
+            "implied_ev_mid_usd": market_residual,
+            "implied_ev_high_usd": market_residual,
+            "implied_ev_mid_per_brk_b_usd": _ps(market_residual),
+        }
+        result = pd.concat([result, pd.DataFrame([context_row])], ignore_index=True)
+
+    return result
+
+
 def build_book_value_history_table(
     company_facts: dict,
     share_count: float | None,

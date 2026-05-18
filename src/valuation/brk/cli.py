@@ -40,6 +40,7 @@ from valuation.brk.tables import (
     build_market_implied_sotp_bridge_table,
     build_operating_business_context_table,
     build_opco_valuation_sensitivity_table,
+    build_opco_segment_industry_multiples_table,
     build_public_equity_portfolio_summary_table,
     build_public_equity_revaluation_detail_table,
     build_public_equity_tax_context_table,
@@ -700,6 +701,15 @@ def run_brk_sotp(
             equity_valuation_basis=equity_valuation_basis,
             max_live_holdings=equity_live_limit if equity_valuation_basis == "live" else None,
         ))
+        _append_nonempty(sections, "Segment Bottoms-Up Valuation", build_opco_segment_industry_multiples_table(
+            bundle,
+            reference,
+            period=period,
+            yahoo_client=yahoo,
+            enriched_holdings=enriched_holdings,
+            equity_valuation_basis=equity_valuation_basis,
+            max_live_holdings=equity_live_limit if equity_valuation_basis == "live" else None,
+        ))
         # Book value history, share repurchase history, and insurance float from SEC company facts
         company_facts = getattr(bundle.overview, "company_facts", {}) or {}
         share_count = _brk_share_count_for_report(bundle.overview.market_snapshot)
@@ -806,7 +816,7 @@ def run_brk_valuation_report(
                 fixed_maturity_raw = float(v)
             except (TypeError, ValueError):
                 pass
-    fixed_maturity_note = _fmt_currency(fixed_maturity_raw) if fixed_maturity_raw else "~$25B"
+    fixed_maturity_note = _fmt_currency(fixed_maturity_raw) if fixed_maturity_raw else "(see balance sheet context)"
 
     # Deferred tax figure for methodology notes — pull from SOTP bridge context row.
     deferred_tax_raw = None
@@ -851,6 +861,15 @@ def run_brk_valuation_report(
         equity_valuation_basis=equity_valuation_basis,
         max_live_holdings=live_pricing_limit,
     )
+    segment_bottoms_up = build_opco_segment_industry_multiples_table(
+        bundle,
+        reference,
+        period=period,
+        yahoo_client=yahoo,
+        enriched_holdings=enriched_holdings,
+        equity_valuation_basis=equity_valuation_basis,
+        max_live_holdings=live_pricing_limit,
+    )
 
     # Assemble Markdown sections in findings-first order.
     core_md = [
@@ -862,6 +881,8 @@ def run_brk_valuation_report(
         core_md.append(("Operating Business Reverse DCF", reverse_dcf))
     if not opco_intrinsic.empty:
         core_md.append(("OpCo Intrinsic Value Estimate", opco_intrinsic))
+    if not segment_bottoms_up.empty:
+        core_md.append(("Segment Bottoms-Up Valuation", segment_bottoms_up))
 
     equity_revaluation_detail = build_public_equity_revaluation_detail_table(
         bundle.holdings.holdings,
@@ -914,6 +935,30 @@ def run_brk_valuation_report(
     _fl = build_insurance_float_table(company_facts, limit=10)
     if not _fl.empty:
         segment_history_md.append(("Insurance Float History", _fl))
+
+    # Extract equity-specific deferred tax liability for methodology note (item 1: liability awareness)
+    inv_dtl_raw = None
+    if not equity_tax_context.empty and "field" in equity_tax_context.columns:
+        _inv_rows = equity_tax_context[equity_tax_context["field"] == "investment_deferred_tax_liability_usd"]
+        if not _inv_rows.empty:
+            _v = _inv_rows.iloc[0].get("value")
+            if _v is not None:
+                try:
+                    inv_dtl_raw = float(_v)
+                except (TypeError, ValueError):
+                    pass
+
+    # Extract consolidated notes payable for subsidiary debt context
+    notes_payable_raw = None
+    if not liquidity_bridge.empty and "metric" in liquidity_bridge.columns:
+        _np_rows = liquidity_bridge[liquidity_bridge["metric"] == "notes_payable_and_other_borrowings"]
+        if not _np_rows.empty:
+            _v = _np_rows.sort_values("filing_date", ascending=False).iloc[0].get("value_usd")
+            if _v is not None:
+                try:
+                    notes_payable_raw = float(_v)
+                except (TypeError, ValueError):
+                    pass
 
     # Build Markdown document
     lines: list[str] = [
@@ -990,18 +1035,41 @@ def run_brk_valuation_report(
         " an interest-free funding source. Do not subtract float at face value if you are"
         " also valuing the investment portfolio at market — the portfolio already reflects"
         " float-funded investments.",
-        f"- **Deferred income-tax context ({deferred_tax_note} per latest balance sheet).**"
-        " The balance-sheet liability is broad context and is not deducted again from"
-        " the bridge. For public equities specifically, the 13F portfolio is valued at"
-        " current market prices (pre-tax), and tax applies to unrealized gain, not gross"
-        " portfolio value. The tax sensitivity uses Berkshire's equity-securities"
-        " cost/fair-value note to approximate embedded gain in the selected 13F value,"
-        " then applies simple rate scenarios. Treat it as a stress test, not an exact"
-        " liquidation model.",
-        "- **Subsidiary debt is not separately deducted.** BNSF (~$24B) and BHE (~$40B+)"
-        " carry their own debt. Since we value the operating businesses via the market-implied"
-        " residual, subsidiary debt is already reflected in how the market prices those"
-        " franchises. Holding-company debt is similarly embedded in the residual.",
+        (
+            f"- **Deferred income-tax context ({deferred_tax_note} per latest balance sheet).**"
+            + (
+                f" Of this, the investment deferred tax liability attributable to equity-securities"
+                f" unrealized gains is ~{_fmt_currency(inv_dtl_raw)}"
+                f" (~{inv_dtl_raw / deferred_tax_raw:.0%} of total balance-sheet DTA, per 10-K tax note)."
+                if inv_dtl_raw is not None and deferred_tax_raw is not None and deferred_tax_raw > 0
+                else ""
+            )
+            + " The balance-sheet liability is broad context and is not deducted again from"
+            " the bridge. For public equities specifically, the 13F portfolio is valued at"
+            " current market prices (pre-tax), and tax applies to unrealized gain, not gross"
+            " portfolio value. The tax sensitivity uses Berkshire's equity-securities"
+            " cost/fair-value note to approximate embedded gain in the selected 13F value,"
+            " then applies simple rate scenarios. Treat it as a stress test, not an exact"
+            " liquidation model."
+        ),
+        (
+            "- **Subsidiary debt is not separately deducted.**"
+            + (
+                f" Consolidated notes payable and other borrowings: ~{_fmt_currency(notes_payable_raw)}"
+                " (per latest filing balance sheet)."
+                if notes_payable_raw is not None
+                else " BNSF and BHE carry substantial subsidiary debt (see balance sheet context)."
+            )
+            + " This consolidated figure includes BNSF (~$24B) and BHE subsidiary debt (~$40B+)."
+            " Since we value the operating businesses via the market-implied residual, subsidiary"
+            " debt is already reflected in how the market prices those franchises."
+            " Holding-company debt is similarly embedded in the residual."
+        ),
+        "- **Segment Bottoms-Up Valuation applies industry EV/pre-tax-earnings multiples.**"
+        " Low/mid/high ranges are approximate industry comps: BNSF 9–15×, BHE 8–13×"
+        " (discounted for wildfire liability), Manufacturing 7–13×, Insurance 8–14×."
+        " This is an independent cross-check, not a precise liquidation model."
+        " The market-implied residual row shows the SOTP plug for direct comparison.",
         "- **Owner earnings** = net income + D&A − capex. For capital-intensive subsidiaries"
         " like BNSF where capex substantially exceeds D&A, this may overstate"
         " maintenance-adjusted earnings.",

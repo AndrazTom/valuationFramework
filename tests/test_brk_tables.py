@@ -1998,3 +1998,109 @@ def test_build_insurance_float_table_empty_when_no_insurance_concepts():
     ]}}}}}
     table = build_insurance_float_table(company_facts, limit=5)
     assert table.empty
+
+
+# ---------------------------------------------------------------------------
+# build_opco_segment_industry_multiples_table
+# ---------------------------------------------------------------------------
+
+def _make_multiples_bundle(bnsf_pretax: float, bhe_pretax: float, mktcap: float) -> "BrkValuationBundle":
+    """Bundle with BNSF and BHE segments + minimal liquidity + market snapshot."""
+    filings = [BrkSegmentFiling(
+        filing_date="2025-02-20", accession_number="acc1", form="10-K",
+        reports=BrkSegmentReportSet(
+            filing_date="2025-02-20", accession_number="acc1",
+            earnings_detail=pd.DataFrame([
+                {"member_path": "Operating Businesses | BNSF", "member_name": "BNSF",
+                 "metric": "Earnings before income taxes", "duration_months": 12,
+                 "period_end": "2024-12-31", "value": bnsf_pretax},
+                {"member_path": "Operating Businesses | BHE", "member_name": "BHE",
+                 "metric": "Earnings before income taxes", "duration_months": 12,
+                 "period_end": "2024-12-31", "value": bhe_pretax},
+            ]),
+            reconciliation_detail=pd.DataFrame(),
+            additional_detail=pd.DataFrame(),
+        ),
+    )]
+    return BrkValuationBundle(
+        overview=BrkOverviewBundle(
+            company=None,
+            market_snapshot={"ticker": "BRK-B", "last_price": 500.0, "market_cap": mktcap,
+                             "shares": mktcap / 500.0, "shares_class_b": mktcap / 500.0},
+            submissions={}, company_facts={},
+        ),
+        holdings=Brk13FBundle(
+            company=None, filing_date="2025-02-17", accession_number="0001",
+            information_table_filename="info.xml",
+            holdings=pd.DataFrame([
+                {"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM",
+                 "cusip": "037833100", "value_usd": 200.0 * M, "shares_or_principal": 1.0},
+            ]),
+        ),
+        liquidity=BrkLiquidityBundle(
+            company=None,
+            filings=[BrkLiquidityFiling(
+                filing_date="2025-03-02", accession_number="0002", form="10-K",
+                balance_sheet=pd.DataFrame(
+                    [["Cash and cash equivalents", "", "100", "90"]],
+                    columns=["Consolidated Balance Sheets", "Consolidated Balance Sheets",
+                             "Dec. 31, 2024", "Dec. 31, 2023"],
+                ),
+            )],
+        ),
+        segments=BrkSegmentsBundle(company=None, filings=filings),
+    )
+
+
+def test_build_opco_segment_industry_multiples_basic():
+    """Table has one row per segment plus Total and Market-Implied Residual."""
+    from valuation.brk.tables import build_opco_segment_industry_multiples_table
+    bundle = _make_multiples_bundle(bnsf_pretax=5 * B, bhe_pretax=2 * B, mktcap=1000 * B)
+    reference = pd.DataFrame()
+    table = build_opco_segment_industry_multiples_table(bundle, reference, yahoo_client=FakeYahooClient())
+    assert not table.empty
+    seg_names = list(table["segment"])
+    assert "BNSF" in seg_names
+    assert "BHE" in seg_names
+    assert "Total Operating Businesses" in seg_names
+    assert "Market-Implied Residual (context)" in seg_names
+
+
+def test_build_opco_segment_industry_multiples_uses_correct_multiples():
+    """BNSF mid multiple = 12; BHE mid multiple = 11. Implied EVs reflect this."""
+    from valuation.brk.tables import build_opco_segment_industry_multiples_table
+    bundle = _make_multiples_bundle(bnsf_pretax=10 * B, bhe_pretax=5 * B, mktcap=2000 * B)
+    reference = pd.DataFrame()
+    table = build_opco_segment_industry_multiples_table(bundle, reference, yahoo_client=FakeYahooClient())
+    bnsf = table[table["segment"] == "BNSF"].iloc[0]
+    bhe = table[table["segment"] == "BHE"].iloc[0]
+    assert bnsf["multiple_mid"] == pytest.approx(12.0)
+    assert bhe["multiple_mid"] == pytest.approx(11.0)
+    assert bnsf["implied_ev_mid_usd"] == pytest.approx(10 * B * 12.0)
+    assert bhe["implied_ev_mid_usd"] == pytest.approx(5 * B * 11.0)
+
+
+def test_build_opco_segment_industry_multiples_total_sums_segments():
+    """Total implied_ev_mid_usd equals sum of individual segment mid EVs."""
+    from valuation.brk.tables import build_opco_segment_industry_multiples_table
+    bundle = _make_multiples_bundle(bnsf_pretax=10 * B, bhe_pretax=5 * B, mktcap=2000 * B)
+    reference = pd.DataFrame()
+    table = build_opco_segment_industry_multiples_table(bundle, reference, yahoo_client=FakeYahooClient())
+    total = table[table["segment"] == "Total Operating Businesses"].iloc[0]
+    seg_sum = (10 * B * 12.0) + (5 * B * 11.0)
+    assert total["implied_ev_mid_usd"] == pytest.approx(seg_sum)
+
+
+def test_build_opco_segment_industry_multiples_empty_without_segments():
+    """Returns empty DataFrame when bundle has no segment filings."""
+    from valuation.brk.tables import build_opco_segment_industry_multiples_table
+    bundle = _make_multiples_bundle(bnsf_pretax=5 * B, bhe_pretax=2 * B, mktcap=1000 * B)
+    bundle = BrkValuationBundle(
+        overview=bundle.overview,
+        holdings=bundle.holdings,
+        liquidity=bundle.liquidity,
+        segments=BrkSegmentsBundle(company=None, filings=[]),
+    )
+    reference = pd.DataFrame()
+    table = build_opco_segment_industry_multiples_table(bundle, reference, yahoo_client=FakeYahooClient())
+    assert table.empty
