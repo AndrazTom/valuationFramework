@@ -69,6 +69,22 @@ def test_cli_rejects_negative_filings_limit():
         cli.main(["snapshot", "BRK-B", "--filings-limit", "-1"])
 
 
+def test_cli_refresh_cache_sets_provider_env(monkeypatch, tmp_path: Path):
+    captured = {}
+
+    def fake_snapshot(ticker, outdir, filings_limit, output_format):
+        captured["refresh"] = __import__("os").environ.get("VALUATION_REFRESH_CACHE")
+        return 0
+
+    monkeypatch.delenv("VALUATION_REFRESH_CACHE", raising=False)
+    monkeypatch.setattr(cli, "run_snapshot", fake_snapshot)
+
+    result = cli.main(["--refresh-cache", "snapshot", "BRK-B", "--outdir", str(tmp_path)])
+
+    assert result == 0
+    assert captured["refresh"] == "1"
+
+
 def test_snapshot_cli_writes_files(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(cli, "SecClient", lambda: FakeSecClient())
     monkeypatch.setattr(cli, "YahooFinanceClient", lambda: FakeYahooClient())
@@ -639,12 +655,17 @@ def test_brk_sotp_cli_writes_expected_sections(monkeypatch, tmp_path: Path):
         )(),
     )
     monkeypatch.setattr(brk_cli, "build_brk_security_reference", lambda: pd.DataFrame())
-    monkeypatch.setattr(brk_cli, "build_brk_valuation_assumptions_table", lambda period="annual": pd.DataFrame())
+    monkeypatch.setattr(brk_cli, "build_brk_valuation_assumptions_table", lambda period="annual", **kwargs: pd.DataFrame())
     monkeypatch.setattr(brk_cli, "build_market_anchor_table", lambda market_snapshot: pd.DataFrame())
     monkeypatch.setattr(
         brk_cli,
         "build_public_equity_portfolio_summary_table",
-        lambda holdings, reference, yahoo_client=None, enriched_holdings=None: pd.DataFrame(),
+        lambda holdings, reference, yahoo_client=None, enriched_holdings=None, **kwargs: pd.DataFrame(),
+    )
+    monkeypatch.setattr(
+        brk_cli,
+        "build_public_equity_revaluation_detail_table",
+        lambda holdings, reference, yahoo_client=None, enriched_holdings=None, **kwargs: pd.DataFrame(),
     )
     monkeypatch.setattr(
         brk_cli,
@@ -654,15 +675,16 @@ def test_brk_sotp_cli_writes_expected_sections(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(brk_cli, "build_liquidity_bridge_table", lambda filings: pd.DataFrame())
     monkeypatch.setattr(brk_cli, "build_liquidity_summary_table", lambda bridge: pd.DataFrame())
     monkeypatch.setattr(brk_cli, "build_latest_liquidity_snapshot_table", lambda bridge: pd.DataFrame())
+    monkeypatch.setattr(brk_cli, "build_balance_sheet_context_table", lambda bridge: pd.DataFrame())
     monkeypatch.setattr(
         brk_cli,
         "build_market_implied_sotp_bridge_table",
-        lambda bundle, reference, yahoo_client=None, enriched_holdings=None: pd.DataFrame(),
+        lambda bundle, reference, yahoo_client=None, enriched_holdings=None, **kwargs: pd.DataFrame(),
     )
     monkeypatch.setattr(
         brk_cli,
         "build_operating_business_context_table",
-        lambda bundle, reference, period="annual", yahoo_client=None, enriched_holdings=None: pd.DataFrame(),
+        lambda bundle, reference, period="annual", yahoo_client=None, enriched_holdings=None, **kwargs: pd.DataFrame(),
     )
     monkeypatch.setattr(
         brk_cli,
@@ -675,6 +697,13 @@ def test_brk_sotp_cli_writes_expected_sections(monkeypatch, tmp_path: Path):
         lambda ticker, price_change_window=None, yahoo_client=None: {"ticker": ticker},
     )
     monkeypatch.setattr(brk_cli, "build_segment_period_sections", lambda filings, period="annual": [])
+    monkeypatch.setattr(brk_cli, "build_segment_earnings_history_table", lambda filings, period="annual": pd.DataFrame())
+    monkeypatch.setattr(brk_cli, "build_segment_owner_earnings_history_table", lambda filings, period="annual": pd.DataFrame())
+    monkeypatch.setattr(brk_cli, "build_segment_pretax_margin_history_table", lambda filings, period="annual": pd.DataFrame())
+    monkeypatch.setattr(brk_cli, "build_segment_implied_allocation_table", lambda bundle, reference, period="annual", yahoo_client=None, enriched_holdings=None, **kwargs: pd.DataFrame())
+    monkeypatch.setattr(brk_cli, "build_opco_valuation_sensitivity_table", lambda bundle, reference, period="annual", yahoo_client=None, enriched_holdings=None, **kwargs: pd.DataFrame())
+    monkeypatch.setattr(brk_cli, "build_book_value_history_table", lambda company_facts, share_count=None, limit=5: pd.DataFrame())
+    monkeypatch.setattr(brk_cli, "_brk_share_count_for_report", lambda market_snapshot: None)
     monkeypatch.setattr(
         brk_cli,
         "_emit_sections",
@@ -717,12 +746,63 @@ def test_brk_sotp_cli_writes_expected_sections(monkeypatch, tmp_path: Path):
         "Valuation Assumptions",
         "Market Anchor",
         "Public Equity Portfolio Summary",
-        "Quoted Holdings Summary",
-        "Liquidity Snapshot",
-        "Market-Implied SOTP Bridge",
-        "Operating Business Context",
-        "BRK vs Holdings Price Change (1M)",
+            "Quoted Holdings Summary",
+            "Liquidity Snapshot",
+            "Balance Sheet Context",
+            "Market-Implied SOTP Bridge",
+            "Operating Business Context",
+            "BRK vs Holdings Price Change (1M)",
     ]
+
+
+def test_brk_valuation_report_cli_writes_markdown_file(monkeypatch, tmp_path: Path, capsys):
+    empty_df = pd.DataFrame()
+
+    monkeypatch.setattr(
+        brk_cli,
+        "fetch_brk_valuation_bundle",
+        lambda period="annual", yahoo_client=None, segment_limit=4: type(
+            "Bundle",
+            (),
+            {
+                "overview": type("Overview", (), {"market_snapshot": {}, "company_facts": {}})(),
+                "holdings": type("Holdings", (), {"holdings": pd.DataFrame(), "filing_date": None, "accession_number": None})(),
+                "liquidity": type("Liquidity", (), {"filings": []})(),
+                "segments": type("Segments", (), {"filings": []})(),
+            },
+        )(),
+    )
+    monkeypatch.setattr(brk_cli, "build_brk_security_reference", lambda: empty_df)
+    monkeypatch.setattr(brk_cli, "enrich_holdings_with_market_prices", lambda holdings, reference, yahoo_client=None, **kwargs: empty_df)
+    monkeypatch.setattr(brk_cli, "aggregate_13f_holdings", lambda holdings: empty_df)
+    monkeypatch.setattr(brk_cli, "build_liquidity_bridge_table", lambda filings: empty_df)
+    monkeypatch.setattr(brk_cli, "build_latest_liquidity_snapshot_table", lambda bridge: empty_df)
+    monkeypatch.setattr(brk_cli, "build_market_implied_sotp_bridge_table", lambda bundle, reference, yahoo_client=None, enriched_holdings=None, **kwargs: empty_df)
+    monkeypatch.setattr(brk_cli, "build_public_equity_portfolio_summary_table", lambda holdings, reference, yahoo_client=None, enriched_holdings=None, **kwargs: empty_df)
+    monkeypatch.setattr(brk_cli, "build_public_equity_revaluation_detail_table", lambda holdings, reference, yahoo_client=None, enriched_holdings=None, **kwargs: empty_df)
+    monkeypatch.setattr(brk_cli, "build_operating_business_context_table", lambda bundle, reference, period="annual", yahoo_client=None, enriched_holdings=None, **kwargs: empty_df)
+    monkeypatch.setattr(brk_cli, "build_brk_operating_reverse_dcf_table", lambda context, market_snapshot: empty_df)
+    monkeypatch.setattr(brk_cli, "build_brk_valuation_summary_table", lambda market_snapshot, sotp_bridge, operating_context, reverse_dcf, equity_portfolio: empty_df)
+    monkeypatch.setattr(brk_cli, "build_market_anchor_table", lambda market_snapshot: empty_df)
+    monkeypatch.setattr(brk_cli, "build_balance_sheet_context_table", lambda bridge: empty_df)
+    monkeypatch.setattr(brk_cli, "build_brk_valuation_assumptions_table", lambda period="annual", **kwargs: empty_df)
+    monkeypatch.setattr(brk_cli, "build_segment_period_sections", lambda filings, period="annual": [])
+    monkeypatch.setattr(brk_cli, "build_segment_earnings_history_table", lambda filings, period="annual": empty_df)
+    monkeypatch.setattr(brk_cli, "build_segment_revenues_history_table", lambda filings, period="annual": empty_df)
+    monkeypatch.setattr(brk_cli, "build_segment_owner_earnings_history_table", lambda filings, period="annual": empty_df)
+    monkeypatch.setattr(brk_cli, "build_segment_pretax_margin_history_table", lambda filings, period="annual": empty_df)
+    monkeypatch.setattr(brk_cli, "build_book_value_history_table", lambda company_facts, share_count=None, limit=5: empty_df)
+    monkeypatch.setattr(brk_cli, "_brk_share_count_for_report", lambda market_snapshot: None)
+
+    result = cli.main(["brk", "valuation-report", "--outdir", str(tmp_path)])
+
+    assert result == 0
+    report_files = list(tmp_path.glob("brk_valuation_report_*.md"))
+    assert len(report_files) == 1
+    content = report_files[0].read_text(encoding="utf-8")
+    assert "Berkshire Hathaway Valuation Report" in content
+    assert "Market-Implied SOTP Bridge" in content
+    assert "Valuation Assumptions & Methodology" in content
 
 
 def test_brk_segments_cli_rejects_invalid_range(tmp_path: Path):

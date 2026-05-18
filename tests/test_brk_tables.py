@@ -19,14 +19,20 @@ from valuation.brk.tables import (
     build_13f_issuer_change_summary_table,
     build_13f_portfolio_change_summary_table,
     build_13f_live_price_summary_table,
+    build_balance_sheet_context_table,
     build_brk_valuation_context_table,
+    build_brk_valuation_summary_table,
     build_segment_period_sections,
     build_holdings_vs_brk_price_change_table,
     build_key_facts_table,
     build_liquidity_bridge_table,
+    build_liquidity_detail_table,
     build_liquidity_summary_table,
     build_market_implied_sotp_bridge_table,
     build_market_anchor_table,
+    build_public_equity_portfolio_summary_table,
+    build_public_equity_revaluation_detail_table,
+    build_brk_operating_reverse_dcf_table,
     build_operating_business_context_table,
     build_top_level_operating_segments_summary_table,
     build_share_class_table,
@@ -609,6 +615,58 @@ def test_build_liquidity_summary_table():
     assert summary.iloc[0]["liquid_investments_total_usd"] == 386.969 * B
 
 
+def test_build_balance_sheet_context_table_shows_selected_residual_context():
+    filings = [
+        BrkLiquidityFiling(
+            filing_date="2026-05-04",
+            accession_number="0001",
+            form="10-Q",
+            balance_sheet=pd.DataFrame(
+                [
+                    ["Investments in equity securities", "", "288,034", "297,778"],
+                    ["Equity method investments", "", "19,951", "19,978"],
+                    ["Total assets", "", "1,252,271", "1,222,176"],
+                    ["Income taxes, principally deferred", "", "88,685", "86,955"],
+                    ["Total liabilities", "", "522,821", "502,473"],
+                    ["Notes payable and other borrowings", "", "42,835", "45,763"],
+                    ["Notes payable and other borrowings", "", "86,051", "83,318"],
+                ],
+                columns=[
+                    "Consolidated Balance Sheets",
+                    "Consolidated Balance Sheets",
+                    "Mar. 31, 2026",
+                    "Dec. 31, 2025",
+                ],
+            ),
+        )
+    ]
+
+    bridge = build_liquidity_bridge_table(filings)
+    context = build_balance_sheet_context_table(bridge)
+
+    fields = dict(zip(context["field"], context["value"]))
+    assert fields["period_end"] == "2026-03-31"
+    assert fields["equity_securities_usd"] == 288_034 * M
+    assert fields["equity_method_investments_usd"] == 19_951 * M
+    assert fields["deferred_income_taxes_usd"] == 88_685 * M
+    assert fields["total_liabilities_usd"] == 522_821 * M
+    assert fields["notes_payable_and_other_borrowings_usd"] == (42_835 + 86_051) * M
+
+
+def test_build_liquidity_detail_table_excludes_context_rows():
+    bridge = pd.DataFrame(
+        [
+            {"metric": "cash_and_equivalents", "value_usd": 1.0},
+            {"metric": "equity_securities", "value_usd": 2.0},
+            {"metric": "notes_payable_and_other_borrowings", "value_usd": 3.0},
+        ]
+    )
+
+    detail = build_liquidity_detail_table(bridge)
+
+    assert list(detail["metric"]) == ["cash_and_equivalents"]
+
+
 def test_build_top_level_operating_segments_summary_table_history():
     filings = [
         BrkSegmentFiling(
@@ -916,9 +974,179 @@ def test_build_market_implied_sotp_bridge_table():
 
     bridge = build_market_implied_sotp_bridge_table(bundle, reference, yahoo_client=FakeYahooClient())
 
+    # cash=100M, T-bills=200M, payable=10M → net_core = 290M (fixed maturity excluded)
     assert bridge[bridge["metric"] == "public_equity_holdings_blended"].iloc[0]["value_usd"] == 70.0
-    assert bridge[bridge["metric"] == "net_liquidity_total"].iloc[0]["value_usd"] == 340.0 * M
-    assert bridge[bridge["metric"] == "residual_operating_and_other"].iloc[0]["value_usd"] == pytest.approx((1000.0 * M) - (340.0 * M) - 70.0)
+    assert bridge[bridge["metric"] == "net_cash_and_treasury_bills"].iloc[0]["value_usd"] == pytest.approx(290.0 * M)
+    assert bridge[bridge["metric"] == "residual_operating_and_other"].iloc[0]["value_usd"] == pytest.approx((1000.0 * M) - (290.0 * M) - 70.0)
+    # fixed maturity appears as a context row, not subtracted
+    assert bridge[bridge["metric"] == "fixed_maturity_securities_context"].iloc[0]["value_usd"] == pytest.approx(50.0 * M)
+    # deferred tax row is absent when balance sheet has no deferred tax entry
+    assert bridge[bridge["metric"] == "deferred_tax_on_equity_context"]["value_usd"].isna().all()
+
+
+def test_build_market_implied_sotp_bridge_table_can_use_reported_13f_value():
+    reference = pd.DataFrame(
+        [{"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"}]
+    )
+    bundle = BrkValuationBundle(
+        overview=BrkOverviewBundle(
+            company=None,
+            market_snapshot={"ticker": "BRK-B", "last_price": 500.0, "market_cap": 1000.0 * M},
+            submissions={},
+            company_facts={},
+        ),
+        holdings=Brk13FBundle(
+            company=None,
+            filing_date="2026-02-17",
+            accession_number="0001",
+            information_table_filename="info.xml",
+            holdings=pd.DataFrame(
+                [{"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 100.0, "shares_or_principal": 0.2}]
+            ),
+        ),
+        liquidity=BrkLiquidityBundle(
+            company=None,
+            filings=[
+                BrkLiquidityFiling(
+                    filing_date="2026-03-02",
+                    accession_number="0002",
+                    form="10-K",
+                    balance_sheet=pd.DataFrame(
+                        [["Cash and cash equivalents", "", "100", "90"]],
+                        columns=[
+                            "Consolidated Balance Sheets",
+                            "Consolidated Balance Sheets",
+                            "Dec. 31, 2025",
+                            "Dec. 31, 2024",
+                        ],
+                    ),
+                )
+            ],
+        ),
+        segments=BrkSegmentsBundle(company=None, filings=[]),
+    )
+
+    bridge = build_market_implied_sotp_bridge_table(
+        bundle,
+        reference,
+        yahoo_client=FakeYahooClient(),
+        equity_valuation_basis="reported",
+    )
+
+    row = bridge[bridge["metric"] == "public_equity_holdings_blended"].iloc[0]
+    assert row["value_usd"] == 100.0
+    assert "reported" in row["note"].lower()
+
+
+def test_build_public_equity_portfolio_summary_table_live_limit_blends_top_holding_only():
+    holdings = pd.DataFrame(
+        [
+            {"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 100.0, "shares_or_principal": 0.2},
+            {"security_id": "cusip:025816109", "issuer": "AMERICAN EXPRESS CO", "class_title": "COM", "cusip": "025816109", "value_usd": 90.0, "shares_or_principal": 0.1},
+        ]
+    )
+    reference = pd.DataFrame(
+        [
+            {"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"},
+            {"security_id": "cusip:025816109", "ticker": "AXP", "exchange": "NYSE"},
+        ]
+    )
+
+    summary = build_public_equity_portfolio_summary_table(
+        holdings,
+        reference,
+        yahoo_client=FakeYahooClient(),
+        equity_valuation_basis="live",
+        max_live_holdings=1,
+    )
+
+    values = dict(zip(summary["field"], summary["value"]))
+    assert values["reported_13f_value_usd"] == 190.0
+    assert values["live_resolved_13f_value_usd"] == 40.0
+    assert values["unresolved_13f_value_reported_usd"] == 90.0
+    assert values["selected_13f_value_usd"] == 130.0
+    assert values["live_pricing_limit"] == 1
+
+
+def test_build_public_equity_revaluation_detail_table_shows_live_replacements():
+    holdings = pd.DataFrame(
+        [
+            {"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 100.0, "shares_or_principal": 0.2},
+            {"security_id": "cusip:025816109", "issuer": "AMERICAN EXPRESS CO", "class_title": "COM", "cusip": "025816109", "value_usd": 90.0, "shares_or_principal": 0.1},
+        ]
+    )
+    reference = pd.DataFrame(
+        [
+            {"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"},
+            {"security_id": "cusip:025816109", "ticker": "AXP", "exchange": "NYSE"},
+        ]
+    )
+
+    detail = build_public_equity_revaluation_detail_table(
+        holdings,
+        reference,
+        yahoo_client=FakeYahooClient(),
+        max_live_holdings=1,
+    )
+
+    assert list(detail["ticker"]) == ["AAPL"]
+    assert detail.iloc[0]["reported_value_usd"] == 100.0
+    assert detail.iloc[0]["market_value_live_usd"] == 40.0
+    assert detail.iloc[0]["live_value_delta_usd"] == -60.0
+    assert detail.iloc[0]["live_value_delta_pct"] == pytest.approx(-0.6)
+
+
+def test_build_market_implied_sotp_bridge_table_deferred_tax_context():
+    """Deferred tax on equity shows as a context row when present in the balance sheet."""
+    reference = pd.DataFrame([{"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"}])
+    bundle = BrkValuationBundle(
+        overview=BrkOverviewBundle(
+            company=None,
+            market_snapshot={"ticker": "BRK-B", "last_price": 500.0, "market_cap": 1000.0 * M},
+            submissions={},
+            company_facts={},
+        ),
+        holdings=Brk13FBundle(
+            company=None,
+            filing_date="2026-02-17",
+            accession_number="0001",
+            information_table_filename="info.xml",
+            holdings=pd.DataFrame(
+                [{"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 100.0, "shares_or_principal": 0.2}]
+            ),
+        ),
+        liquidity=BrkLiquidityBundle(
+            company=None,
+            filings=[
+                BrkLiquidityFiling(
+                    filing_date="2026-03-02",
+                    accession_number="0002",
+                    form="10-K",
+                    balance_sheet=pd.DataFrame(
+                        [
+                            ["Cash and cash equivalents", "", "100", "90"],
+                            ["Short-term investments in U.S. Treasury Bills", "", "200", "180"],
+                            ["Investments in fixed maturity securities", "", "50", "40"],
+                            ["Payable for purchase of U.S. Treasury Bills", "", "10", "5"],
+                            ["Income taxes, principally deferred", "", "35", "30"],
+                        ],
+                        columns=[
+                            "Consolidated Balance Sheets",
+                            "Consolidated Balance Sheets",
+                            "Dec. 31, 2025",
+                            "Dec. 31, 2024",
+                        ],
+                    ),
+                )
+            ],
+        ),
+        segments=BrkSegmentsBundle(company=None, filings=[]),
+    )
+
+    bridge = build_market_implied_sotp_bridge_table(bundle, reference, yahoo_client=FakeYahooClient())
+    deferred_row = bridge[bridge["metric"] == "deferred_tax_on_equity_context"]
+    assert not deferred_row.empty
+    assert deferred_row.iloc[0]["value_usd"] == pytest.approx(35.0 * M)
 
 
 def test_build_operating_business_context_table_compares_residual_to_segment_earnings():
@@ -1002,3 +1230,385 @@ def test_build_operating_business_context_table_compares_residual_to_segment_ear
     assert pretax == 50 * M
     assert residual == pytest.approx((1000.0 * M) - (300.0 * M) - 40.0)
     assert multiple == pytest.approx(residual / pretax)
+
+
+def test_build_brk_operating_reverse_dcf_table_basic():
+    # residual = 500M, pretax_earnings = 50M
+    # oe_yield = 50/500 = 0.10
+    # at r=0.10: implied_g = 0.10 - 0.10 = 0.00
+    # zero_growth_value = 50M / 0.10 = 500M
+    context = pd.DataFrame([
+        {"field": "residual_operating_and_other_usd", "value": 500.0 * M},
+        {"field": "operating_segment_pretax_earnings_usd", "value": 50.0 * M},
+    ])
+    snapshot = {"market_cap": 1000.0 * M, "last_price": 500.0}
+    table = build_brk_operating_reverse_dcf_table(context, snapshot, required_returns=[0.10])
+    assert len(table) == 1
+    row = table.iloc[0]
+    assert row["assumed_return"] == pytest.approx(0.10)
+    assert row["implied_growth"] == pytest.approx(0.0)
+    assert row["zero_growth_operating_value_usd"] == pytest.approx(500.0 * M)
+
+
+def test_build_brk_operating_reverse_dcf_table_default_returns():
+    context = pd.DataFrame([
+        {"field": "residual_operating_and_other_usd", "value": 400.0 * M},
+        {"field": "operating_segment_pretax_earnings_usd", "value": 20.0 * M},
+    ])
+    snapshot = {"market_cap": 800.0 * M, "last_price": 400.0}
+    table = build_brk_operating_reverse_dcf_table(context, snapshot)
+    assert list(table["assumed_return"]) == pytest.approx([0.08, 0.10, 0.12])
+
+
+def test_build_brk_operating_reverse_dcf_table_computes_per_share():
+    # residual=400M, pretax=40M, oe_yield=0.10
+    # at r=0.10: implied_g=0, zero_growth=400M
+    # market_cap=1000M, last_price=500 → shares=2M BRK-B equiv
+    # zero_growth_per_brk_b = 400M / 2M = $200
+    context = pd.DataFrame([
+        {"field": "residual_operating_and_other_usd", "value": 400.0 * M},
+        {"field": "operating_segment_pretax_earnings_usd", "value": 40.0 * M},
+    ])
+    snapshot = {"market_cap": 1000.0 * M, "last_price": 500.0}
+    table = build_brk_operating_reverse_dcf_table(context, snapshot, required_returns=[0.10])
+    row = table.iloc[0]
+    assert row["zero_growth_per_brk_b_usd"] == pytest.approx(200.0)
+
+
+def test_build_brk_operating_reverse_dcf_table_returns_empty_when_residual_zero():
+    context = pd.DataFrame([
+        {"field": "residual_operating_and_other_usd", "value": 0.0},
+        {"field": "operating_segment_pretax_earnings_usd", "value": 50.0 * M},
+    ])
+    snapshot = {"market_cap": 1000.0 * M, "last_price": 500.0}
+    table = build_brk_operating_reverse_dcf_table(context, snapshot)
+    assert table.empty
+
+
+def test_build_brk_operating_reverse_dcf_table_returns_empty_when_pretax_missing():
+    context = pd.DataFrame([
+        {"field": "residual_operating_and_other_usd", "value": 500.0 * M},
+    ])
+    snapshot = {"market_cap": 1000.0 * M, "last_price": 500.0}
+    table = build_brk_operating_reverse_dcf_table(context, snapshot)
+    assert table.empty
+
+
+# ---------------------------------------------------------------------------
+# build_brk_valuation_summary_table
+# ---------------------------------------------------------------------------
+
+def _make_sotp_bridge(
+    market_cap=700.0 * B,
+    public_equities=300.0 * B,
+    net_liquidity=50.0 * B,
+    residual=350.0 * B,
+    share_count=2_800.0e6,
+) -> pd.DataFrame:
+    """Minimal SOTP bridge fixture with the rows the summary table reads."""
+    def _per(v):
+        return v / share_count if v is not None and share_count else None
+
+    def _wt(v):
+        return v / market_cap if v is not None and market_cap else None
+
+    rows = [
+        {
+            "metric": "public_equity_holdings_blended",
+            "value_usd": public_equities,
+            "per_brk_b_share_usd": _per(public_equities),
+            "market_cap_weight": _wt(public_equities),
+        },
+        {
+            "metric": "net_cash_and_treasury_bills",
+            "value_usd": net_liquidity,
+            "per_brk_b_share_usd": _per(net_liquidity),
+            "market_cap_weight": _wt(net_liquidity),
+        },
+        {
+            "metric": "quoted_holdings_plus_net_cash",
+            "value_usd": public_equities + net_liquidity,
+            "per_brk_b_share_usd": _per(public_equities + net_liquidity),
+            "market_cap_weight": _wt(public_equities + net_liquidity),
+        },
+        {
+            "metric": "market_cap",
+            "value_usd": market_cap,
+            "per_brk_b_share_usd": _per(market_cap),
+            "market_cap_weight": 1.0,
+        },
+        {
+            "metric": "residual_operating_and_other",
+            "value_usd": residual,
+            "per_brk_b_share_usd": _per(residual),
+            "market_cap_weight": _wt(residual),
+        },
+    ]
+    return pd.DataFrame(rows)
+
+
+def _make_operating_context(residual=350.0 * B, pretax=50.0 * B) -> pd.DataFrame:
+    multiple = residual / pretax if pretax else None
+    return pd.DataFrame([
+        {"field": "operating_segment_pretax_earnings_usd", "value": pretax},
+        {"field": "residual_operating_and_other_usd", "value": residual},
+        {"field": "residual_to_pretax_earnings_multiple", "value": multiple},
+    ])
+
+
+def _make_reverse_dcf(residual=350.0 * B, pretax=35.0 * B) -> pd.DataFrame:
+    # implied_growth at 10% = 0.10 - pretax/residual = 0.10 - 0.10 = 0.00
+    return pd.DataFrame([
+        {
+            "assumed_return": 0.10,
+            "implied_growth": 0.10 - pretax / residual,
+            "zero_growth_operating_value_usd": pretax / 0.10,
+            "zero_growth_per_brk_b_usd": (pretax / 0.10) / (700.0 * B / 500.0),
+        }
+    ])
+
+
+def _make_equity_portfolio(reported=300.0 * B, blended=305.0 * B, coverage=0.85) -> pd.DataFrame:
+    return pd.DataFrame([
+        {"field": "reported_13f_value_usd", "value": reported},
+        {"field": "blended_13f_value_usd", "value": blended},
+        {"field": "selected_13f_value_usd", "value": blended},
+        {"field": "selected_13f_basis", "value": "live_revalued_13f"},
+        {"field": "live_price_coverage_pct", "value": coverage},
+    ])
+
+
+def test_build_brk_valuation_summary_table_happy_path():
+    snapshot = {"last_price": 500.0, "market_cap": 700.0 * B}
+    bridge = _make_sotp_bridge()
+    context = _make_operating_context()
+    rdcf = _make_reverse_dcf()
+    portfolio = _make_equity_portfolio()
+
+    table = build_brk_valuation_summary_table(snapshot, bridge, context, rdcf, portfolio)
+
+    assert not table.empty
+    fields = set(table["field"].tolist())
+    assert "price_brk_b" in fields
+    assert "market_cap_usd" in fields
+    assert "residual_operating_and_other_usd" in fields
+    assert "residual_per_brk_b_usd" in fields
+    assert "residual_market_cap_weight" in fields
+    assert "segment_pretax_earnings_usd" in fields
+    assert "residual_to_pretax_earnings_multiple" in fields
+    assert "implied_growth_at_10_pct" in fields
+    assert "zero_growth_value_per_brk_b_usd" in fields
+
+    def _val(field):
+        return table.loc[table["field"] == field, "value"].iloc[0]
+
+    assert _val("price_brk_b") == pytest.approx(500.0)
+    assert _val("market_cap_usd") == pytest.approx(700.0 * B)
+    assert _val("13f_reported_value_usd") == pytest.approx(300.0 * B)
+    assert _val("13f_selected_basis") == "live_revalued_13f"
+    assert _val("13f_blended_value_usd") == pytest.approx(305.0 * B)
+    assert _val("13f_selected_value_usd") == pytest.approx(305.0 * B)
+    assert _val("13f_live_coverage_pct") == pytest.approx(0.85)
+    assert _val("residual_operating_and_other_usd") == pytest.approx(350.0 * B)
+    assert _val("residual_market_cap_weight") == pytest.approx(350.0 / 700.0)
+    # implied growth at 10%: 0.10 - 35B/350B = 0.0
+    assert _val("implied_growth_at_10_pct") == pytest.approx(0.0, abs=1e-9)
+
+
+def test_build_brk_valuation_summary_table_empty_inputs_return_none_values():
+    """Empty sub-tables should not crash; numeric fields should be None."""
+    snapshot = {"last_price": 500.0, "market_cap": 700.0 * B}
+    table = build_brk_valuation_summary_table(
+        snapshot,
+        pd.DataFrame(),   # empty sotp_bridge
+        pd.DataFrame(),   # empty operating_context
+        pd.DataFrame(),   # empty reverse_dcf
+        pd.DataFrame(),   # empty equity_portfolio
+    )
+    assert not table.empty
+    # All numeric fields should be None or NaN when inputs are empty
+    for _, row in table.iterrows():
+        if row["field"] == "price_brk_b":
+            assert row["value"] == pytest.approx(500.0)
+        elif row["field"] == "market_cap_usd":
+            # market_cap comes from sotp_bridge which is empty — should be None
+            assert row["value"] is None or (isinstance(row["value"], float) and pd.isna(row["value"]))
+
+
+def test_build_brk_valuation_summary_table_no_reverse_dcf():
+    """Empty reverse_dcf leaves implied_growth and zero_growth rows as None."""
+    snapshot = {"last_price": 500.0, "market_cap": 700.0 * B}
+    bridge = _make_sotp_bridge()
+    context = _make_operating_context()
+    portfolio = _make_equity_portfolio()
+
+    table = build_brk_valuation_summary_table(
+        snapshot, bridge, context, pd.DataFrame(), portfolio
+    )
+    def _val(field):
+        return table.loc[table["field"] == field, "value"].iloc[0]
+
+    assert _val("implied_growth_at_10_pct") is None or pd.isna(_val("implied_growth_at_10_pct"))
+    assert _val("zero_growth_value_per_brk_b_usd") is None or pd.isna(_val("zero_growth_value_per_brk_b_usd"))
+
+
+# ─── Segment history tables ────────────────────────────────────────────────
+
+
+def _make_two_annual_segment_filings():
+    """Two annual filings with BNSF and BHE earning pretax earnings, revenues, D&A, capex."""
+    rows_2024 = [
+        {"report": "earnings", "member_path": "Operating Businesses | BNSF", "member_name": "BNSF", "metric": "Revenues", "duration_months": 12, "period_end": "2024-12-31", "value": 20 * M},
+        {"report": "earnings", "member_path": "Operating Businesses | BNSF", "member_name": "BNSF", "metric": "Earnings before income taxes", "duration_months": 12, "period_end": "2024-12-31", "value": 5 * M},
+        {"report": "add", "member_path": "Operating Businesses | BNSF", "member_name": "BNSF", "metric": "Capital expenditures", "duration_months": 12, "period_end": "2024-12-31", "value": 3 * M},
+        {"report": "add", "member_path": "Operating Businesses | BNSF", "member_name": "BNSF", "metric": "Depreciation and amortization", "duration_months": 12, "period_end": "2024-12-31", "value": 2 * M},
+        {"report": "earnings", "member_path": "Operating Businesses | BHE", "member_name": "BHE", "metric": "Revenues", "duration_months": 12, "period_end": "2024-12-31", "value": 10 * M},
+        {"report": "earnings", "member_path": "Operating Businesses | BHE", "member_name": "BHE", "metric": "Earnings before income taxes", "duration_months": 12, "period_end": "2024-12-31", "value": 3 * M},
+        {"report": "add", "member_path": "Operating Businesses | BHE", "member_name": "BHE", "metric": "Capital expenditures", "duration_months": 12, "period_end": "2024-12-31", "value": 2 * M},
+        {"report": "add", "member_path": "Operating Businesses | BHE", "member_name": "BHE", "metric": "Depreciation and amortization", "duration_months": 12, "period_end": "2024-12-31", "value": 1 * M},
+    ]
+    rows_2023 = [r.copy() for r in rows_2024]
+    for r in rows_2023:
+        r["period_end"] = "2023-12-31"
+        r["value"] = r["value"] * 0.9  # slightly lower
+
+    def _filing(date, rows, accession):
+        return BrkSegmentFiling(
+            filing_date=date,
+            accession_number=accession,
+            form="10-K",
+            reports=BrkSegmentReportSet(
+                filing_date=date,
+                accession_number=accession,
+                earnings_detail=pd.DataFrame([r for r in rows if r["report"] == "earnings"]).drop(columns=["report"]),
+                reconciliation_detail=pd.DataFrame(),
+                additional_detail=pd.DataFrame([r for r in rows if r["report"] == "add"]).drop(columns=["report"]),
+            ),
+        )
+
+    return [_filing("2025-02-20", rows_2024, "acc1"), _filing("2024-02-20", rows_2023, "acc2")]
+
+
+def test_build_segment_earnings_history_table_pivots_across_filings():
+    from valuation.brk.tables import build_segment_earnings_history_table
+    filings = _make_two_annual_segment_filings()
+    table = build_segment_earnings_history_table(filings, period="annual")
+    assert not table.empty
+    assert "FY 2024" in table.columns
+    assert "FY 2023" in table.columns
+    assert "cagr_pct" in table.columns
+    assert "unit" in table.columns
+    bnsf_row = table[table["segment"] == "BNSF"].iloc[0]
+    assert bnsf_row["FY 2024"] == pytest.approx(5 * M)
+    total_row = table[table["segment"] == "Total"].iloc[0]
+    assert total_row["FY 2024"] == pytest.approx(8 * M)  # 5 + 3
+
+
+def test_build_segment_revenues_history_table_returns_revenues():
+    from valuation.brk.tables import build_segment_revenues_history_table
+    filings = _make_two_annual_segment_filings()
+    table = build_segment_revenues_history_table(filings, period="annual")
+    assert not table.empty
+    bnsf_row = table[table["segment"] == "BNSF"].iloc[0]
+    assert bnsf_row["FY 2024"] == pytest.approx(20 * M)
+
+
+def test_build_segment_owner_earnings_history_table_derives_oe():
+    from valuation.brk.tables import build_segment_owner_earnings_history_table
+    filings = _make_two_annual_segment_filings()
+    table = build_segment_owner_earnings_history_table(filings, period="annual")
+    assert not table.empty
+    bnsf_row = table[table["segment"] == "BNSF"].iloc[0]
+    # OE = pretax + D&A - capex = 5M + 2M - 3M = 4M
+    assert bnsf_row["FY 2024"] == pytest.approx(4 * M)
+
+
+def test_build_segment_pretax_margin_history_table_computes_ratio():
+    from valuation.brk.tables import build_segment_pretax_margin_history_table
+    filings = _make_two_annual_segment_filings()
+    table = build_segment_pretax_margin_history_table(filings, period="annual")
+    assert not table.empty
+    bnsf_row = table[table["segment"] == "BNSF"].iloc[0]
+    assert bnsf_row["FY 2024"] == pytest.approx(5 / 20)  # 25% margin
+    assert table[table["segment"] == "Total"].iloc[0]["FY 2024"] == pytest.approx(8 / 30)  # total pretax / total rev
+
+
+def test_build_segment_history_empty_without_filings():
+    from valuation.brk.tables import build_segment_earnings_history_table
+    assert build_segment_earnings_history_table([], period="annual").empty
+
+
+def test_build_opco_valuation_sensitivity_table_shows_scenarios():
+    from valuation.brk.tables import build_opco_valuation_sensitivity_table
+    filings = _make_two_annual_segment_filings()
+    bundle = BrkValuationBundle(
+        overview=BrkOverviewBundle(
+            company=None,
+            market_snapshot={"ticker": "BRK-B", "last_price": 500.0, "market_cap": 1000.0 * M,
+                             "shares": 2.0 * M, "shares_class_b": 2.0 * M},
+            submissions={},
+            company_facts={},
+        ),
+        holdings=Brk13FBundle(
+            company=None, filing_date="2026-02-17", accession_number="0001",
+            information_table_filename="info.xml",
+            holdings=pd.DataFrame([
+                {"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM",
+                 "cusip": "037833100", "value_usd": 300.0 * M, "shares_or_principal": 1.0},
+            ]),
+        ),
+        liquidity=BrkLiquidityBundle(
+            company=None,
+            filings=[
+                BrkLiquidityFiling(
+                    filing_date="2026-03-02", accession_number="0002", form="10-K",
+                    balance_sheet=pd.DataFrame(
+                        [
+                            ["Cash and cash equivalents", "", "100", "90"],
+                            ["Short-term investments in U.S. Treasury Bills", "", "200", "180"],
+                        ],
+                        columns=["Consolidated Balance Sheets", "Consolidated Balance Sheets", "Dec. 31, 2025", "Dec. 31, 2024"],
+                    ),
+                )
+            ],
+        ),
+        segments=BrkSegmentsBundle(company=None, filings=filings),
+    )
+    reference = pd.DataFrame()
+    table = build_opco_valuation_sensitivity_table(
+        bundle, reference, period="annual", yahoo_client=FakeYahooClient()
+    )
+    assert not table.empty
+    assert "implied_brk_b_price_usd" in table.columns
+    assert "vs_current_price_pct" in table.columns
+    assert len(table) == 5  # 5 multiples
+
+
+def test_build_book_value_history_table_shows_equity_and_bvps():
+    from valuation.brk.tables import build_book_value_history_table
+    # Build minimal SEC companyfacts with annual stockholders_equity
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "StockholdersEquity": {
+                    "units": {
+                        "USD": [
+                            {"form": "10-K", "end": "2024-12-31", "val": 400 * M, "accn": "a1", "fy": 2024, "fp": "FY", "filed": "2025-02-21"},
+                            {"form": "10-K", "end": "2023-12-31", "val": 360 * M, "accn": "a2", "fy": 2023, "fp": "FY", "filed": "2024-02-21"},
+                        ]
+                    }
+                }
+            }
+        },
+        "entityName": "Test Corp",
+    }
+    table = build_book_value_history_table(company_facts, share_count=2.0 * M, limit=5)
+    assert not table.empty
+    assert any(table["metric"] == "stockholders_equity_usd")
+    assert any(table["metric"] == "book_value_per_brk_b_usd")
+    eq_row = table[table["metric"] == "stockholders_equity_usd"].iloc[0]
+    bv_row = table[table["metric"] == "book_value_per_brk_b_usd"].iloc[0]
+    # Find FY 2024 column
+    fy_col = next(c for c in table.columns if "2024" in str(c))
+    assert eq_row[fy_col] == pytest.approx(400 * M)
+    assert bv_row[fy_col] == pytest.approx(400 * M / (2.0 * M))  # $200/share

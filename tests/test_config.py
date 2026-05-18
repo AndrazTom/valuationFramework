@@ -1,5 +1,6 @@
 from valuation.config import (
     DEFAULT_SEC_USER_AGENT,
+    cache_dir,
     get_sec_user_agent,
     load_project_env,
     using_default_sec_user_agent,
@@ -60,3 +61,12 @@ def test_load_project_env_does_not_override_exported_env(monkeypatch, tmp_path):
     load_project_env()
 
     assert get_sec_user_agent() == "valuationFramework/0.1 exported@example.com"
+
+
+def test_cache_dir_uses_configured_env(monkeypatch, tmp_path):
+    configured = tmp_path / "cache"
+    monkeypatch.setenv("VALUATION_CACHE_DIR", str(configured))
+    monkeypatch.setattr("valuation.config._LOADED_ENV_FILES", set())
+    monkeypatch.setattr("valuation.config._candidate_env_paths", lambda: [])
+
+    assert cache_dir() == configured

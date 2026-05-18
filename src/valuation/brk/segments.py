@@ -21,10 +21,12 @@ TOP_LEVEL_OPERATING_METRICS = (
     "Revenues",
     "Total revenues",
     "Earnings before income taxes",
+    "Earnings (loss) before income taxes",
     "Earnings (Loss) Before Income Taxes of Operating Businesses",
     "Interest expense",
     "Capital expenditures",
     "Depreciation and amortization",
+    "Depreciation of tangible assets",
     "Goodwill at year-end",
     "Goodwill",
     "Identifiable assets at year-end",
@@ -45,10 +47,12 @@ FLOW_METRIC_RENAMES = {
     "Revenues": "revenues_usd",
     "Total revenues": "revenues_usd",
     "Earnings before income taxes": "earnings_before_income_taxes_usd",
+    "Earnings (loss) before income taxes": "earnings_before_income_taxes_usd",
     "Earnings (Loss) Before Income Taxes of Operating Businesses": "earnings_before_income_taxes_usd",
     "Interest expense": "interest_expense_usd",
     "Capital expenditures": "capex_usd",
     "Depreciation and amortization": "depreciation_and_amortization_usd",
+    "Depreciation of tangible assets": "depreciation_and_amortization_usd",
 }
 
 STOCK_METRIC_RENAMES = {

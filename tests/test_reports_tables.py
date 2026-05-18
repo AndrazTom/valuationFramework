@@ -159,21 +159,22 @@ def test_render_terminal_table_drops_secondary_columns_to_fit_width():
 
 
 def test_render_terminal_table_splits_period_columns_to_fit_width():
+    # Use large USD values so formatted cells are wide enough to force splitting at max_width=50
     frame = pd.DataFrame(
         [
             {
                 "metric": "revenue",
                 "unit": "USD",
-                "FY 2025": 100.0,
-                "FY 2024": 90.0,
-                "FY 2023": 80.0,
-                "FY 2022": 70.0,
-                "FY 2021": 60.0,
+                "FY 2025": 100e9,
+                "FY 2024": 90e9,
+                "FY 2023": 80e9,
+                "FY 2022": 70e9,
+                "FY 2021": 60e9,
             }
         ]
     )
 
-    rendered = render_terminal_table(frame, max_width=72)
+    rendered = render_terminal_table(frame, max_width=50)
 
     assert "Period block 1/" in rendered
     assert "FY 2025" in rendered
@@ -193,6 +194,8 @@ def test_render_terminal_table_uses_compact_value_aliases():
         [
             {"field": "residual_to_pretax_earnings_multiple", "value": 7.2},
             {"field": "short_term_us_treasury_bills", "value": 286_000_000_000.0},
+            {"field": "resolved_holdings_weighted_change_pct", "value": 0.045},
+            {"field": "top_holdings_minus_brk_b_change_pct", "value": 0.027},
         ]
     )
 
@@ -200,3 +203,23 @@ def test_render_terminal_table_uses_compact_value_aliases():
 
     assert "residual / pretax earnings" in rendered
     assert "T-bills" in rendered
+    assert "holdings change" in rendered
+    assert "top holdings vs BRK.B" in rendered
+    assert "change pct" not in rendered
+
+
+def test_render_terminal_table_keeps_issuer_names_on_one_line():
+    frame = pd.DataFrame(
+        [
+            {
+                "issuer": "LIBERTY LATIN AMERICA LTD",
+                "cusip": "G9001E102",
+                "change_type": "eliminated",
+            }
+        ]
+    )
+
+    rendered = render_terminal_table(frame)
+
+    assert "LIBERTY LATIN AMERICA LTD" in rendered
+    assert "| LTD " not in rendered

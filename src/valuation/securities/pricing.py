@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Mapping, Optional
 
 import pandas as pd
@@ -45,6 +46,7 @@ def enrich_holdings_with_market_prices(
     reference: pd.DataFrame,
     yahoo_client: Optional[YahooFinanceClient] = None,
     price_change_window: str | None = None,
+    max_holdings: int | None = None,
 ) -> pd.DataFrame:
     """Attach current price snapshots to holdings when a market symbol is known."""
     if holdings.empty:
@@ -60,20 +62,15 @@ def enrich_holdings_with_market_prices(
 
     yahoo = yahoo_client or YahooFinanceClient()
     normalized_window = normalize_price_change_window(price_change_window)
-    snapshots_by_ticker = {
-        ticker: _safe_fetch_price_snapshot(yahoo, ticker)
-        for ticker in sorted(set(enriched["ticker"].dropna()))
-    }
+    tickers = _tickers_to_fetch(enriched, max_holdings=max_holdings)
+    snapshots_by_ticker = _fetch_price_snapshots(yahoo, tickers)
     histories_by_ticker = {}
     if normalized_window is not None:
-        histories_by_ticker = {
-            ticker: _safe_fetch_history(
-                yahoo,
-                ticker,
-                period=_history_period_for_change_window(normalized_window),
-            )
-            for ticker in sorted(set(enriched["ticker"].dropna()))
-        }
+        histories_by_ticker = _fetch_price_histories(
+            yahoo,
+            tickers,
+            period=_history_period_for_change_window(normalized_window),
+        )
 
     enriched["last_price"] = enriched["ticker"].map(
         lambda ticker: _snapshot_value(snapshots_by_ticker, ticker, "last_price")
@@ -182,6 +179,69 @@ def _snapshot_value(
     return snapshot.get(field)
 
 
+def _tickers_to_fetch(holdings: pd.DataFrame, *, max_holdings: int | None) -> list[str]:
+    if "ticker" not in holdings.columns:
+        return []
+    candidates = holdings[holdings["ticker"].notna()]
+    if max_holdings is not None:
+        candidates = candidates.head(max(0, int(max_holdings)))
+    tickers: list[str] = []
+    seen: set[str] = set()
+    for value in candidates["ticker"].tolist():
+        ticker = str(value)
+        if ticker in seen:
+            continue
+        tickers.append(ticker)
+        seen.add(ticker)
+    return tickers
+
+
+def _fetch_price_snapshots(
+    yahoo: YahooFinanceClient,
+    tickers: list[str],
+) -> dict[str, Mapping[str, object]]:
+    if not tickers:
+        return {}
+    max_workers = min(8, len(tickers))
+    results: dict[str, Mapping[str, object]] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(_safe_fetch_price_snapshot, yahoo, ticker): ticker
+            for ticker in tickers
+        }
+        for future in as_completed(futures):
+            ticker = futures[future]
+            try:
+                results[ticker] = future.result()
+            except Exception:
+                results[ticker] = {"ticker": ticker.upper(), "source": "yfinance"}
+    return results
+
+
+def _fetch_price_histories(
+    yahoo: YahooFinanceClient,
+    tickers: list[str],
+    *,
+    period: str,
+) -> dict[str, pd.DataFrame]:
+    if not tickers:
+        return {}
+    max_workers = min(8, len(tickers))
+    results: dict[str, pd.DataFrame] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(_safe_fetch_history, yahoo, ticker, period=period): ticker
+            for ticker in tickers
+        }
+        for future in as_completed(futures):
+            ticker = futures[future]
+            try:
+                results[ticker] = future.result()
+            except Exception:
+                results[ticker] = pd.DataFrame()
+    return results
+
+
 def _compute_market_value_live(row: pd.Series):
     shares = row.get("shares_or_principal")
     last_price = row.get("last_price")
@@ -268,7 +328,11 @@ def _normalize_history_frame(history: pd.DataFrame) -> pd.DataFrame:
     if date_column is None or "close" not in history.columns:
         return pd.DataFrame(columns=["price_date", "close"])
     normalized = history[[date_column, "close"]].copy()
-    normalized["price_date"] = pd.to_datetime(normalized[date_column], errors="coerce")
+    normalized["price_date"] = pd.to_datetime(
+        normalized[date_column],
+        errors="coerce",
+        utc=True,
+    )
     normalized["close"] = pd.to_numeric(normalized["close"], errors="coerce")
     normalized = normalized.dropna(subset=["price_date", "close"]).sort_values("price_date")
     return normalized.reset_index(drop=True)

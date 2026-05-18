@@ -16,27 +16,12 @@ Project posture:
 
 Current branch priority:
 
-- `brk` should inherit the current generic company/statement backend from `main`
-- `brk` is the Berkshire-specific proving ground layered on top of that generic base
+- `brk` is the Berkshire-specific proving ground layered on top of the generic base from `main`
+- as of 2026-05-18, `brk` is mature; all prior hardening complete (liquidity, segments, SOTP, holdings history, price windows, diagnostics, valuation tables, valuation report)
+- 2026-05-18 live QA sweep passed for `./vf brk holdings --history --filings-limit 2 --limit 10`, `./vf brk sotp --details`, and `./vf brk sotp --price-change 1M`
+- `./vf brk valuation-report` now functional: self-contained Markdown artifact, findings-first order, terminal key-numbers preview, dynamic methodology notes, `--segment-filings`, and selectable public-equity basis (`--equity-valuation-basis reported|live`)
+- 288 tests passing as of 2026-05-18
 - temporary hardening branches should be merged back quickly, then deleted
-- current branch focus is stabilizing Berkshire workflows after inheriting the newer generic backend
-- current hardening branch has already:
-  - moved Berkshire liquidity from sparse companyfacts to filing balance-sheet tables
-  - made Berkshire segments work again without relying on `lxml`
-  - added annual/quarterly history controls to Berkshire liquidity and segment commands
-  - added explicit Berkshire start/end period filters, with range filters widening the default history limit
-  - fixed Berkshire segment rows being split across alternate SEC member paths
-  - changed multi-period Berkshire segment output to emit one table per filing period
-  - added optional Berkshire holdings price-change windows on live-priced holdings output
-  - added Berkshire-vs-holdings price-change comparison tables
-  - added a first Berkshire market-implied SOTP bridge command
-  - added Berkshire 13F holdings history across recent filings via `./vf brk holdings --history`
-  - added Berkshire SOTP operating-business context comparing residual value to latest segment pre-tax earnings
-  - hardened Yahoo live-price paths so Berkshire pricing commands degrade to partial coverage instead of crashing on rate limits
-  - confirmed that some remaining blank cells in older annual Berkshire segment tables are real SEC report-table coverage gaps, not renderer bugs
-- recent mainline hardening merged into this branch:
-  - corrected Yahoo-backed European balance-sheet mappings for `short_term_investments` and `long_term_debt`
-  - fixed plain `BRK` resolving through Yahoo to `BRK-B` without retrying SEC lookup on the resolved symbol
 
 Long-term direction:
 
@@ -53,6 +38,7 @@ Long-term direction:
 - keep `claude.md` current so a new chat can resume work quickly
 - coding agents should update root `claude.md` whenever meaningful backend behavior, priorities, branch state, or workflow assumptions change
 - coding agents should also update relevant subtree `CLAUDE.md` files regularly when module-local contracts or workflow expectations change
+- **this is a constant, non-negotiable instruction**: every code change must be accompanied by updates to all affected subtree `CLAUDE.md` files; do not close a task without doing this
 - create a new subtree `CLAUDE.md` when a module has enough local context that future chats would otherwise have to rediscover it
 - add subtree `CLAUDE.md` files only when module-specific context is genuinely useful
 - after implementation work is complete, a separate Codex/Claude review pass should inspect the patch, run tests, and verify the basic README-listed workflows before the branch is considered ready to merge
@@ -69,6 +55,14 @@ Long-term direction:
   - support both a repo-local `.env` and explicit exported variables
   - code should load `.env` without relying only on the `vf` shell wrapper
   - exported env vars should keep precedence over `.env`
+- cache note:
+  - SEC provider payloads persist under `~/.cache/valuationFramework/sec` by default, or `VALUATION_CACHE_DIR/sec`
+  - mutable SEC endpoints auto-expire: company ticker map 24h, submissions 12h, companyfacts 24h
+  - immutable filing artifacts such as filing indexes, `FilingSummary.xml`, report HTML, and 13F XML cache indefinitely
+- Yahoo price snapshots persist under `~/.cache/valuationFramework/yahoo/snapshots` for 1h
+- Yahoo history frames persist under `~/.cache/valuationFramework/yahoo/history` for 24h
+- live holding quote enrichment fetches Yahoo quotes in parallel and can be bounded to the top N holdings; BRK SOTP and valuation report default to live revaluation for all mapped holdings unless `--equity-live-limit N` is supplied
+- use `./vf --refresh-cache ...` to force provider refresh for one run
 
 ## Current Architecture
 
@@ -95,6 +89,8 @@ Rules:
   - `data/normalize` stabilizes
   - `company` assembles product-facing tables
   - `reports` renders and exports
+- broad universe downloads should be built on a persisted cache/index layer, not by repeatedly hitting providers in ad hoc command loops
+- for a future top-500 US or top-1000 global command, define the universe source, ranking date, and licensing/data-source assumptions before implementation
 
 ## Repo Map
 
@@ -112,6 +108,19 @@ Rules:
   - fallback path only, not a deep modeling layer
 - `src/valuation/company/tables.py`
   - compact backend-facing company tables such as summary, overview, and statement availability
+  - also contains `build_implied_value_range_table` and `build_reverse_dcf_table` (owner-earnings valuation)
+- `src/valuation/company/comps.py`
+  - multi-security comparison table builder: `fetch_comps_entries` (parallel TTM fetch) + `build_comps_table`
+  - columns: ticker, name, price, market_cap, revenue, net_income, owner_earnings, oe_margin_pct, pe_ratio, price_to_oe, oe_yield_pct, ev_to_ebitda, implied_growth_pct
+- `src/valuation/company/ratios.py`
+  - historical per-fiscal-year valuation ratio builder
+  - SEC path: `build_historical_ratios_table` (annual companyfacts + monthly Yahoo price history)
+  - Yahoo path: `build_historical_ratios_table_from_yahoo` (Yahoo annual frames)
+  - `_annual_period_end_dates` reads raw companyfacts to recover actual fiscal year end dates (lost when statements convert to period labels)
+- `src/valuation/watchlist.py`
+  - persistent ticker watchlist backed by `~/.config/valuationFramework/watchlist.toml`
+  - add/remove/load/save with case-insensitive deduplication
+  - `./vf watchlist show` delegates to `run_comps` on the full watchlist
 - `src/valuation/data/normalize/tables.py`
   - core normalization contract layer
   - latest-fact selection, filing normalization, statement period matrix logic
@@ -120,6 +129,8 @@ Rules:
   - SEC filing report tables are now parsed in-code from HTML rather than relying on `pandas.read_html` + `lxml`
 - `src/valuation/reports/tables.py`
   - rendering and export helpers
+  - terminal display aliases keep BRK live/resolved 13F and price-change field labels compact without changing backend table keys
+  - security identity columns such as `issuer` should stay on one terminal row; wrapping them can look like false extra holdings
 - `src/valuation/securities/identifiers.py`
   - canonical `security_id` rules
 - `tests/`
@@ -142,26 +153,31 @@ Keep `main` generic. Do not leak Berkshire assumptions into generic modules.
 
 ## Berkshire Branch Goal
 
-`brk` is for:
+`brk` contains:
 
-- latest 13F holdings
-- 13F holdings history across recent filings
-- optional live-price revaluation
-- liquidity bridge
-- operating segment extraction
-- later Berkshire sum-of-the-parts logic
+- latest 13F holdings with live-price revaluation and price-change windows
+- BRK valuation report can keep the old reported-13F equity value or use a bounded current-price estimate from shares × quote for top holdings
+- 13F holdings history across recent filings with portfolio-level change summaries
+- liquidity bridge from filing balance-sheet tables
+- operating segment history
+- market-implied SOTP bridge with operating business context
+- operating business reverse DCF (Gordon Growth implied growth at 8%/10%/12% required return)
+- valuation tables (implied value range, reverse DCF) inherited from generic company workflow
 
-As of 2026-04-11, `brk` should no longer lag far behind `main`.
+As of 2026-05-18, `brk` is ahead of `main`; the live QA sweep and EPS/share fallback are complete before merging back.
 
 - inherit the generic company/snapshot/statements stack from `main`
 - keep Berkshire-specific logic in `src/valuation/brk/`
+- `src/valuation/brk/statements.py` fills BRK Class B EPS/equivalent-share rows from filing report tables for annual and direct quarterly income statements when companyfacts omits them
+- SOTP `--details` emits balance-sheet context rows for major assets/liabilities that remain inside the residual; these rows are context only and should not be added to net liquidity without redefining the bridge
+- fixed maturity securities should be framed as insurance investment-portfolio context, not deployable liquidity; BRK SOTP subtracts only cash + Treasury bills - T-bill purchase payable as core liquidity
 - keep Berkshire assumptions out of generic modules unless they are reusable and parameterized cleanly
 
 Reusable pieces discovered there should be extracted back into `main`.
 
 ## Current Main Features
 
-As of 2026-04-09, `main` should contain or move toward:
+As of 2026-05-18, `main` contains (on `brk`, pending merge):
 
 - repo-local launcher via `./vf`
 - generic `valuation company <identifier>` CLI
@@ -183,7 +199,7 @@ As of 2026-04-09, `main` should contain or move toward:
 - generic statements command backed by SEC companyfacts:
   - income
   - balance
-  - cashflow
+  - cashflow (now includes `depreciation_amortization` row via `DepreciationDepletionAndAmortization`)
   - annual and quarterly
   - optional start/end year filters
   - optional start/end quarter filters for quarterly views
@@ -192,6 +208,10 @@ As of 2026-04-09, `main` should contain or move toward:
     - additive flows may derive from YTD/FY
     - balance-sheet items stay instant
     - diluted EPS / diluted shares should prefer direct-quarter facts and avoid subtraction
+  - BRK income statements add a Berkshire-only filing-table fallback for Class B EPS/share rows from `Consolidated Statements of Earnings`; quarterly fallback uses only `3 Months Ended` columns and leaves Q4 blank rather than deriving per-share values from annual/YTD disclosures
+- multi-security comps table: `./vf comps AAPL MSFT GOOG` fetches TTM metrics in parallel and renders side-by-side
+- historical valuation ratios: `./vf ratios AAPL --limit 5` shows annual P/E, P/OE, OE yield, P/B, EV/EBITDA with price from Yahoo monthly history
+- persistent watchlist: `./vf watchlist add/remove/list/show` backed by `~/.config/valuationFramework/watchlist.toml`
 
 ## Current Commands
 
@@ -205,13 +225,26 @@ As of 2026-04-09, `main` should contain or move toward:
 - `./vf statements AAPL --statement income --period annual`
 - `./vf statements BNP.PA --statement income --period annual`
 - `./vf statements AAPL --statement balance --period quarterly`
+- `./vf statements BRK --statement income --period quarterly --diagnostics`
+- `./vf ratios AAPL --limit 5`
+- `./vf ratios BNP.PA --limit 4`
+- `./vf comps AAPL MSFT GOOG`
+- `./vf watchlist add AAPL MSFT BRK-B`
+- `./vf watchlist remove MSFT`
+- `./vf watchlist list`
+- `./vf watchlist show`
 - `./vf brk overview`
 - `./vf brk holdings --limit 10`
 - `./vf brk holdings --history --filings-limit 4 --limit 10`
 - `./vf brk holdings --live-prices --limit 10`
 - `./vf brk holdings --price-change 1M --limit 10`
 - `./vf brk sotp`
+- `./vf brk sotp --details`
 - `./vf brk sotp --price-change 1M`
+- `./vf brk valuation-report`
+- `./vf brk valuation-report --segment-filings 4`
+- `./vf brk valuation-report --equity-valuation-basis reported`
+- `./vf brk valuation-report --equity-live-limit 20`
 - `./vf brk liquidity --period annual --limit 4`
 - `./vf brk liquidity --period quarterly --limit 4`
 - `./vf brk segments --period annual --limit 4`
@@ -255,12 +288,44 @@ As of 2026-04-09, `main` should contain or move toward:
 
 ## Berkshire Priorities
 
-After the current mainline sync, the next Berkshire branch steps should be:
+Steps 1-4 done. Next hardening pass:
 
-1. keep the `./vf brk ...` workflows healthy on top of the inherited generic stack
-2. improve Berkshire SOTP by separating more non-13F assets/liabilities and making segment earnings history more valuation-ready
-3. tighten Berkshire-specific filing/report extraction quality
-4. keep pushing reusable pieces back into `main` when they are genuinely generic
+1. ~~keep `./vf brk ...` workflows healthy after mainline sync~~ ✓
+2. ~~improve Berkshire SOTP~~ ✓ (operating context + reverse DCF shipped 2026-05-18)
+3. ~~tighten Berkshire-specific filing/report extraction quality (EPS/share fallback from filing tables)~~ ✓
+4. ~~`./vf brk valuation-report` command~~ ✓ (shipped 2026-05-18: findings-first MD report, terminal summary, dynamic methodology notes)
+
+### Next SOTP / Valuation Hardening Tasks
+
+These are the highest-value next steps for improving the quality and trust of the BRK valuation output:
+
+**Liability awareness in the SOTP bridge (highest priority conceptual improvement):**
+- The current bridge shows deferred tax on unrealized equity gains as a context row when the balance-sheet filing exposes it
+  - This is a real contingent liability: selling the equity portfolio triggers ~21% capital gains tax on the unrealized gain
+  - The 13F portfolio is valued pre-tax, so the "true" after-tax value is lower if realized
+  - Future refinement: split deferred tax attributable to equity gains from broader deferred tax liabilities where filing detail allows it
+- Insurance float treatment: the methodology notes now explain this correctly; no code change needed unless a separate float-funded investment yield table becomes worthwhile
+- Holding-company debt vs subsidiary debt: balance sheet context already shows `notes_payable_and_other_borrowings`; consider splitting into holding-company debt (Senior notes issued by BRK parent) vs consolidated debt in a future pass
+
+**Valuation report quality:**
+- Run `./vf brk valuation-report` live and QA the output Markdown for:
+  - Fixed maturity figure is pulled from actual data (not hardcoded ~$25B)
+  - Fixed maturities are framed as insurance investment context, not deployable liquidity
+  - All sections render without empty tables
+  - Methodology notes are factually accurate with actual balance sheet context values
+- Use `--equity-valuation-basis reported` for old filing-date 13F values; default live mode prices all mapped holdings, or use `--equity-live-limit N` for a bounded current-price estimate
+- Consider adding a `--price-change` flag to the valuation report so holdings can be revalued with a window (e.g. 1M price change context)
+
+**Independent operating business valuation (medium-term):**
+- The SOTP residual is market-implied (circular). A higher-quality report would also include a bottoms-up range estimate for the operating businesses
+- BNSF: could use rail-industry EV/EBITDA multiples applied to BNSF segment EBITDA
+- BHE: similar approach with utility multiples, noting the ongoing BHE utility wildfire liability
+- Insurance / other: harder to value independently; keep as residual
+- This is a larger project but the segment data + reverse DCF are already in place to support it
+
+**Merge readiness:**
+- after next live QA sweep, port `brk` clean to `main`
+- keep pushing reusable pieces back into `main` when genuinely generic
 
 Latest Berkshire live check on 2026-05-16:
 
@@ -284,31 +349,6 @@ Current CLI hardening pass:
   - `./vf company AAPL`
   - `./vf statements BRK --statement income --period quarterly --limit 20`
 
-Next concrete tasks:
-
-1. Berkshire statement fallback:
-   - investigate BRK 10-Q/10-K filing statement tables for EPS and weighted-average share rows that are not usable through SEC companyfacts
-   - if present, add a Berkshire-specific filing-table fallback under `src/valuation/brk/` rather than broadening generic SEC companyfacts heuristics
-   - label current market shares separately from weighted-average basic/diluted shares
-2. Berkshire SOTP:
-   - separate more non-13F assets/liabilities from the residual where filing tables support it
-   - add a segment earnings history/multiple table to detailed SOTP output so the current 7.2x residual context can be compared across years
-   - decide whether fixed maturity securities should remain in net liquidity or be shown as a separate investment bucket
-3. Generic company workflow:
-   - investigate JPM stale revenue in overview; likely bank-specific companyfacts concept freshness, but confirm before adding rules
-   - consider extracting reusable market-snapshot freshness/provenance helpers if another module starts duplicating them
-4. Berkshire 13F history:
-   - add optional export-friendly change summaries by issuer across filings
-   - consider distinguishing share-count changes from price-driven value changes in history output
-5. Valuation MVP:
-   - start with `owner-earnings`, not full DCF
-   - keep model functions pure over normalized statement data
-   - output owner earnings, owner earnings yield, per-share owner earnings, and a simple normalized multiple range
-   - follow with reverse DCF once statement diagnostics are trustworthy
-6. QA:
-   - run one more live sweep before merging `brk` back toward `main`
-   - include `./vf brk sotp --price-change 1M` in that sweep because it exercises the most Yahoo live-price paths
-
 Completed on 2026-05-17:
 
 - `./vf statements ... --diagnostics` / `--include-missing` now emits a `Statement Diagnostics` section for SEC-backed statements
@@ -317,42 +357,113 @@ Completed on 2026-05-17:
   - `diluted_eps` and `diluted_shares` are absent from BRK SEC companyfacts
   - `operating_income` has only stale usable quarterly coverage, latest shown as 2013 Q1
 
-## Resume Plan
+Completed before 2026-05-18:
 
-When resuming work after the current overview hardening, keep the next steps in this order:
+- EBITDA and free_cash_flow derived rows added to Key Financials for both SEC and Yahoo paths
+- TTM financials used for valuation ratios in `./vf company` (SEC path)
+- TTM financials used for valuation ratios in Yahoo-backed path using quarterly frames when available
+- TTM NQ label applied when fewer than 4 quarters are available
+- earnings/FCF/owner-earnings yield ratios and per-share owner earnings added to Valuation Ratios section
+- portfolio-level 13F change summary added: categorises every issuer as new/increased/decreased/eliminated/unchanged
+- price/share decomposition added to 13F issuer change summary
+- fixed maturity securities split explicitly in SOTP component bridge table
+- segment earnings history in `./vf brk sotp --details` now fetches 4 filings (not 1)
 
-1. strengthen overview quality and provenance
-   - keep `company` backend-first
-   - add clearer provenance and completeness signals for overview metrics
-   - prefer compact trustworthy metadata over adding many new metrics
-2. improve the compact security overview model
-   - make `overview` the stable summary backbone for one security
-   - keep `key financials` as the deeper supporting table
-   - avoid overcomplicating the schema too early
-3. keep improving statement metadata and availability reasons
-   - surface why a metric or statement is unavailable
-   - keep provider gaps explicit, especially for Yahoo-backed non-US names
-4. keep filing quality high
-   - continue prioritizing analysis-relevant forms over noisy filing streams
-   - preserve useful filing metadata for backend consumers
-5. postpone broader expansion until the core backend is stronger
-   - no urgent need to add more countries right now
-   - no urgent need to add ETF or real index support right now
-   - only expand market coverage after the core single-security workflow is more trustworthy
+Completed on 2026-05-18 (valuation):
 
-Immediate next implementation target:
+- `build_implied_value_range_table` added to `company/tables.py`
+  - pure function over market snapshot + TTM financials
+  - computes owner earnings = net income + D&A - capex; returns empty when negative
+  - shows implied price per share at 10x/15x/20x/25x/30x owner earnings multiples
+  - shows `upside_pct` (0-1 decimal) as (implied - current) / current
+  - `multiple` column formatted as "Nx" by `humanize_frame` via new `_infer_format_kind` case
+- `build_reverse_dcf_table` added to `company/tables.py`
+  - Gordon Growth model solved for g: implied_growth = required_return - (owner_earnings / market_cap)
+  - shows implied perpetual growth at 8%/10%/12% required return assumptions
+  - shows `zero_growth_price` = per_share_OE / r (what you'd pay for zero-growth OE)
+  - `assumed_return` and `implied_growth` formatted as percent by `humanize_frame`
+  - returns empty when owner earnings negative or market cap unavailable
+- both `Implied Value Range` and `Reverse DCF` sections wired into `./vf company` for both SEC and Yahoo paths
+  - sections only emit when owner earnings are positive and inputs are available
+  - rendered to CSV/MD/JSON with slugs `implied_value_range` and `reverse_dcf`
+- 13 new tests in `test_company_tables.py`; full suite now 219 tests, all passing
 
-- add provenance/completeness fields to the compact overview layer in a minimal way
-- keep the table output, but move toward a more canonical machine-friendly overview contract underneath if needed
+Completed on 2026-05-18 (Berkshire SOTP):
 
-On `brk`, immediate branch-specific target after sync:
+- `build_brk_operating_reverse_dcf_table` added to `brk/tables.py`
+  - uses Gordon Growth solved for g: implied_g = r - (pretax_earnings / residual)
+  - extracts residual and pretax_earnings from the already-built operating context table
+  - shows implied perpetual growth at 8%/10%/12% required return, plus zero-growth value in USD and per BRK-B share
+  - returns empty when residual or pretax earnings are zero/negative/missing
+  - note: residual includes non-13F assets, debt, deferred taxes — implied growth is an approximation
+- `Operating Business Reverse DCF` section added to default `./vf brk sotp` output (after Operating Business Context)
+  - only emits when operating context has positive residual and pretax earnings
+- 5 new tests in `test_brk_tables.py`; full suite now 224 tests, all passing
 
-- build the first Berkshire sum-of-the-parts bridge using:
-  - 13F holdings
-  - liquidity bridge
-  - segment summary tables
-- keep Berkshire liquidity grounded in filing balance-sheet tables, especially U.S. Treasury Bill rows
-- keep Berkshire quarterly segments on true 3-month data instead of YTD values
+Completed on 2026-05-18 (generic company research tools):
+
+- `src/valuation/company/comps.py` added: multi-ticker TTM comps via parallel `fetch_comps_entries` + `build_comps_table`
+  - columns: ticker, name, price, market_cap, revenue, net_income, owner_earnings, oe_margin_pct, pe_ratio, price_to_oe, oe_yield_pct, ev_to_ebitda, implied_growth_pct
+  - implied_growth_pct = 0.10 - (owner_earnings / market_cap), shown when owner earnings positive
+- `src/valuation/company/ratios.py` added: historical per-fiscal-year valuation ratios
+  - `build_historical_ratios_table`: SEC path using annual companyfacts + Yahoo monthly price history
+  - `build_historical_ratios_table_from_yahoo`: Yahoo annual frames path
+  - `_annual_period_end_dates`: recovers actual FY end dates from raw companyfacts (period labels lose the date)
+  - `_price_for_date`: searches ±3 months in monthly price map for closest bar
+  - columns: fiscal_year, end_date, price, market_cap, net_income, revenue, owner_earnings, pe_ratio, price_to_oe, oe_yield_pct, pb_ratio, ev_to_ebitda
+- `src/valuation/watchlist.py` added: persistent ticker watchlist at `~/.config/valuationFramework/watchlist.toml`
+  - `./vf watchlist add/remove/list/show` subcommands; `show` delegates to `run_comps` on full watchlist
+- `depreciation_amortization` added to `CASH_FLOW_DEFINITIONS` (`DepreciationDepletionAndAmortization` / `DepreciationAndAmortization`)
+  - unlocks owner earnings in historical ratios for all issuers with SEC cashflow D&A data
+  - D&A now also surfaces in Key Financials section of `./vf company` with proper `$X.XXB` formatting
+- `humanize_frame` formatting extended: `depreciation` and `amortization` token → currency format
+- full test suite at 257 tests (was 224 before this session)
+
+## First Task for Next Session
+
+**CLAUDE.md audit — do this before any other work:**
+
+- scan the entire repo for all existing `CLAUDE.md` files and identify every module that has meaningful local context but no `CLAUDE.md` yet
+- update all existing subtree `CLAUDE.md` files to reflect the current state of the code (many were last updated before the valuation report, summary table, and liability-context work)
+- add new subtree `CLAUDE.md` files where missing and genuinely useful (candidates: `src/valuation/company/`, `src/valuation/data/providers/`, `src/valuation/reports/`, `src/valuation/securities/`)
+- cross-check every `CLAUDE.md` against the actual code: remove stale claims, add anything a new chat would need to avoid rediscovering
+
+This is required before any feature work so the repo is fully navigable from a cold start.
+
+---
+
+Completed on 2026-05-18 (valuation report):
+
+- `./vf brk valuation-report` now fully functional
+  - findings-first section order: Key Valuation Summary → SOTP Bridge → Operating Context → Reverse DCF → Supporting Detail → Segment History → Methodology
+  - terminal key-numbers preview (prints `Key Valuation Summary` table before writing file)
+  - Key Valuation Summary and Public Equity Portfolio keep both reported 13F value and selected 13F value/basis
+  - `build_brk_valuation_summary_table` added to `brk/tables.py`: compact summary over already-computed tables (price, mktcap, 13F blended/selected, net cash/T-bills, residual + per-share + weight, pretax earnings, multiple, implied growth at 10%, zero-growth per-share)
+  - dynamic methodology notes: fixed maturity note pulled from actual liquidity data
+  - improved liability context in methodology notes: float explained correctly (not a simple deduction), deferred tax haircut on equity flagged, subsidiary vs holdco debt distinction made explicit
+  - `--segment-filings` arg (default 4) controls segment history depth
+  - `--equity-valuation-basis reported|live` selects old reported-13F equity value vs current-price estimate; live mode defaults to all mapped holdings and can be bounded via `--equity-live-limit`
+  - accession numbers included in report header for both 13F and liquidity filings
+  - 288 tests passing
+- `_metric_per_share()` and `_metric_weight()` helpers added to `brk/tables.py` for SOTP bridge row extraction
+
+Next concrete tasks:
+
+1. Tax sensitivity / deferred-tax refinement remains planned, but is intentionally not part of the current report-hardening pass
+2. Cached universe/index layer:
+   - build a small security/filer index before any top-500/top-1000 downloader
+   - for updated SEC filings after long gaps, refresh submissions first, compare latest accession/report dates to local index, then fetch only new immutable filing artifacts
+3. Yahoo Europe hardening:
+   - collect specific issuer failures before changing mappings; bank/insurance statement shapes can be legitimately sparse
+4. Generic company improvements:
+   - statement concept coverage: consider sector-specific concept additions for energy/utility/insurance companies
+   - filing quality: ensure `8-K` and proxy filings are surfaced cleanly in the company view
+4. QA sweep completed on 2026-05-18:
+   - `./vf brk sotp`, `./vf brk sotp --price-change 1M`, `./vf brk holdings --history --filings-limit 2`, `./vf company AAPL`, `./vf company BRK-B`, `./vf company BNP.PA` all exited 0
+   - `Operating Business Reverse DCF` confirmed present in SOTP output
+   - `Implied Value Range` and `Reverse DCF` confirmed for both AAPL and BRK-B
+   - note: BRK-B owner earnings ARE available from SEC TTM (D&A + capex + net income all in Q1 2026 10-Q); earlier assumption of suppression was incorrect
+   - BRK quarterly diagnostics confirmed: diluted_eps and diluted_shares absent from SEC companyfacts; operating_income stale since 2013
 
 ## Statement Debug Notes
 
@@ -594,12 +705,16 @@ On `brk`, immediate branch-specific target after sync:
     - minimal CLI JSON bundle support
 - `brk`
   - remains the Berkshire-specific proving ground
-- current hardening branch work now proven and ready to merge:
+- `brk` contains all new work, pending final QA sweep before merge to `main`:
   - stronger `company` backbone with statement availability
-  - richer prioritized filing rows
-  - human-facing README refresh
-  - `.codex` ignored in Git
-  - minimal `--format json` backend bundle path
+  - richer prioritized filing rows + human-facing README refresh
+  - `.codex` ignored in Git + minimal `--format json` bundle path
+  - statement diagnostics (`--diagnostics` / `--include-missing`)
+  - TTM financials for valuation ratios (SEC + Yahoo paths)
+  - `Implied Value Range` and `Reverse DCF` sections in `./vf company`
+  - `Operating Business Reverse DCF` in `./vf brk sotp`
+  - portfolio-level and issuer-level 13F change summaries
+  - 224 tests passing
 
 ## Quality Bar
 
@@ -608,6 +723,12 @@ On `brk`, immediate branch-specific target after sync:
 - delete code that is not pulling its weight
 - keep tests that protect real behavior; skip decorative or low-signal tests
 - preserve a clean path for later API/UI work without adding that surface too early
+
+## Commit Authorship
+
+- Do NOT add `Co-Authored-By: Claude` or any AI co-author trailers to commits
+- Do NOT add `Generated with [Claude Code]` or any AI attribution lines to commit messages
+- Commits should appear authored solely by the human user
 
 ## Git / Publication
 

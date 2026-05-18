@@ -25,23 +25,36 @@ from valuation.brk.tables import (
     build_13f_portfolio_change_summary_table,
     build_13f_summary_table,
     build_13f_live_price_summary_table,
+    build_balance_sheet_context_table,
+    build_book_value_history_table,
+    build_brk_operating_reverse_dcf_table,
     build_brk_valuation_assumptions_table,
+    build_brk_valuation_summary_table,
     build_key_facts_table,
     build_holdings_vs_brk_price_change_table,
     build_liquidity_bridge_table,
+    build_liquidity_detail_table,
     build_liquidity_summary_table,
     build_latest_liquidity_snapshot_table,
     build_market_anchor_table,
     build_market_implied_sotp_bridge_table,
     build_operating_business_context_table,
+    build_opco_valuation_sensitivity_table,
     build_public_equity_portfolio_summary_table,
+    build_public_equity_revaluation_detail_table,
+    build_segment_earnings_history_table,
+    build_segment_implied_allocation_table,
+    build_segment_owner_earnings_history_table,
     build_segment_period_sections,
+    build_segment_pretax_margin_history_table,
+    build_segment_revenues_history_table,
     build_segment_report_summary_table,
     build_share_class_table,
     build_top_level_operating_segments_summary_table,
     build_top_holdings_live_table,
     build_top_holdings_table,
     filter_core_filings_table,
+    normalize_public_equity_valuation_basis,
 )
 from valuation.data.normalize.tables import (
     recent_filings_to_table,
@@ -49,7 +62,7 @@ from valuation.data.normalize.tables import (
     snapshot_to_table,
 )
 from valuation.data.providers.yahoo import YahooFinanceClient
-from valuation.reports.tables import render_terminal_table, write_csv, write_markdown
+from valuation.reports.tables import render_markdown_table, render_terminal_table, write_csv, write_markdown
 from valuation.securities.pricing import (
     enrich_holdings_with_market_prices,
     fetch_price_change_snapshot,
@@ -180,6 +193,48 @@ def register_brk_parser(subparsers) -> None:
         action="store_true",
         help="Include supporting assumptions, market anchor, liquidity, holdings, and segment tables.",
     )
+    sotp_parser.add_argument(
+        "--equity-valuation-basis",
+        choices=("reported", "live"),
+        default="live",
+        help="Use reported 13F values or current-price revaluation for public equities.",
+    )
+    sotp_parser.add_argument(
+        "--equity-live-limit",
+        type=_non_negative_int,
+        default=None,
+        help="When using live equity valuation, only fetch prices for the top N reported 13F holdings.",
+    )
+
+    report_parser = brk_subparsers.add_parser(
+        "valuation-report",
+        help="Generate a self-contained Berkshire valuation report as a Markdown file.",
+    )
+    report_parser.add_argument("--outdir", default="outputs/tables")
+    report_parser.add_argument(
+        "--period",
+        choices=("annual", "quarterly"),
+        default="annual",
+        help="Use annual 10-K or quarterly 10-Q inputs for liquidity and segment context.",
+    )
+    report_parser.add_argument(
+        "--segment-filings",
+        type=_non_negative_int,
+        default=4,
+        help="Number of segment filings to include in the report.",
+    )
+    report_parser.add_argument(
+        "--equity-valuation-basis",
+        choices=("reported", "live"),
+        default="live",
+        help="Use reported 13F values or current-price revaluation for public equities.",
+    )
+    report_parser.add_argument(
+        "--equity-live-limit",
+        type=_non_negative_int,
+        default=None,
+        help="When using live equity valuation, only fetch prices for the top N reported 13F holdings.",
+    )
 
 
 def run_brk_command(args: argparse.Namespace) -> int:
@@ -224,6 +279,16 @@ def run_brk_command(args: argparse.Namespace) -> int:
             period=args.period,
             price_change_window=args.price_change_window,
             details=args.details,
+            equity_valuation_basis=args.equity_valuation_basis,
+            equity_live_limit=args.equity_live_limit,
+        )
+    if args.brk_command == "valuation-report":
+        return run_brk_valuation_report(
+            outdir=args.outdir,
+            period=args.period,
+            segment_filings=args.segment_filings,
+            equity_valuation_basis=args.equity_valuation_basis,
+            equity_live_limit=args.equity_live_limit,
         )
     raise ValueError(f"Unknown Berkshire command: {args.brk_command}")
 
@@ -407,7 +472,8 @@ def run_brk_liquidity(
     bridge = build_liquidity_bridge_table(bundle.filings)
     sections = [
         ("Liquidity History", build_liquidity_summary_table(bridge)),
-        ("Liquidity Bridge", bridge),
+        ("Liquidity Bridge", build_liquidity_detail_table(bridge)),
+        ("Balance Sheet Context", build_balance_sheet_context_table(bridge)),
     ]
     _emit_sections(sections, Path(outdir) / "BRK_LIQUIDITY")
     return 0
@@ -451,6 +517,10 @@ def run_brk_segments(
         ),
     ]
     sections.extend(build_segment_period_sections(bundle.filings, period=period))
+    _append_nonempty(sections, "Segment Pre-Tax Earnings History", build_segment_earnings_history_table(bundle.filings, period=period))
+    _append_nonempty(sections, "Segment Revenues History", build_segment_revenues_history_table(bundle.filings, period=period))
+    _append_nonempty(sections, "Segment Owner Earnings History", build_segment_owner_earnings_history_table(bundle.filings, period=period))
+    _append_nonempty(sections, "Segment Pre-Tax Margin History", build_segment_pretax_margin_history_table(bundle.filings, period=period))
     if len(bundle.filings) == 1 and len(sections) == 1:
         sections.append(
             (
@@ -470,17 +540,23 @@ def run_brk_sotp(
     period: str,
     price_change_window: str | None,
     details: bool = False,
+    equity_valuation_basis: str = "live",
+    equity_live_limit: int | None = None,
 ) -> int:
     """Build a first Berkshire market-implied SOTP bridge."""
+    equity_valuation_basis = normalize_public_equity_valuation_basis(equity_valuation_basis)
     yahoo = YahooFinanceClient()
     bundle = fetch_brk_valuation_bundle(period=period, yahoo_client=yahoo, segment_limit=4 if details else 1)
     reference = build_brk_security_reference()
-    enriched_holdings = enrich_holdings_with_market_prices(
-        aggregate_13f_holdings(bundle.holdings.holdings),
-        reference,
-        yahoo_client=yahoo,
-        price_change_window=price_change_window,
-    )
+    enriched_holdings = None
+    if equity_valuation_basis == "live" or price_change_window is not None:
+        enriched_holdings = enrich_holdings_with_market_prices(
+            aggregate_13f_holdings(bundle.holdings.holdings),
+            reference,
+            yahoo_client=yahoo,
+            price_change_window=price_change_window,
+            max_holdings=equity_live_limit if equity_valuation_basis == "live" else None,
+        )
     brk_snapshot = (
         fetch_price_change_snapshot(
             BRK_B_TICKER,
@@ -490,6 +566,18 @@ def run_brk_sotp(
         if price_change_window is not None
         else None
     )
+    operating_context = build_operating_business_context_table(
+        bundle,
+        reference,
+        period=period,
+        yahoo_client=yahoo,
+        enriched_holdings=enriched_holdings,
+        equity_valuation_basis=equity_valuation_basis,
+        max_live_holdings=equity_live_limit if equity_valuation_basis == "live" else None,
+    )
+    reverse_dcf = build_brk_operating_reverse_dcf_table(
+        operating_context, bundle.overview.market_snapshot
+    )
     sections = [
         (
             "Market-Implied SOTP Bridge",
@@ -498,25 +586,24 @@ def run_brk_sotp(
                 reference,
                 yahoo_client=yahoo,
                 enriched_holdings=enriched_holdings,
+                equity_valuation_basis=equity_valuation_basis,
+                max_live_holdings=equity_live_limit if equity_valuation_basis == "live" else None,
             ),
         ),
-        (
-            "Operating Business Context",
-            build_operating_business_context_table(
-                bundle,
-                reference,
-                period=period,
-                yahoo_client=yahoo,
-                enriched_holdings=enriched_holdings,
-            ),
-        ),
+        ("Operating Business Context", operating_context),
     ]
+    if not reverse_dcf.empty:
+        sections.append(("Operating Business Reverse DCF", reverse_dcf))
     if details:
         liquidity_bridge = build_liquidity_bridge_table(bundle.liquidity.filings)
         sections[0:0] = [
             (
                 "Valuation Assumptions",
-                build_brk_valuation_assumptions_table(period=period),
+                build_brk_valuation_assumptions_table(
+                    period=period,
+                    equity_valuation_basis=equity_valuation_basis,
+                    max_live_holdings=equity_live_limit if equity_valuation_basis == "live" else None,
+                ),
             ),
             (
                 "Market Anchor",
@@ -529,11 +616,17 @@ def run_brk_sotp(
                     reference,
                     yahoo_client=yahoo,
                     enriched_holdings=enriched_holdings,
+                    equity_valuation_basis=equity_valuation_basis,
+                    max_live_holdings=equity_live_limit if equity_valuation_basis == "live" else None,
                 ),
             ),
             (
                 "Liquidity Snapshot",
                 build_latest_liquidity_snapshot_table(liquidity_bridge),
+            ),
+            (
+                "Balance Sheet Context",
+                build_balance_sheet_context_table(liquidity_bridge),
             ),
         ]
     if price_change_window is not None:
@@ -550,7 +643,7 @@ def run_brk_sotp(
                 ),
             )
         )
-    if details:
+    if details and enriched_holdings is not None:
         insert_at = 3
         if price_change_window is not None:
             sections.insert(
@@ -580,8 +673,303 @@ def run_brk_sotp(
                 ),
             )
         sections.extend(build_segment_period_sections(bundle.segments.filings, period=period))
+        # Segment history pivot tables
+        _append_nonempty(sections, "Segment Pre-Tax Earnings History", build_segment_earnings_history_table(bundle.segments.filings, period=period))
+        _append_nonempty(sections, "Segment Owner Earnings History", build_segment_owner_earnings_history_table(bundle.segments.filings, period=period))
+        _append_nonempty(sections, "Segment Pre-Tax Margin History", build_segment_pretax_margin_history_table(bundle.segments.filings, period=period))
+        # Implied segment allocation and OpCo sensitivity
+        _append_nonempty(sections, "Implied Segment Allocation", build_segment_implied_allocation_table(
+            bundle,
+            reference,
+            period=period,
+            yahoo_client=yahoo,
+            enriched_holdings=enriched_holdings,
+            equity_valuation_basis=equity_valuation_basis,
+            max_live_holdings=equity_live_limit if equity_valuation_basis == "live" else None,
+        ))
+        _append_nonempty(sections, "OpCo Valuation Sensitivity", build_opco_valuation_sensitivity_table(
+            bundle,
+            reference,
+            period=period,
+            yahoo_client=yahoo,
+            enriched_holdings=enriched_holdings,
+            equity_valuation_basis=equity_valuation_basis,
+            max_live_holdings=equity_live_limit if equity_valuation_basis == "live" else None,
+        ))
+        # Book value history from SEC company facts
+        company_facts = getattr(bundle.overview, "company_facts", {}) or {}
+        share_count = _brk_share_count_for_report(bundle.overview.market_snapshot)
+        _append_nonempty(sections, "Book Value History", build_book_value_history_table(company_facts, share_count=share_count, limit=5))
     _emit_sections(sections, Path(outdir) / "BRK_SOTP")
     return 0
+
+
+def run_brk_valuation_report(
+    outdir: str,
+    period: str,
+    segment_filings: int = 4,
+    equity_valuation_basis: str = "live",
+    equity_live_limit: int | None = None,
+) -> int:
+    """Generate a self-contained Berkshire valuation report as a single Markdown file."""
+    from datetime import datetime as _dt
+    from valuation.utils.formatting import format_currency as _fmt_currency
+
+    equity_valuation_basis = normalize_public_equity_valuation_basis(equity_valuation_basis)
+    live_pricing_limit = equity_live_limit if equity_valuation_basis == "live" else None
+    yahoo = YahooFinanceClient()
+    bundle = fetch_brk_valuation_bundle(period=period, yahoo_client=yahoo, segment_limit=segment_filings)
+    reference = build_brk_security_reference()
+    enriched_holdings = None
+    if equity_valuation_basis == "live":
+        enriched_holdings = enrich_holdings_with_market_prices(
+            aggregate_13f_holdings(bundle.holdings.holdings),
+            reference,
+            yahoo_client=yahoo,
+            max_holdings=live_pricing_limit,
+        )
+
+    # Build primary tables up-front — each is reused in multiple places.
+    liquidity_bridge = build_liquidity_bridge_table(bundle.liquidity.filings)
+    liquidity_snapshot = build_latest_liquidity_snapshot_table(liquidity_bridge)
+    sotp_bridge = build_market_implied_sotp_bridge_table(
+        bundle,
+        reference,
+        yahoo_client=yahoo,
+        enriched_holdings=enriched_holdings,
+        equity_valuation_basis=equity_valuation_basis,
+        max_live_holdings=live_pricing_limit,
+    )
+    equity_portfolio = build_public_equity_portfolio_summary_table(
+        bundle.holdings.holdings, reference,
+        yahoo_client=yahoo,
+        enriched_holdings=enriched_holdings,
+        equity_valuation_basis=equity_valuation_basis,
+        max_live_holdings=live_pricing_limit,
+    )
+    operating_context = build_operating_business_context_table(
+        bundle,
+        reference,
+        period=period,
+        yahoo_client=yahoo,
+        enriched_holdings=enriched_holdings,
+        equity_valuation_basis=equity_valuation_basis,
+        max_live_holdings=live_pricing_limit,
+    )
+    reverse_dcf = build_brk_operating_reverse_dcf_table(
+        operating_context, bundle.overview.market_snapshot
+    )
+    summary = build_brk_valuation_summary_table(
+        bundle.overview.market_snapshot,
+        sotp_bridge,
+        operating_context,
+        reverse_dcf,
+        equity_portfolio,
+    )
+
+    # Header metadata
+    now = _dt.now()
+    price_date = bundle.overview.market_snapshot.get("latest_price_date", "unknown")
+    holdings_filing_date = bundle.holdings.filing_date or "unknown"
+    holdings_accession = bundle.holdings.accession_number or "unknown"
+    liquidity_period_end = (
+        str(liquidity_snapshot.iloc[0]["period_end"])
+        if not liquidity_snapshot.empty and "period_end" in liquidity_snapshot.columns
+        else "unknown"
+    )
+    liquidity_accession = (
+        str(liquidity_snapshot.iloc[0]["accession_number"])
+        if not liquidity_snapshot.empty and "accession_number" in liquidity_snapshot.columns
+        else "unknown"
+    )
+
+    # Fixed maturity figure for methodology notes — pull from actual data.
+    fixed_maturity_raw = None
+    if not liquidity_snapshot.empty and "fixed_maturity_securities_usd" in liquidity_snapshot.columns:
+        v = liquidity_snapshot.iloc[0]["fixed_maturity_securities_usd"]
+        if v is not None and str(v) not in {"nan", "None", ""}:
+            try:
+                fixed_maturity_raw = float(v)
+            except (TypeError, ValueError):
+                pass
+    fixed_maturity_note = _fmt_currency(fixed_maturity_raw) if fixed_maturity_raw else "~$25B"
+
+    # Deferred tax figure for methodology notes — pull from SOTP bridge context row.
+    deferred_tax_raw = None
+    if not sotp_bridge.empty:
+        dt_rows = sotp_bridge[sotp_bridge["metric"] == "deferred_tax_on_equity_context"]
+        if not dt_rows.empty:
+            v = dt_rows.iloc[0].get("value_usd")
+            if v is not None and str(v) not in {"nan", "None", ""}:
+                try:
+                    deferred_tax_raw = float(v)
+                except (TypeError, ValueError):
+                    pass
+    deferred_tax_note = _fmt_currency(deferred_tax_raw) if deferred_tax_raw else "~$35B"
+
+    # Print key numbers to terminal so the user sees results without opening the file.
+    print("\n## Key Valuation Summary\n")
+    print(render_terminal_table(summary))
+
+    # Assemble Markdown sections in findings-first order.
+    core_md = [
+        ("Key Valuation Summary", summary),
+        ("Market-Implied SOTP Bridge", sotp_bridge),
+        ("Operating Business Context", operating_context),
+    ]
+    if not reverse_dcf.empty:
+        core_md.append(("Operating Business Reverse DCF", reverse_dcf))
+
+    equity_revaluation_detail = build_public_equity_revaluation_detail_table(
+        bundle.holdings.holdings,
+        reference,
+        yahoo_client=yahoo,
+        enriched_holdings=enriched_holdings,
+        equity_valuation_basis=equity_valuation_basis,
+        max_live_holdings=live_pricing_limit,
+        limit=20,
+    )
+    support_md = [
+        ("Market Anchor", build_market_anchor_table(bundle.overview.market_snapshot)),
+        ("Public Equity Portfolio", equity_portfolio),
+        ("Cash/T-Bills and Fixed Maturity Context", liquidity_snapshot),
+        ("Balance Sheet Context", build_balance_sheet_context_table(liquidity_bridge)),
+    ]
+    if not equity_revaluation_detail.empty:
+        support_md.insert(2, ("Equity Revaluation Detail", equity_revaluation_detail))
+
+    segment_md = build_segment_period_sections(bundle.segments.filings, period=period)
+    segment_history_md: list[tuple[str, "pd.DataFrame"]] = []
+    _ht = build_segment_earnings_history_table(bundle.segments.filings, period=period)
+    if not _ht.empty:
+        segment_history_md.append(("Segment Pre-Tax Earnings History", _ht))
+    _ht = build_segment_revenues_history_table(bundle.segments.filings, period=period)
+    if not _ht.empty:
+        segment_history_md.append(("Segment Revenues History", _ht))
+    _ht = build_segment_owner_earnings_history_table(bundle.segments.filings, period=period)
+    if not _ht.empty:
+        segment_history_md.append(("Segment Owner Earnings History", _ht))
+    _ht = build_segment_pretax_margin_history_table(bundle.segments.filings, period=period)
+    if not _ht.empty:
+        segment_history_md.append(("Segment Pre-Tax Margin History", _ht))
+
+    company_facts = getattr(bundle.overview, "company_facts", {}) or {}
+    share_count = _brk_share_count_for_report(bundle.overview.market_snapshot)
+    _bv = build_book_value_history_table(company_facts, share_count=share_count, limit=5)
+    if not _bv.empty:
+        segment_history_md.append(("Book Value History", _bv))
+
+    # Build Markdown document
+    lines: list[str] = [
+        "# Berkshire Hathaway Valuation Report",
+        "",
+        f"Generated: {now.strftime('%Y-%m-%d %H:%M')}  ",
+        f"Price date: {price_date}  ",
+        f"13F filing date: {holdings_filing_date} · accession {holdings_accession}  ",
+        f"Liquidity period end: {liquidity_period_end} · accession {liquidity_accession}  ",
+        f"Segment period type: {period}  ",
+        f"Public-equity valuation basis: {equity_valuation_basis}"
+        + (f" · live pricing limit {live_pricing_limit}" if live_pricing_limit is not None else "")
+        + "  ",
+        "",
+        "---",
+        "",
+    ]
+
+    # Core findings
+    for title, frame in core_md:
+        lines += [f"## {title}", "", render_markdown_table(frame), ""]
+
+    # Supporting detail
+    lines += ["---", "", "## Supporting Detail", ""]
+    for title, frame in support_md:
+        lines += [f"### {title}", "", render_markdown_table(frame), ""]
+
+    # Segment history
+    if segment_md or segment_history_md:
+        lines += ["---", "", "## Segment History", ""]
+        for title, frame in segment_md:
+            lines += [f"### {title}", "", render_markdown_table(frame), ""]
+        for title, frame in segment_history_md:
+            lines += [f"### {title}", "", render_markdown_table(frame), ""]
+
+    # Methodology — at the end so findings lead
+    lines += [
+        "---",
+        "",
+        "## Valuation Assumptions & Methodology",
+        "",
+        "### Assumptions",
+        "",
+        render_markdown_table(
+            build_brk_valuation_assumptions_table(
+                period=period,
+                equity_valuation_basis=equity_valuation_basis,
+                max_live_holdings=live_pricing_limit,
+            )
+        ),
+        "",
+        "### Methodology Notes",
+        "",
+        "- **13F public-equity value.** The report keeps both the latest reported 13F"
+        " value and the selected valuation value. In `live` mode, selected value equals"
+        " reported 13F total minus the reported value of live-priced holdings plus"
+        " `shares held × current price` for those holdings; unmapped, unpriced, or"
+        " live-limit-excluded holdings remain at reported 13F value. In `reported` mode,"
+        " selected value equals the latest reported 13F total.",
+        "- **SOTP residual is market-implied (circular).** The operating-business residual is"
+        " `market cap − public equities − net core liquidity`. It reflects what the market"
+        " is already pricing in, not an independent bottoms-up appraisal of the operating"
+        " businesses.",
+        "- **Reverse DCF uses pre-tax segment earnings.** Implied growth rates are"
+        " approximations. Apply a ~0.75 factor to estimate an after-tax earnings yield.",
+        f"- **Fixed maturity securities ({fixed_maturity_note}) are insurance-reserve-backed**"
+        " and are shown as investment-portfolio context, not as deployable core liquidity."
+        " The bridge subtracts cash and Treasury bills net of T-bill purchase payable;"
+        " fixed maturities remain inside the residual above with the insurance businesses"
+        " and other non-13F assets/liabilities.",
+        "- **Insurance float (~$170B) is an accounting liability but not a simple deduction.**"
+        " Float is policyholders' money Berkshire holds before paying claims. If underwriting"
+        " is break-even or profitable the cost of float is zero or negative, making it"
+        " an interest-free funding source. Do not subtract float at face value if you are"
+        " also valuing the investment portfolio at market — the portfolio already reflects"
+        " float-funded investments.",
+        f"- **Deferred tax on unrealized equity gains ({deferred_tax_note} per latest balance sheet).**"
+        " The 13F portfolio is valued at current market prices (pre-tax). A sale of the"
+        " entire equity portfolio would trigger capital-gains tax on the embedded gain. A"
+        " conservative view haircuts the 13F value by roughly (unrealized gain × 21%) to"
+        " reach an after-tax net value. This context row is also shown in the SOTP bridge.",
+        "- **Subsidiary debt is not separately deducted.** BNSF (~$24B) and BHE (~$40B+)"
+        " carry their own debt. Since we value the operating businesses via the market-implied"
+        " residual, subsidiary debt is already reflected in how the market prices those"
+        " franchises. Holding-company debt is similarly embedded in the residual.",
+        "- **Owner earnings** = net income + D&A − capex. For capital-intensive subsidiaries"
+        " like BNSF where capex substantially exceeds D&A, this may overstate"
+        " maintenance-adjusted earnings.",
+        "- **13F lag.** Unresolved holdings use reported values from the 13F filing date, not"
+        " today's market prices.",
+        "",
+        "---",
+        "",
+        f"*Generated by valuationFramework · {now.strftime('%Y-%m-%d %H:%M')}*",
+    ]
+
+    content = "\n".join(lines)
+    outpath = Path(outdir) / f"brk_valuation_report_{now.strftime('%Y%m%d')}.md"
+    outpath.parent.mkdir(parents=True, exist_ok=True)
+    outpath.write_text(content, encoding="utf-8")
+    print(f"\nValuation report written to: {outpath}")
+    return 0
+
+
+def _append_nonempty(sections: list, title: str, frame: "pd.DataFrame") -> None:
+    if frame is not None and not frame.empty:
+        sections.append((title, frame))
+
+
+def _brk_share_count_for_report(market_snapshot: dict) -> float | None:
+    from valuation.brk.tables import _implied_brk_b_equivalent_shares
+    return _implied_brk_b_equivalent_shares(market_snapshot)
 
 
 def _emit_sections(sections: Iterable[tuple[str, object]], output_dir: Path) -> None:

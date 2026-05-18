@@ -14,6 +14,37 @@ All non-BRK work is immediately merged to `main` via fast-forward.
 
 ## Completed this session
 
+### Persistent provider cache (current)
+- `SecClient` now persists SEC JSON/text payloads under `~/.cache/valuationFramework/sec` by default, or `VALUATION_CACHE_DIR/sec` when configured
+- Mutable SEC endpoints expire automatically: company ticker map 24h, submissions 12h, companyfacts 24h
+- Immutable filing artifacts such as filing index JSON, `FilingSummary.xml`, report HTML, and 13F XML are cached indefinitely after first fetch
+- `YahooFinanceClient` now persists price snapshots under `~/.cache/valuationFramework/yahoo/snapshots` for 1h and history frames under `~/.cache/valuationFramework/yahoo/history` for 24h
+- `./vf --refresh-cache ...` bypasses cached SEC/Yahoo payloads for one run and overwrites cache entries
+- This is the right foundation for later universe download/index commands; do not build top-500/top-1000 ingest until source/licensing and ranking definition are explicit
+- Full test suite now passes: 272 tests
+
+### BRK balance-sheet context for SOTP residual (current)
+- `./vf brk sotp --details` now includes a `Balance Sheet Context` section sourced from the filing balance sheet
+- Context rows include equity securities, equity-method investments, total assets, notes payable and other borrowings, deferred income taxes, and total liabilities
+- These rows are shown for residual context only; they are not added to the net-liquidity subtotal or SOTP arithmetic
+- `./vf brk liquidity --period quarterly --limit 1` now captures the latest 10-Q's plural `Payable for purchases of U.S. Treasury Bills` label and separates context rows from the `Liquidity Bridge`
+- Full test suite now passes: 262 tests
+
+### BRK EPS/share filing-table fallback (current)
+- `./vf statements BRK --statement income --period annual --limit 3` now fills Class B EPS and equivalent-share rows from Berkshire's `Consolidated Statements of Earnings` filing report table when SEC companyfacts omits them
+- `./vf statements BRK --statement income --period quarterly --limit 4` now fills available direct 3-month Class B EPS/share rows from recent 10-Q report tables
+- The fallback lives in `src/valuation/brk/statements.py` and only runs for BRK income statements; generic companyfacts statement behavior stays unchanged
+- Quarterly fallback intentionally uses only `3 Months Ended` columns and leaves Q4 blank rather than deriving per-share values from annual EPS/YTD columns
+- Full test suite now passes: 260 tests
+
+### BRK live QA sweep + terminal readability (current)
+- `./vf brk holdings --history --filings-limit 2 --limit 10` exits 0 against live SEC data
+- `./vf brk sotp --details` exits 0 and emits valuation assumptions, market anchor, 13F summaries, liquidity, SOTP bridge, operating context, reverse DCF, and segment sections
+- `./vf brk sotp --price-change 1M` exits 0 and emits the BRK-vs-holdings comparison
+- Fixed terminal rendering so security issuer names do not wrap into misleading continuation rows
+- Added compact display aliases for BRK live/resolved 13F and price-change summary fields; backend field names and JSON/CSV contracts remain unchanged
+- Full test suite now passes: 258 tests
+
 ### TTM period support (0169831, f739f26)
 - `./vf statements TICKER --period ttm` sums last 4 quarterly filings per metric
 - Balance sheet returns latest quarterly snapshot (TTM not meaningful for instant items)
@@ -63,8 +94,9 @@ All non-BRK work is immediately merged to `main` via fast-forward.
 
 ## Planned work (in order)
 
-- [ ] Live QA sweep: `./vf brk holdings --history --filings-limit 2` and `./vf brk sotp --details`
-- [ ] BRK EPS/shares filing-table fallback — requires live exploration of SEC report names
+- [x] Live QA sweep: `./vf brk holdings --history --filings-limit 2` and `./vf brk sotp --details`
+- [x] BRK EPS/shares filing-table fallback — requires live exploration of SEC report names
+- [x] BRK balance-sheet context for major residual assets/liabilities
 - [ ] Yahoo statement hardening for European issuers (bank/insurance balance sheet shapes)
 - [ ] Consider open-sourcing after BRK workflow is excellent
 
@@ -81,7 +113,8 @@ All non-BRK work is immediately merged to `main` via fast-forward.
 
 ## Issues / observations
 
-- BRK `diluted_eps` and `diluted_shares` absent from SEC companyfacts; only approach is HTML filing tables
+- Terminal renderer should keep security identity columns such as `issuer` on one line; wrapping issuer names in Markdown-style terminal tables looks like false extra rows
+- BRK `diluted_eps` and `diluted_shares` are absent from SEC companyfacts; `statements` now fills the available Class B rows from filing report tables for annual and direct quarterly income statements
 - Valuation Ratios `as_of` shows "TTM" or "3Q TTM" — this is intentional and accurate
 - FCF derived row in Key Financials uses positive capex (PaymentsToAcquirePropertyPlantAndEquipment is always positive in SEC GAAP); FCF = OCF - capex
 - TTM financial extraction uses 4 quarters for income/cashflow, latest quarterly for balance; falls back to annual when quarterly unavailable
@@ -93,3 +126,6 @@ All non-BRK work is immediately merged to `main` via fast-forward.
 ## Test status (2026-05-17)
 - 161 tests pass (pytest `tests/` excluding tabulate-dependent files)
 - Tabulate-dependent tests (test_cli.py, test_reports_display.py, test_reports_tables.py) need `.venv` activated
+
+## Test status (2026-05-18)
+- 272 tests pass with `. .venv/bin/activate && PYTHONPATH=src pytest -q`

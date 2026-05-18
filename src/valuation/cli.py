@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
 from valuation.brk.cli import register_brk_parser, run_brk_command
+from valuation.brk.statements import supplement_brk_income_statement_eps_shares
 from valuation.company.service import fetch_company_facts, fetch_company_snapshot
 from valuation.company.statements import build_statement_diagnostics_table, build_statement_table, build_statement_table_ttm
 from valuation.company.tables import (
+    build_implied_value_range_table,
     build_key_financials_table,
+    build_reverse_dcf_table,
     build_sec_overview_table,
     build_sec_statement_availability_table,
     build_valuation_ratios_table,
@@ -28,6 +32,12 @@ from valuation.company.tables import (
     extract_period_label_from_company_facts,
     resolution_to_table,
 )
+from valuation.company.comps import build_comps_table, fetch_comps_entries
+from valuation.company.ratios import (
+    build_historical_ratios_table,
+    build_historical_ratios_table_from_yahoo,
+)
+from valuation.watchlist import add_ticker, load_tickers, remove_ticker, watchlist_path
 from valuation.company.yahoo_statements import build_yahoo_statement_table
 from valuation.data.normalize.tables import (
     CORE_COMPANY_FILING_FORMS,
@@ -49,6 +59,11 @@ from valuation.reports.tables import (
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="valuation framework CLI")
+    parser.add_argument(
+        "--refresh-cache",
+        action="store_true",
+        help="Bypass provider cache for this run and overwrite cached SEC/Yahoo payloads.",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     snapshot_parser = subparsers.add_parser(
@@ -123,6 +138,42 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include a diagnostic table explaining expected statement rows that are missing or stale.",
     )
 
+    ratios_parser = subparsers.add_parser(
+        "ratios",
+        help="Show historical per-fiscal-year valuation ratios (P/E, P/OE, EV/EBITDA, ...).",
+    )
+    ratios_parser.add_argument("identifier")
+    ratios_parser.add_argument(
+        "--identifier-kind",
+        choices=("auto", "ticker", "cik", "cusip", "isin"),
+        default="auto",
+    )
+    ratios_parser.add_argument("--limit", type=_non_negative_int, default=10)
+    ratios_parser.add_argument("--outdir", default="outputs/tables")
+    ratios_parser.add_argument("--format", choices=("table", "json"), default="table")
+
+    comps_parser = subparsers.add_parser(
+        "comps",
+        help="Compare multiple securities side-by-side on TTM valuation metrics.",
+    )
+    comps_parser.add_argument("tickers", nargs="+", help="Two or more tickers to compare.")
+    comps_parser.add_argument("--outdir", default="outputs/tables")
+    comps_parser.add_argument("--format", choices=("table", "json"), default="table")
+
+    watchlist_parser = subparsers.add_parser(
+        "watchlist",
+        help="Manage a persistent ticker watchlist and compare all tickers side-by-side.",
+    )
+    watchlist_sub = watchlist_parser.add_subparsers(dest="watchlist_command", required=True)
+    wl_add = watchlist_sub.add_parser("add", help="Add one or more tickers to the watchlist.")
+    wl_add.add_argument("tickers", nargs="+")
+    wl_remove = watchlist_sub.add_parser("remove", help="Remove one or more tickers from the watchlist.")
+    wl_remove.add_argument("tickers", nargs="+")
+    watchlist_sub.add_parser("list", help="Print the current watchlist.")
+    wl_show = watchlist_sub.add_parser("show", help="Run comps on all watchlist tickers.")
+    wl_show.add_argument("--outdir", default="outputs/tables")
+    wl_show.add_argument("--format", choices=("table", "json"), default="table")
+
     register_brk_parser(subparsers)
     return parser
 
@@ -184,16 +235,27 @@ def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limi
         )
         sections.append(("Key Financials", build_key_financials_table(bundle.company_facts)))
         _ttm_financials, _ttm_label = extract_financials_ttm_from_company_facts(bundle.company_facts)
+        _ratio_label = _ttm_label or extract_period_label_from_company_facts(bundle.company_facts)
         sections.append(
             (
                 "Valuation Ratios",
                 build_valuation_ratios_table(
                     bundle.market_snapshot,
                     _ttm_financials,
-                    period_label=_ttm_label or extract_period_label_from_company_facts(bundle.company_facts),
+                    period_label=_ratio_label,
                 ),
             )
         )
+        _oe_range = build_implied_value_range_table(
+            bundle.market_snapshot, _ttm_financials, period_label=_ratio_label
+        )
+        if not _oe_range.empty:
+            sections.append(("Implied Value Range", _oe_range))
+        _rdcf = build_reverse_dcf_table(
+            bundle.market_snapshot, _ttm_financials, period_label=_ratio_label
+        )
+        if not _rdcf.empty:
+            sections.append(("Reverse DCF", _rdcf))
         sections.append(("Statement Availability", build_sec_statement_availability_table(bundle.company_facts)))
     elif bundle.company_profile:
         yahoo = YahooFinanceClient()
@@ -258,6 +320,16 @@ def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limi
                 ),
             )
         )
+        _yahoo_oe_range = build_implied_value_range_table(
+            bundle.market_snapshot, _yahoo_ttm_financials, period_label=_yahoo_ttm_label
+        )
+        if not _yahoo_oe_range.empty:
+            sections.append(("Implied Value Range", _yahoo_oe_range))
+        _yahoo_rdcf = build_reverse_dcf_table(
+            bundle.market_snapshot, _yahoo_ttm_financials, period_label=_yahoo_ttm_label
+        )
+        if not _yahoo_rdcf.empty:
+            sections.append(("Reverse DCF", _yahoo_rdcf))
         sections.append(
             (
                 "Statement Availability",
@@ -285,6 +357,115 @@ def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limi
         command="company",
     )
     return 0
+
+
+def run_ratios(
+    identifier: str,
+    identifier_kind: str,
+    limit: int,
+    outdir: str,
+    output_format: str,
+) -> int:
+    """Fetch historical annual financials + price history and render per-year valuation ratios."""
+    bundle = fetch_company_snapshot(identifier, identifier_kind=identifier_kind)
+    ticker = bundle.resolution.ticker
+    yahoo = YahooFinanceClient()
+
+    price_history = yahoo.fetch_history(ticker, period="max", interval="1mo")
+
+    if bundle.company_facts:
+        table = build_historical_ratios_table(bundle.company_facts, price_history, limit=limit)
+    elif bundle.company_profile:
+        requests = [
+            ("income", "annual"),
+            ("balance", "annual"),
+            ("cashflow", "annual"),
+        ]
+        with ThreadPoolExecutor(max_workers=len(requests)) as executor:
+            futures = {
+                r: executor.submit(yahoo.fetch_statement_frame, ticker, statement=r[0], period=r[1])
+                for r in requests
+            }
+        frames = {r: f.result() for r, f in futures.items()}
+        table = build_historical_ratios_table_from_yahoo(
+            income_annual=frames[("income", "annual")],
+            balance_annual=frames[("balance", "annual")],
+            cashflow_annual=frames[("cashflow", "annual")],
+            price_history=price_history,
+            limit=limit,
+        )
+    else:
+        print(f"Error: could not resolve {identifier!r}", file=sys.stderr)
+        return 1
+
+    if table.empty:
+        print("Error: no historical ratio data available", file=sys.stderr)
+        return 1
+
+    slug = ticker.upper().replace(".", "-")
+    _emit_sections(
+        [("Historical Ratios", table)],
+        Path(outdir) / slug,
+        output_format=output_format,
+        command="ratios",
+    )
+    return 0
+
+
+def run_comps(tickers: list[str], outdir: str, output_format: str) -> int:
+    """Fetch TTM valuation metrics for multiple tickers and render a side-by-side table."""
+    entries = fetch_comps_entries(tickers)
+    table = build_comps_table(entries)
+
+    # Surface any per-ticker errors to stderr; drop the error column from display
+    error_rows = table[table["error"].notna()] if "error" in table.columns else table.iloc[:0]
+    for _, row in error_rows.iterrows():
+        print(f"Warning: {row['ticker']}: {row['error']}", file=sys.stderr)
+
+    display = table.drop(columns=["error"], errors="ignore")
+    slug = "COMPS_" + "_".join(t.upper().replace(".", "-") for t in tickers[:6])
+    out_path = Path(outdir) / slug
+    _emit_sections(
+        [("Comps", display)],
+        out_path,
+        output_format=output_format,
+        command="comps",
+    )
+    return 0
+
+
+def run_watchlist(args: argparse.Namespace, outdir: str = "outputs/tables", output_format: str = "table") -> int:
+    """Manage the watchlist or run comps on all watchlist tickers."""
+    cmd = args.watchlist_command
+    if cmd == "add":
+        for t in args.tickers:
+            add_ticker(t)
+        tickers = load_tickers()
+        print(f"Watchlist ({len(tickers)}): {', '.join(tickers)}")
+        return 0
+    if cmd == "remove":
+        for t in args.tickers:
+            remove_ticker(t)
+        tickers = load_tickers()
+        print(f"Watchlist ({len(tickers)}): {', '.join(tickers) or '(empty)'}")
+        return 0
+    if cmd == "list":
+        tickers = load_tickers()
+        if not tickers:
+            print(f"Watchlist is empty. Add tickers with: ./vf watchlist add AAPL MSFT")
+            print(f"Stored at: {watchlist_path()}")
+        else:
+            print(f"Watchlist ({len(tickers)}):")
+            for t in tickers:
+                print(f"  {t}")
+        return 0
+    if cmd == "show":
+        tickers = load_tickers()
+        if not tickers:
+            print("Watchlist is empty. Add tickers with: ./vf watchlist add AAPL MSFT", file=sys.stderr)
+            return 1
+        return run_comps(tickers=tickers, outdir=outdir, output_format=output_format)
+    return 1
 
 
 def run_statements(
@@ -338,6 +519,18 @@ def run_statements(
                 start_quarter=start_quarter,
                 end_quarter=end_quarter,
             )
+            if (
+                statement == "income"
+                and bundle.resolution.sec_company is not None
+                and bundle.resolution.sec_company.ticker.upper() == "BRK-B"
+            ):
+                statement_table = supplement_brk_income_statement_eps_shares(
+                    statement_table,
+                    sec_client=SecClient(),
+                    company=bundle.resolution.sec_company,
+                    submissions=None,
+                    period=period,
+                )
         if diagnostics and period != "ttm":
             diagnostics_table = build_statement_diagnostics_table(
                 bundle.company_facts,
@@ -439,6 +632,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     load_project_env()
     parser = build_parser()
     args = parser.parse_args(argv)
+    previous_refresh_cache = os.environ.get("VALUATION_REFRESH_CACHE")
+    if args.refresh_cache:
+        os.environ["VALUATION_REFRESH_CACHE"] = "1"
 
     try:
         if args.command == "snapshot":
@@ -471,11 +667,35 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 output_format=args.format,
                 diagnostics=args.diagnostics,
             )
+        if args.command == "ratios":
+            return run_ratios(
+                identifier=args.identifier,
+                identifier_kind=args.identifier_kind,
+                limit=args.limit,
+                outdir=args.outdir,
+                output_format=args.format,
+            )
+        if args.command == "comps":
+            return run_comps(
+                tickers=args.tickers,
+                outdir=args.outdir,
+                output_format=args.format,
+            )
+        if args.command == "watchlist":
+            outdir = getattr(args, "outdir", "outputs/tables")
+            output_format = getattr(args, "format", "table")
+            return run_watchlist(args, outdir=outdir, output_format=output_format)
         if args.command == "brk":
             return run_brk_command(args)
     except (LookupError, RuntimeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    finally:
+        if args.refresh_cache:
+            if previous_refresh_cache is None:
+                os.environ.pop("VALUATION_REFRESH_CACHE", None)
+            else:
+                os.environ["VALUATION_REFRESH_CACHE"] = previous_refresh_cache
     return 1
 
 

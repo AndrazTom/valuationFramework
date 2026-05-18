@@ -74,12 +74,17 @@ def _infer_format_kind(column: str, row: pd.Series) -> Optional[str]:
         "day_high",
         "day_low",
         "market_cap",
+        "price",
         "fifty_day_average",
         "two_hundred_day_average",
     }:
         return "currency"
     if column_name in {"coverage_ratio"} or column_name.endswith("_pct"):
         return "percent"
+    if column_name in {"assumed_return", "implied_growth"}:
+        return "percent"
+    if column_name == "multiple":
+        return "multiple"
     if column_name in {"portfolio_weight"} or "weight" in column_name:
         return "percent"
     if column_name in {
@@ -99,11 +104,26 @@ def _infer_format_kind(column: str, row: pd.Series) -> Optional[str]:
         return _infer_kind_from_field(str(row["metric"]).lower())
     if "ratio" in row and column_name == "value":
         return _infer_kind_from_field(str(row["ratio"]).lower())
+    # Unit sentinel: period/wide-table columns inherit format from the row's unit field.
+    unit_val = str(row.get("unit") or "").upper().strip()
+    if unit_val and column_name not in {"metric", "segment", "field", "ratio", "unit", "note", "name", "ticker", "scenario", "cagr_pct"}:
+        if unit_val == "USD":
+            return "currency"
+        if unit_val in {"PCT", "PERCENT"}:
+            return "percent"
+        if unit_val in {"SHARES", "COUNT"}:
+            return "quantity"
+    # Fallback: column-name inference for wide tables (e.g. comps) that lack a
+    # "metric"/"field"/"ratio" structure column. Skip generic names that would
+    # collide with non-numeric columns.
+    if column_name not in {"value", "name", "ticker", "error", "as_of", "note", "status", "source", "form", "field", "reason", "unit", "period", "statement"}:
+        return _infer_kind_from_field(column_name)
     return None
 
 
 _VALUATION_RATIO_FIELDS = frozenset({
-    "pe_ratio", "ps_ratio", "pb_ratio", "price_to_fcf", "price_to_owner_earnings",
+    "pe_ratio", "ps_ratio", "pb_ratio",
+    "price_to_fcf", "price_to_owner_earnings", "price_to_oe",
     "ev_to_revenue", "ev_to_ebitda",
 })
 
@@ -114,7 +134,7 @@ def _infer_kind_from_field(field_name: str) -> Optional[str]:
         return "multiple"
     if normalized_field.endswith("_pct") or normalized_field.endswith("_ratio"):
         return "percent"
-    if normalized_field.endswith("_yield"):
+    if normalized_field.endswith("_yield") or normalized_field.endswith("_margin"):
         return "percent"
     if normalized_field.endswith("_multiple"):
         return "multiple"
@@ -153,6 +173,8 @@ def _infer_kind_from_field(field_name: str) -> Optional[str]:
             "free_cash_flow",
             "owner_earnings",
             "earnings",
+            "depreciation",
+            "amortization",
         )
     ):
         return "currency"

@@ -20,6 +20,8 @@ from valuation.brk.holdings import aggregate_13f_holdings
 from valuation.notation import MILLION
 from valuation.securities.pricing import enrich_holdings_with_market_prices, fetch_price_change_snapshot
 
+PUBLIC_EQUITY_VALUATION_BASES = ("reported", "live")
+
 BRK_FACT_DEFINITIONS: Sequence[CompanyFactQuery] = (
     CompanyFactQuery(
         "cash_and_equivalents",
@@ -99,6 +101,25 @@ BRK_LIQUIDITY_REPORT_LABELS = {
     "short_term_us_treasury_bills": "Short-term investments in U.S. Treasury Bills",
     "fixed_maturity_securities": "Investments in fixed maturity securities",
     "payable_for_purchase_of_us_treasury_bills": "Payable for purchase of U.S. Treasury Bills",
+}
+
+BRK_BALANCE_SHEET_CONTEXT_LABELS = {
+    "equity_securities": "Investments in equity securities",
+    "equity_method_investments": "Equity method investments",
+    "total_assets": "Total assets",
+    "deferred_income_taxes": "Income taxes, principally deferred",
+    "total_liabilities": "Total liabilities",
+}
+
+BRK_BALANCE_SHEET_CONTEXT_SUM_LABELS = {
+    "notes_payable_and_other_borrowings": "Notes payable and other borrowings",
+}
+
+BRK_REPORT_LABEL_ALIASES = {
+    "Payable for purchase of U.S. Treasury Bills": (
+        "Payable for purchase of U.S. Treasury Bills",
+        "Payable for purchases of U.S. Treasury Bills",
+    ),
 }
 
 CORE_BRK_FORMS = ("10-K", "10-Q", "8-K", "DEF 14A", "13F-HR", "13F-HR/A")
@@ -187,7 +208,7 @@ def build_liquidity_bridge_table(filings: Sequence[BrkLiquidityFiling]) -> pd.Da
                     "period_end": period_end,
                     "accession_number": filing.accession_number,
                     "metric": metric,
-                    "label": BRK_LIQUIDITY_REPORT_LABELS[metric],
+                    "label": _report_label_for_metric(metric),
                     "value_usd": value,
                 }
             )
@@ -260,6 +281,45 @@ def build_liquidity_summary_table(bridge: pd.DataFrame) -> pd.DataFrame:
         by=["filing_date", "period_end"],
         ascending=False,
     ).reset_index(drop=True)
+
+
+def build_liquidity_detail_table(bridge: pd.DataFrame) -> pd.DataFrame:
+    """Return only the rows that make up the liquidity subtotal."""
+    if bridge.empty:
+        return bridge
+    return bridge[bridge["metric"].isin(BRK_LIQUIDITY_REPORT_LABELS)].reset_index(drop=True)
+
+
+def build_balance_sheet_context_table(bridge: pd.DataFrame) -> pd.DataFrame:
+    """Return latest selected Berkshire balance-sheet rows that remain SOTP context."""
+    if bridge.empty:
+        return pd.DataFrame(columns=["field", "value"])
+    summary = _balance_sheet_context_summary_table(bridge)
+    if summary.empty:
+        return pd.DataFrame(columns=["field", "value"])
+    latest = summary.iloc[0]
+    fields = [
+        "period_end",
+        "equity_securities_usd",
+        "equity_method_investments_usd",
+        "total_assets_usd",
+        "notes_payable_and_other_borrowings_usd",
+        "deferred_income_taxes_usd",
+        "total_liabilities_usd",
+    ]
+    rows = [
+        {"field": field, "value": latest.get(field)}
+        for field in fields
+        if field in latest.index and latest.get(field) is not None and pd.notna(latest.get(field))
+    ]
+    if rows:
+        rows.append(
+            {
+                "field": "context_note",
+                "value": "Selected balance-sheet assets and liabilities remain inside the SOTP residual; they are shown for context, not added to the liquidity subtotal",
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def filter_core_filings_table(frame: pd.DataFrame, limit: int = 10) -> pd.DataFrame:
@@ -772,47 +832,81 @@ def build_latest_liquidity_snapshot_table(bridge: pd.DataFrame) -> pd.DataFrame:
     return latest[[column for column in ordered if column in latest.columns]].reset_index(drop=True)
 
 
+def _balance_sheet_context_summary_table(bridge: pd.DataFrame) -> pd.DataFrame:
+    if bridge.empty:
+        return pd.DataFrame()
+    context_metrics = set(BRK_BALANCE_SHEET_CONTEXT_LABELS) | set(BRK_BALANCE_SHEET_CONTEXT_SUM_LABELS)
+    filtered = bridge[bridge["metric"].isin(context_metrics)]
+    if filtered.empty:
+        return pd.DataFrame()
+    summary = (
+        filtered.pivot_table(
+            index=["filing_date", "form", "period_end", "accession_number"],
+            columns="metric",
+            values="value_usd",
+            aggfunc="first",
+        )
+        .reset_index()
+        .rename_axis(columns=None)
+    )
+    summary = summary.rename(
+        columns={
+            "equity_securities": "equity_securities_usd",
+            "equity_method_investments": "equity_method_investments_usd",
+            "total_assets": "total_assets_usd",
+            "deferred_income_taxes": "deferred_income_taxes_usd",
+            "total_liabilities": "total_liabilities_usd",
+            "notes_payable_and_other_borrowings": "notes_payable_and_other_borrowings_usd",
+        }
+    )
+    return summary.sort_values(
+        by=["filing_date", "period_end"],
+        ascending=False,
+    ).reset_index(drop=True)
+
+
 def build_public_equity_portfolio_summary_table(
     holdings: pd.DataFrame,
     reference: pd.DataFrame,
     *,
     yahoo_client=None,
     enriched_holdings: pd.DataFrame | None = None,
+    equity_valuation_basis: str = "live",
+    max_live_holdings: int | None = None,
 ) -> pd.DataFrame:
     """Summarize Berkshire's latest public-equity block for valuation work."""
     if holdings.empty:
         return pd.DataFrame(columns=["field", "value"])
-    enriched = _enriched_holdings_frame(
+    holdings_metrics = _live_holdings_metrics(
         holdings,
         reference,
         yahoo_client=yahoo_client,
         enriched_holdings=enriched_holdings,
+        equity_valuation_basis=equity_valuation_basis,
+        max_live_holdings=max_live_holdings,
     )
-    resolved = enriched["market_value_live_usd"].notna()
-    reported_total = enriched["value_usd"].dropna().sum()
-    live_resolved = enriched.loc[resolved, "market_value_live_usd"].dropna().sum()
-    unresolved_reported = enriched.loc[~resolved, "value_usd"].dropna().sum()
-    blended_value = _sum_defined(live_resolved, unresolved_reported)
-    latest_price_date = None
-    if "latest_price_date" in enriched.columns:
-        dates = [value for value in enriched["latest_price_date"].dropna().tolist() if value]
-        if dates:
-            latest_price_date = max(dates)
+    reported_total = holdings_metrics["reported_value_usd"]
+    live_resolved = holdings_metrics["live_value_usd"]
+    unresolved_reported = holdings_metrics["unresolved_reported_value_usd"]
+    blended_value = holdings_metrics["blended_value_usd"]
     rows = [
         {"field": "reported_13f_value_usd", "value": reported_total},
         {"field": "live_resolved_13f_value_usd", "value": live_resolved},
         {"field": "unresolved_13f_value_reported_usd", "value": unresolved_reported},
         {"field": "blended_13f_value_usd", "value": blended_value},
+        {"field": "selected_13f_value_usd", "value": holdings_metrics["selected_value_usd"]},
+        {"field": "selected_13f_basis", "value": holdings_metrics["selected_basis"]},
         {
             "field": "live_price_coverage_pct",
-            "value": (live_resolved / reported_total) if reported_total else None,
+            "value": holdings_metrics["coverage_ratio"],
         },
-        {"field": "positions_total", "value": int(len(enriched))},
-        {"field": "positions_live_priced", "value": int(resolved.sum())},
-        {"field": "positions_unresolved", "value": int((~resolved).sum())},
-        {"field": "latest_price_date", "value": latest_price_date},
+        {"field": "positions_total", "value": holdings_metrics["positions_total"]},
+        {"field": "positions_live_priced", "value": holdings_metrics["resolved_positions"]},
+        {"field": "positions_unresolved", "value": holdings_metrics["unresolved_positions"]},
+        {"field": "live_pricing_limit", "value": holdings_metrics["live_pricing_limit"]},
+        {"field": "latest_price_date", "value": holdings_metrics["latest_price_date"]},
     ]
-    if int(resolved.sum()) == 0:
+    if holdings_metrics["resolved_positions"] == 0 and holdings_metrics["selected_basis"] != "reported_13f":
         rows.append(
             {
                 "field": "live_price_status",
@@ -820,6 +914,55 @@ def build_public_equity_portfolio_summary_table(
             }
         )
     return pd.DataFrame(rows)
+
+
+def build_public_equity_revaluation_detail_table(
+    holdings: pd.DataFrame,
+    reference: pd.DataFrame,
+    *,
+    yahoo_client=None,
+    enriched_holdings: pd.DataFrame | None = None,
+    equity_valuation_basis: str = "live",
+    max_live_holdings: int | None = None,
+    limit: int = 20,
+) -> pd.DataFrame:
+    """Show which 13F holdings were replaced with live share-count based values."""
+    if holdings.empty or normalize_public_equity_valuation_basis(equity_valuation_basis) != "live":
+        return pd.DataFrame()
+    enriched = _enriched_holdings_frame(
+        holdings,
+        reference,
+        yahoo_client=yahoo_client,
+        enriched_holdings=enriched_holdings,
+        max_live_holdings=max_live_holdings,
+    )
+    if enriched.empty or "market_value_live_usd" not in enriched.columns:
+        return pd.DataFrame()
+    detail = enriched[
+        enriched["market_value_live_usd"].notna() & enriched["value_usd"].notna()
+    ].copy()
+    if detail.empty:
+        return pd.DataFrame()
+    detail["live_value_delta_usd"] = detail["market_value_live_usd"] - detail["value_usd"]
+    detail["live_value_delta_pct"] = detail.apply(
+        lambda row: _ratio(row.get("live_value_delta_usd"), row.get("value_usd")),
+        axis=1,
+    )
+    columns = [
+        "issuer",
+        "ticker",
+        "cusip",
+        "value_usd",
+        "market_value_live_usd",
+        "live_value_delta_usd",
+        "live_value_delta_pct",
+        "shares_or_principal",
+        "last_price",
+        "latest_price_date",
+    ]
+    selected = detail[[column for column in columns if column in detail.columns]].copy()
+    selected = selected.rename(columns={"value_usd": "reported_value_usd"})
+    return selected.head(max(0, limit)).reset_index(drop=True)
 
 
 def build_market_anchor_table(market_snapshot: dict) -> pd.DataFrame:
@@ -842,8 +985,24 @@ def build_market_anchor_table(market_snapshot: dict) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def build_brk_valuation_assumptions_table(*, period: str) -> pd.DataFrame:
+def build_brk_valuation_assumptions_table(
+    *,
+    period: str,
+    equity_valuation_basis: str = "live",
+    max_live_holdings: int | None = None,
+) -> pd.DataFrame:
     """Return the assumptions used in the first Berkshire bridge."""
+    equity_basis = normalize_public_equity_valuation_basis(equity_valuation_basis)
+    if equity_basis == "reported":
+        public_equities_basis = "Latest 13F reported market values from the filing"
+        residual_definition = "Market cap less reported 13F public equities less net cash/T-bills"
+    else:
+        limit_text = "all mapped holdings" if max_live_holdings is None else f"top {max_live_holdings} mapped holdings"
+        public_equities_basis = (
+            f"Latest 13F, revaluing {limit_text} at current prices where resolved "
+            "and using reported values for unresolved positions"
+        )
+        residual_definition = "Market cap less selected 13F public equities less net cash/T-bills"
     return pd.DataFrame(
         [
             {"field": "valuation_unit", "value": BRK_B_TICKER},
@@ -851,19 +1010,33 @@ def build_brk_valuation_assumptions_table(*, period: str) -> pd.DataFrame:
             {"field": "market_anchor", "value": "Yahoo market snapshot market cap"},
             {
                 "field": "public_equities_basis",
-                "value": "Latest 13F with live prices where resolved and reported values for unresolved positions",
+                "value": public_equities_basis,
             },
+            {"field": "equity_valuation_basis", "value": equity_basis},
+            {"field": "equity_live_pricing_limit", "value": max_live_holdings if equity_basis == "live" else None},
             {
                 "field": "public_equities_scope",
                 "value": "13F positions only; excludes non-13F public equities and controlled subsidiaries",
             },
             {
                 "field": "liquidity_basis",
-                "value": "Latest filing balance-sheet bridge including cash, Treasury Bills, and fixed maturity securities",
+                "value": "Latest filing cash and Treasury bills for deployable core liquidity; fixed maturity securities shown separately as insurance investment context",
             },
             {
                 "field": "residual_definition",
-                "value": "Market cap less blended 13F public equities less net liquid investments",
+                "value": residual_definition,
+            },
+            {
+                "field": "residual_circularity_note",
+                "value": "Residual is market-implied (circular): it reflects the market's current pricing, not an independent bottoms-up appraisal of operating business value",
+            },
+            {
+                "field": "insurance_float_note",
+                "value": "~$170B insurance float not separately valued in this bridge; float enables investment of policyholders' funds at near-zero cost and is implicitly reflected in the public-equity portfolio value",
+            },
+            {
+                "field": "fixed_maturity_note",
+                "value": "Fixed maturity securities are insurance-reserve-backed; not freely deployable excess capital",
             },
         ]
     )
@@ -881,7 +1054,9 @@ def build_brk_component_bridge_table(
     """
     market_cap = _market_cap_from_snapshot(market_snapshot)
     shares = market_snapshot.get("shares")
-    public_equities = _field_value(public_equity_summary, "blended_13f_value_usd")
+    public_equities = _field_value(public_equity_summary, "selected_13f_value_usd")
+    if public_equities is None:
+        public_equities = _field_value(public_equity_summary, "blended_13f_value_usd")
 
     # Pull individual liquidity components for explicit breakdown
     fixed_maturity = _frame_row_value(latest_liquidity_snapshot, "fixed_maturity_securities_usd")
@@ -959,6 +1134,8 @@ def build_brk_valuation_context_table(
     *,
     yahoo_client=None,
     enriched_holdings: pd.DataFrame | None = None,
+    equity_valuation_basis: str = "live",
+    max_live_holdings: int | None = None,
 ) -> pd.DataFrame:
     """Return the key inputs behind Berkshire's current valuation bridge."""
     holdings_metrics = _live_holdings_metrics(
@@ -966,6 +1143,8 @@ def build_brk_valuation_context_table(
         reference,
         yahoo_client=yahoo_client,
         enriched_holdings=enriched_holdings,
+        equity_valuation_basis=equity_valuation_basis,
+        max_live_holdings=max_live_holdings,
     )
     liquidity_summary = build_liquidity_summary_table(
         build_liquidity_bridge_table(bundle.liquidity.filings)
@@ -987,6 +1166,8 @@ def build_brk_valuation_context_table(
             {"field": "13f_reported_value_usd", "value": holdings_metrics["reported_value_usd"]},
             {"field": "13f_live_resolved_value_usd", "value": holdings_metrics["live_value_usd"]},
             {"field": "13f_live_coverage_ratio", "value": holdings_metrics["coverage_ratio"]},
+            {"field": "13f_selected_value_usd", "value": holdings_metrics["selected_value_usd"]},
+            {"field": "13f_selected_basis", "value": holdings_metrics["selected_basis"]},
             {"field": "liquidity_period_end", "value": latest_liquidity.get("period_end")},
             {"field": "net_liquidity_total_usd", "value": _net_liquidity_total(latest_liquidity)},
             {"field": "segment_period_end", "value": segment_period_end},
@@ -1000,6 +1181,8 @@ def build_market_implied_sotp_bridge_table(
     *,
     yahoo_client=None,
     enriched_holdings: pd.DataFrame | None = None,
+    equity_valuation_basis: str = "live",
+    max_live_holdings: int | None = None,
 ) -> pd.DataFrame:
     """Return a first explicit Berkshire market-implied SOTP bridge."""
     market_snapshot = bundle.overview.market_snapshot
@@ -1010,30 +1193,31 @@ def build_market_implied_sotp_bridge_table(
         reference,
         yahoo_client=yahoo_client,
         enriched_holdings=enriched_holdings,
+        equity_valuation_basis=equity_valuation_basis,
+        max_live_holdings=max_live_holdings,
     )
-    liquidity_snapshot = build_latest_liquidity_snapshot_table(
-        build_liquidity_bridge_table(bundle.liquidity.filings)
-    )
+    liquidity_bridge = build_liquidity_bridge_table(bundle.liquidity.filings)
+    liquidity_snapshot = build_latest_liquidity_snapshot_table(liquidity_bridge)
+    bs_context = _balance_sheet_context_summary_table(liquidity_bridge)
+    deferred_tax = float(bs_context.iloc[0]["deferred_income_taxes_usd"]) if not bs_context.empty and "deferred_income_taxes_usd" in bs_context.columns and pd.notna(bs_context.iloc[0].get("deferred_income_taxes_usd")) else None
 
     cash_and_equivalents = _frame_row_value(liquidity_snapshot, "cash_and_equivalents_usd")
     short_term_t_bills = _frame_row_value(liquidity_snapshot, "short_term_us_treasury_bills_usd")
     fixed_maturity = _frame_row_value(liquidity_snapshot, "fixed_maturity_securities_usd")
-    payable_component = _frame_row_value(
-        liquidity_snapshot,
-        "payable_for_purchase_of_us_treasury_bills_usd",
-    )
-    if payable_component is not None and pd.notna(payable_component):
-        payable_component = -float(payable_component)
-    net_liquidity = _frame_row_value(liquidity_snapshot, "net_liquid_investments_usd")
-    public_equities = holdings_metrics["blended_value_usd"]
-    quoted_plus_liquidity = _sum_defined(public_equities, net_liquidity)
-    residual = None
-    if market_cap is not None and quoted_plus_liquidity is not None and pd.notna(market_cap):
-        residual = float(market_cap) - float(quoted_plus_liquidity)
+    payable_raw = _frame_row_value(liquidity_snapshot, "payable_for_purchase_of_us_treasury_bills_usd")
+    payable_component = -float(payable_raw) if payable_raw is not None and pd.notna(payable_raw) else None
 
-    coverage_text = None
-    if holdings_metrics["coverage_ratio"] is not None:
-        coverage_text = f"Live 13F price coverage {holdings_metrics['coverage_ratio'] * 100:.1f}%"
+    # Core deployable liquidity: cash + T-bills - payable only.
+    # Fixed maturity securities are insurance-reserve-backed and sit inside the insurance
+    # business; they are not freely deployable capital and must not be subtracted here.
+    net_core_liquidity = _sum_defined(cash_and_equivalents, short_term_t_bills, payable_component)
+    public_equities = holdings_metrics["selected_value_usd"]
+    quoted_plus_core_liquidity = _sum_defined(public_equities, net_core_liquidity)
+    residual = None
+    if market_cap is not None and quoted_plus_core_liquidity is not None and pd.notna(market_cap):
+        residual = float(market_cap) - float(quoted_plus_core_liquidity)
+
+    coverage_text = _public_equity_note(holdings_metrics)
 
     rows = [
         {
@@ -1041,7 +1225,7 @@ def build_market_implied_sotp_bridge_table(
             "value_usd": public_equities,
             "per_brk_b_share_usd": _per_share_value(public_equities, share_count),
             "market_cap_weight": _ratio(public_equities, market_cap),
-            "note": coverage_text or "Latest 13F using live prices where resolved and reported values otherwise",
+            "note": coverage_text,
         },
         {
             "metric": "cash_and_equivalents",
@@ -1058,32 +1242,25 @@ def build_market_implied_sotp_bridge_table(
             "note": "Latest filing Treasury-bill position",
         },
         {
-            "metric": "fixed_maturity_securities",
-            "value_usd": fixed_maturity,
-            "per_brk_b_share_usd": _per_share_value(fixed_maturity, share_count),
-            "market_cap_weight": _ratio(fixed_maturity, market_cap),
-            "note": "Latest filing fixed maturity securities",
-        },
-        {
             "metric": "payable_for_purchase_of_us_treasury_bills",
             "value_usd": payable_component,
             "per_brk_b_share_usd": _per_share_value(payable_component, share_count),
             "market_cap_weight": _ratio(payable_component, market_cap),
-            "note": "Deducted from liquidity when reported",
+            "note": "Deducted from core liquidity when reported",
         },
         {
-            "metric": "net_liquidity_total",
-            "value_usd": net_liquidity,
-            "per_brk_b_share_usd": _per_share_value(net_liquidity, share_count),
-            "market_cap_weight": _ratio(net_liquidity, market_cap),
-            "note": "Cash + Treasury bills + fixed maturity securities - payable",
+            "metric": "net_cash_and_treasury_bills",
+            "value_usd": net_core_liquidity,
+            "per_brk_b_share_usd": _per_share_value(net_core_liquidity, share_count),
+            "market_cap_weight": _ratio(net_core_liquidity, market_cap),
+            "note": "Cash + Treasury bills - payable (excludes fixed maturity; see context row below)",
         },
         {
-            "metric": "quoted_holdings_plus_net_liquidity",
-            "value_usd": quoted_plus_liquidity,
-            "per_brk_b_share_usd": _per_share_value(quoted_plus_liquidity, share_count),
-            "market_cap_weight": _ratio(quoted_plus_liquidity, market_cap),
-            "note": "Blended 13F public equities plus net liquidity subtotal",
+            "metric": "quoted_holdings_plus_net_cash",
+            "value_usd": quoted_plus_core_liquidity,
+            "per_brk_b_share_usd": _per_share_value(quoted_plus_core_liquidity, share_count),
+            "market_cap_weight": _ratio(quoted_plus_core_liquidity, market_cap),
+            "note": "Selected 13F public equities plus net cash and T-bills",
         },
         {
             "metric": "market_cap",
@@ -1097,7 +1274,21 @@ def build_market_implied_sotp_bridge_table(
             "value_usd": residual,
             "per_brk_b_share_usd": _per_share_value(residual, share_count),
             "market_cap_weight": _ratio(residual, market_cap),
-            "note": "Residual after blended 13F public equities and net liquidity; includes operating businesses, non-13F assets, debt, and other items",
+            "note": "Market-implied plug (circular): market cap minus public equities and net cash/T-bills. Not an independent appraisal — reflects what the market already prices in for operating businesses, insurance portfolio (incl. fixed maturity), non-13F assets, debt, and deferred taxes",
+        },
+        {
+            "metric": "fixed_maturity_securities_context",
+            "value_usd": fixed_maturity,
+            "per_brk_b_share_usd": _per_share_value(fixed_maturity, share_count),
+            "market_cap_weight": _ratio(fixed_maturity, market_cap),
+            "note": "Context only — included in residual above; insurance-reserve-backed bond portfolio, not freely deployable capital",
+        },
+        {
+            "metric": "deferred_tax_on_equity_context",
+            "value_usd": deferred_tax,
+            "per_brk_b_share_usd": _per_share_value(deferred_tax, share_count),
+            "market_cap_weight": _ratio(deferred_tax, market_cap),
+            "note": "Context only — contingent tax liability on unrealized equity gains (~21% capital gains tax if portfolio sold); 13F values are pre-tax market prices, so after-tax realizable value is lower by roughly this amount",
         },
     ]
     return pd.DataFrame(rows)
@@ -1110,6 +1301,8 @@ def build_operating_business_context_table(
     period: str = "annual",
     yahoo_client=None,
     enriched_holdings: pd.DataFrame | None = None,
+    equity_valuation_basis: str = "live",
+    max_live_holdings: int | None = None,
 ) -> pd.DataFrame:
     """Put the SOTP residual next to latest reported operating segment earnings."""
     bridge = build_market_implied_sotp_bridge_table(
@@ -1117,6 +1310,8 @@ def build_operating_business_context_table(
         reference,
         yahoo_client=yahoo_client,
         enriched_holdings=enriched_holdings,
+        equity_valuation_basis=equity_valuation_basis,
+        max_live_holdings=max_live_holdings,
     )
     residual = _metric_value(bridge, "residual_operating_and_other")
     market_cap = _metric_value(bridge, "market_cap")
@@ -1143,6 +1338,563 @@ def build_operating_business_context_table(
             },
         ]
     )
+
+
+_BRK_DEFAULT_REQUIRED_RETURNS = (0.08, 0.10, 0.12)
+
+
+def _context_field_value(context: pd.DataFrame, field: str) -> float | None:
+    if context.empty or "field" not in context.columns or "value" not in context.columns:
+        return None
+    rows = context[context["field"] == field]
+    if rows.empty:
+        return None
+    v = rows.iloc[0]["value"]
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def build_brk_operating_reverse_dcf_table(
+    context_table: pd.DataFrame,
+    market_snapshot: dict,
+    *,
+    required_returns: tuple[float, ...] | list[float] = _BRK_DEFAULT_REQUIRED_RETURNS,
+) -> pd.DataFrame:
+    """Return implied perpetual growth rates for Berkshire operating businesses.
+
+    Uses the Gordon Growth model solved for g:
+      residual = pretax_earnings / (r - g)  →  g = r - pretax_earnings / residual
+
+    ``residual`` is the market-implied operating-and-other residual from the SOTP
+    bridge (includes non-13F assets, debt, deferred taxes, and other items, so treat
+    the implied growth as an approximation, not a precise business appraisal).
+    ``pretax_earnings`` are the latest reported top-level segment pre-tax earnings.
+    ``zero_growth_operating_value_usd`` is what the residual would be worth at that
+    required return with zero growth assumed: pretax_earnings / r.
+
+    Returns empty DataFrame when residual or pretax earnings are unavailable or ≤ 0.
+
+    Columns: assumed_return, implied_growth, zero_growth_operating_value_usd,
+             zero_growth_per_brk_b_usd
+    ``assumed_return`` and ``implied_growth`` are 0-1 decimals.
+    """
+    residual = _context_field_value(context_table, "residual_operating_and_other_usd")
+    pretax_earnings = _context_field_value(context_table, "operating_segment_pretax_earnings_usd")
+    if residual is None or pretax_earnings is None or residual <= 0 or pretax_earnings <= 0:
+        return pd.DataFrame()
+
+    share_count = _implied_brk_b_equivalent_shares(market_snapshot)
+    earnings_yield = pretax_earnings / residual
+    rows = []
+    for r in required_returns:
+        implied_g = r - earnings_yield
+        zero_growth_value = pretax_earnings / r
+        rows.append(
+            {
+                "assumed_return": r,
+                "implied_growth": implied_g,
+                "zero_growth_operating_value_usd": zero_growth_value,
+                "zero_growth_per_brk_b_usd": _per_share_value(zero_growth_value, share_count),
+                "model_note": "Pre-tax earnings / pre-tax return; apply ~0.75 tax-rate factor for after-tax equivalent. Residual is market-implied (circular).",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def build_brk_valuation_summary_table(
+    market_snapshot: dict,
+    sotp_bridge: pd.DataFrame,
+    operating_context: pd.DataFrame,
+    reverse_dcf: pd.DataFrame,
+    equity_portfolio: pd.DataFrame,
+) -> pd.DataFrame:
+    """Return a compact key-numbers summary extracted from already-computed SOTP tables.
+
+    Columns: field, value.  Values are raw numerics; humanize_frame formats them for display.
+    Designed to be the first section of a valuation report — key findings at a glance.
+    """
+    price = market_snapshot.get("last_price")
+    market_cap = _metric_value(sotp_bridge, "market_cap")
+    blended_13f = _context_field_value(equity_portfolio, "blended_13f_value_usd")
+    selected_13f = _context_field_value(equity_portfolio, "selected_13f_value_usd")
+    selected_13f_basis = _field_value(equity_portfolio, "selected_13f_basis")
+    reported_13f = _context_field_value(equity_portfolio, "reported_13f_value_usd")
+    coverage = _context_field_value(equity_portfolio, "live_price_coverage_pct")
+    net_liquidity = _metric_value(sotp_bridge, "net_cash_and_treasury_bills")
+    residual = _metric_value(sotp_bridge, "residual_operating_and_other")
+    residual_per_share = _metric_per_share(sotp_bridge, "residual_operating_and_other")
+    residual_weight = _metric_weight(sotp_bridge, "residual_operating_and_other")
+    pretax_earnings = _context_field_value(operating_context, "operating_segment_pretax_earnings_usd")
+    earnings_multiple = _context_field_value(operating_context, "residual_to_pretax_earnings_multiple")
+
+    implied_growth_10 = None
+    zero_growth_per_share_10 = None
+    if not reverse_dcf.empty and "assumed_return" in reverse_dcf.columns:
+        row_10 = reverse_dcf[abs(reverse_dcf["assumed_return"] - 0.10) < 0.001]
+        if not row_10.empty:
+            v = row_10.iloc[0].get("implied_growth")
+            implied_growth_10 = float(v) if v is not None and pd.notna(v) else None
+            v = row_10.iloc[0].get("zero_growth_per_brk_b_usd")
+            zero_growth_per_share_10 = float(v) if v is not None and pd.notna(v) else None
+
+    rows = [
+        {"field": "price_brk_b", "value": price},
+        {"field": "market_cap_usd", "value": market_cap},
+        {"field": "13f_reported_value_usd", "value": reported_13f},
+        {"field": "13f_selected_basis", "value": selected_13f_basis},
+        {"field": "13f_blended_value_usd", "value": blended_13f},
+        {"field": "13f_selected_value_usd", "value": selected_13f if selected_13f is not None else blended_13f},
+        {"field": "13f_live_coverage_pct", "value": coverage},
+        {"field": "net_core_liquidity_usd", "value": net_liquidity},
+        {"field": "residual_operating_and_other_usd", "value": residual},
+        {"field": "residual_per_brk_b_usd", "value": residual_per_share},
+        {"field": "residual_market_cap_weight", "value": residual_weight},
+        {"field": "segment_pretax_earnings_usd", "value": pretax_earnings},
+        {"field": "residual_to_pretax_earnings_multiple", "value": earnings_multiple},
+        {"field": "implied_growth_at_10_pct", "value": implied_growth_10},
+        {"field": "zero_growth_value_per_brk_b_usd", "value": zero_growth_per_share_10},
+    ]
+    return pd.DataFrame(rows)
+
+
+def build_segment_metric_history_table(
+    filings: Sequence[BrkSegmentFiling],
+    *,
+    metric: str,
+    period: str = "annual",
+    row_label: str | None = None,
+) -> pd.DataFrame:
+    """Generic pivot: segments as rows, period labels as columns, CAGR appended.
+
+    Each cell is the raw USD value for that segment in that period.
+    Returns empty DataFrame when no filings yield the requested metric.
+    """
+    records: list[dict] = []
+    for filing in filings:
+        table = build_top_level_operating_segments_table(filing.reports, period=period)
+        if table.empty or metric not in table.columns:
+            continue
+        ts = table.iloc[0]["period_end"]
+        try:
+            t = pd.Timestamp(ts)
+        except Exception:
+            continue
+        if period == "annual":
+            col_label = f"FY {t.year}"
+        else:
+            q = ((t.month - 1) // 3) + 1
+            col_label = f"{t.year} Q{q}"
+        for _, row in table.iterrows():
+            seg = row.get("segment")
+            val = row.get(metric)
+            if seg is None or val is None or (isinstance(val, float) and pd.isna(val)):
+                continue
+            records.append({"segment": seg, "period_label": col_label, "value": float(val)})
+    if not records:
+        return pd.DataFrame()
+    df = pd.DataFrame(records)
+    pivot = (
+        df.pivot_table(index="segment", columns="period_label", values="value", aggfunc="first")
+        .rename_axis(columns=None)
+        .reset_index()
+    )
+    # Sort period columns chronologically (oldest left → newest right for CAGR direction)
+    period_cols = [c for c in pivot.columns if c != "segment"]
+    period_cols_sorted = sorted(period_cols, key=_period_col_sort_key)
+    pivot = pivot[["segment"] + period_cols_sorted]
+
+    pivot["cagr_pct"] = pivot.apply(
+        lambda row: _row_cagr([row.get(c) for c in period_cols_sorted]), axis=1
+    )
+    # Add Total row
+    total_row: dict = {"segment": "Total"}
+    for c in period_cols_sorted:
+        col_vals = pd.to_numeric(pivot[c], errors="coerce")
+        total_row[c] = col_vals.sum() if col_vals.notna().any() else None
+    total_row["cagr_pct"] = _row_cagr([total_row.get(c) for c in period_cols_sorted])
+    pivot = pd.concat([pivot, pd.DataFrame([total_row])], ignore_index=True)
+    pivot["unit"] = "USD"
+    return pivot
+
+
+def build_segment_earnings_history_table(
+    filings: Sequence[BrkSegmentFiling], *, period: str = "annual"
+) -> pd.DataFrame:
+    return build_segment_metric_history_table(filings, metric="earnings_before_income_taxes_usd", period=period)
+
+
+def build_segment_revenues_history_table(
+    filings: Sequence[BrkSegmentFiling], *, period: str = "annual"
+) -> pd.DataFrame:
+    return build_segment_metric_history_table(filings, metric="revenues_usd", period=period)
+
+
+def build_segment_dna_history_table(
+    filings: Sequence[BrkSegmentFiling], *, period: str = "annual"
+) -> pd.DataFrame:
+    return build_segment_metric_history_table(filings, metric="depreciation_and_amortization_usd", period=period)
+
+
+def build_segment_capex_history_table(
+    filings: Sequence[BrkSegmentFiling], *, period: str = "annual"
+) -> pd.DataFrame:
+    return build_segment_metric_history_table(filings, metric="capex_usd", period=period)
+
+
+def build_segment_owner_earnings_history_table(
+    filings: Sequence[BrkSegmentFiling], *, period: str = "annual"
+) -> pd.DataFrame:
+    """Pivot of owner earnings (pretax + D&A - capex) per segment per period."""
+    records: list[dict] = []
+    for filing in filings:
+        table = build_top_level_operating_segments_table(filing.reports, period=period)
+        if table.empty:
+            continue
+        required = {"earnings_before_income_taxes_usd", "depreciation_and_amortization_usd", "capex_usd"}
+        if not required.issubset(table.columns):
+            continue
+        ts = table.iloc[0]["period_end"]
+        try:
+            t = pd.Timestamp(ts)
+        except Exception:
+            continue
+        if period == "annual":
+            col_label = f"FY {t.year}"
+        else:
+            q = ((t.month - 1) // 3) + 1
+            col_label = f"{t.year} Q{q}"
+        for _, row in table.iterrows():
+            seg = row.get("segment")
+            pretax = row.get("earnings_before_income_taxes_usd")
+            dna = row.get("depreciation_and_amortization_usd")
+            capex = row.get("capex_usd")
+            if seg is None or any(v is None or (isinstance(v, float) and pd.isna(v)) for v in [pretax, dna, capex]):
+                continue
+            oe = float(pretax) + float(dna) - float(capex)
+            records.append({"segment": seg, "period_label": col_label, "value": oe})
+    if not records:
+        return pd.DataFrame()
+    df = pd.DataFrame(records)
+    pivot = (
+        df.pivot_table(index="segment", columns="period_label", values="value", aggfunc="first")
+        .rename_axis(columns=None)
+        .reset_index()
+    )
+    period_cols = sorted([c for c in pivot.columns if c != "segment"], key=_period_col_sort_key)
+    pivot = pivot[["segment"] + period_cols]
+    pivot["cagr_pct"] = pivot.apply(lambda row: _row_cagr([row.get(c) for c in period_cols]), axis=1)
+    total_row: dict = {"segment": "Total"}
+    for c in period_cols:
+        col_vals = pd.to_numeric(pivot[c], errors="coerce")
+        total_row[c] = col_vals.sum() if col_vals.notna().any() else None
+    total_row["cagr_pct"] = _row_cagr([total_row.get(c) for c in period_cols])
+    pivot = pd.concat([pivot, pd.DataFrame([total_row])], ignore_index=True)
+    pivot["unit"] = "USD"
+    return pivot
+
+
+def build_segment_pretax_margin_history_table(
+    filings: Sequence[BrkSegmentFiling], *, period: str = "annual"
+) -> pd.DataFrame:
+    """Pivot of pretax margin (pretax / revenue) per segment per period.
+
+    Values stored as 0-1 ratios; unit='PCT' so humanize_frame renders as %.
+    Includes Total row using aggregate pretax / aggregate revenue.
+    """
+    records: list[dict] = []
+    for filing in filings:
+        table = build_top_level_operating_segments_table(filing.reports, period=period)
+        if table.empty:
+            continue
+        if "earnings_before_income_taxes_usd" not in table.columns or "revenues_usd" not in table.columns:
+            continue
+        ts = table.iloc[0]["period_end"]
+        try:
+            t = pd.Timestamp(ts)
+        except Exception:
+            continue
+        col_label = f"FY {t.year}" if period == "annual" else f"{t.year} Q{((t.month - 1) // 3) + 1}"
+        for _, row in table.iterrows():
+            seg = row.get("segment")
+            pretax = row.get("earnings_before_income_taxes_usd")
+            rev = row.get("revenues_usd")
+            if seg is None or any(v is None or (isinstance(v, float) and pd.isna(v)) for v in [pretax, rev]):
+                continue
+            if float(rev) == 0:
+                continue
+            records.append({"segment": seg, "period_label": col_label, "value": float(pretax) / float(rev)})
+    if not records:
+        return pd.DataFrame()
+    df = pd.DataFrame(records)
+    pivot = (
+        df.pivot_table(index="segment", columns="period_label", values="value", aggfunc="first")
+        .rename_axis(columns=None)
+        .reset_index()
+    )
+    period_cols = sorted([c for c in pivot.columns if c != "segment"], key=_period_col_sort_key)
+    pivot = pivot[["segment"] + period_cols]
+    pivot["cagr_pct"] = pivot.apply(lambda row: _row_cagr([row.get(c) for c in period_cols]), axis=1)
+
+    # Total row: aggregate pretax / aggregate revenue per period
+    pretax_table = build_segment_earnings_history_table(filings, period=period)
+    rev_table = build_segment_revenues_history_table(filings, period=period)
+    total_row: dict = {"segment": "Total"}
+    for c in period_cols:
+        pretax_total = None
+        rev_total = None
+        if not pretax_table.empty and c in pretax_table.columns:
+            seg_rows = pretax_table[pretax_table["segment"] != "Total"]
+            vals = pd.to_numeric(seg_rows[c], errors="coerce")
+            pretax_total = vals.sum() if vals.notna().any() else None
+        if not rev_table.empty and c in rev_table.columns:
+            seg_rows2 = rev_table[rev_table["segment"] != "Total"]
+            vals2 = pd.to_numeric(seg_rows2[c], errors="coerce")
+            rev_total = vals2.sum() if vals2.notna().any() else None
+        if pretax_total is not None and rev_total is not None and rev_total != 0:
+            total_row[c] = pretax_total / rev_total
+        else:
+            total_row[c] = None
+    total_row["cagr_pct"] = _row_cagr([total_row.get(c) for c in period_cols])
+    pivot = pd.concat([pivot, pd.DataFrame([total_row])], ignore_index=True)
+    pivot["unit"] = "PCT"
+    return pivot
+
+
+def build_segment_implied_allocation_table(
+    bundle: "BrkValuationBundle",
+    reference: pd.DataFrame,
+    *,
+    period: str = "annual",
+    yahoo_client=None,
+    enriched_holdings: pd.DataFrame | None = None,
+    equity_valuation_basis: str = "live",
+    max_live_holdings: int | None = None,
+) -> pd.DataFrame:
+    """Allocate the SOTP residual proportionally to each segment's pre-tax earnings share.
+
+    Shows segment, pretax earnings, % of total, implied value, and implied P/E.
+    Also shows owner earnings columns when available.
+    """
+    bridge = build_market_implied_sotp_bridge_table(
+        bundle,
+        reference,
+        yahoo_client=yahoo_client,
+        enriched_holdings=enriched_holdings,
+        equity_valuation_basis=equity_valuation_basis,
+        max_live_holdings=max_live_holdings,
+    )
+    residual = _metric_value(bridge, "residual_operating_and_other")
+    share_count = _implied_brk_b_equivalent_shares(bundle.overview.market_snapshot)
+    if residual is None or residual <= 0:
+        return pd.DataFrame()
+    segments = _latest_segments_table(bundle.segments.filings, period=period)
+    if segments.empty or "earnings_before_income_taxes_usd" not in segments.columns:
+        return pd.DataFrame()
+    valid_segs = segments[pd.to_numeric(segments["earnings_before_income_taxes_usd"], errors="coerce").notna()].copy()
+    if valid_segs.empty:
+        return pd.DataFrame()
+    total_pretax = float(pd.to_numeric(valid_segs["earnings_before_income_taxes_usd"], errors="coerce").sum())
+    if total_pretax <= 0:
+        return pd.DataFrame()
+
+    has_oe = (
+        "earnings_before_income_taxes_usd" in segments.columns
+        and "depreciation_and_amortization_usd" in segments.columns
+        and "capex_usd" in segments.columns
+    )
+    rows = []
+    for _, row in valid_segs.iterrows():
+        pretax = float(row["earnings_before_income_taxes_usd"])
+        share_pct = pretax / total_pretax
+        implied_val = residual * share_pct
+        implied_pe = implied_val / pretax if pretax != 0 else None
+        rec: dict = {
+            "segment": row.get("segment"),
+            "pretax_earnings_usd": pretax,
+            "pretax_share_pct": share_pct,
+            "implied_value_usd": implied_val,
+            "implied_pe_multiple": implied_pe,
+        }
+        if has_oe:
+            dna = row.get("depreciation_and_amortization_usd")
+            capex = row.get("capex_usd")
+            if dna is not None and capex is not None and not any(
+                isinstance(v, float) and pd.isna(v) for v in [dna, capex]
+            ):
+                oe = pretax + float(dna) - float(capex)
+                rec["owner_earnings_usd"] = oe
+                rec["implied_p_oe_multiple"] = implied_val / oe if oe != 0 else None
+        rows.append(rec)
+    if not rows:
+        return pd.DataFrame()
+    result = pd.DataFrame(rows)
+    # Append totals row
+    total: dict = {
+        "segment": "Total",
+        "pretax_earnings_usd": total_pretax,
+        "pretax_share_pct": 1.0,
+        "implied_value_usd": residual,
+        "implied_pe_multiple": residual / total_pretax if total_pretax != 0 else None,
+    }
+    if has_oe and "owner_earnings_usd" in result.columns:
+        total_oe = pd.to_numeric(result["owner_earnings_usd"], errors="coerce").sum()
+        total["owner_earnings_usd"] = total_oe
+        total["implied_p_oe_multiple"] = residual / total_oe if total_oe != 0 else None
+    return pd.concat([result, pd.DataFrame([total])], ignore_index=True)
+
+
+def build_opco_valuation_sensitivity_table(
+    bundle: "BrkValuationBundle",
+    reference: pd.DataFrame,
+    *,
+    period: str = "annual",
+    pe_multiples: tuple[float, ...] = (6.0, 8.0, 10.0, 12.0, 15.0),
+    yahoo_client=None,
+    enriched_holdings: pd.DataFrame | None = None,
+    equity_valuation_basis: str = "live",
+    max_live_holdings: int | None = None,
+) -> pd.DataFrame:
+    """Show implied BRK.B price at various owner-earnings (or pretax-earnings) multiples.
+
+    Total value = (13F blended + net liquidity) + (owner earnings × multiple).
+    Falls back to pretax earnings when OE components are unavailable.
+    """
+    bridge = build_market_implied_sotp_bridge_table(
+        bundle,
+        reference,
+        yahoo_client=yahoo_client,
+        enriched_holdings=enriched_holdings,
+        equity_valuation_basis=equity_valuation_basis,
+        max_live_holdings=max_live_holdings,
+    )
+    known_assets = None
+    pe_val = _metric_value(bridge, "public_equity_holdings_blended")
+    liq_val = _metric_value(bridge, "net_cash_and_treasury_bills")
+    if pe_val is not None and liq_val is not None:
+        known_assets = pe_val + liq_val
+    if known_assets is None:
+        return pd.DataFrame()
+
+    share_count = _implied_brk_b_equivalent_shares(bundle.overview.market_snapshot)
+    last_price = bundle.overview.market_snapshot.get("last_price")
+    if share_count is None or share_count <= 0:
+        return pd.DataFrame()
+
+    segments = _latest_segments_table(bundle.segments.filings, period=period)
+    owner_earnings: float | None = None
+    earnings_label = "pretax earnings"
+    if not segments.empty:
+        required_oe = {"earnings_before_income_taxes_usd", "depreciation_and_amortization_usd", "capex_usd"}
+        if required_oe.issubset(segments.columns):
+            pt_vals = pd.to_numeric(segments["earnings_before_income_taxes_usd"], errors="coerce")
+            dna_vals = pd.to_numeric(segments["depreciation_and_amortization_usd"], errors="coerce")
+            capex_vals = pd.to_numeric(segments["capex_usd"], errors="coerce")
+            total_pt = pt_vals.sum() if pt_vals.notna().any() else None
+            total_dna = dna_vals.sum() if dna_vals.notna().any() else None
+            total_capex = capex_vals.sum() if capex_vals.notna().any() else None
+            if all(v is not None for v in [total_pt, total_dna, total_capex]):
+                oe = float(total_pt) + float(total_dna) - float(total_capex)
+                if oe > 0:
+                    owner_earnings = oe
+                    earnings_label = "owner earnings"
+        if owner_earnings is None and "earnings_before_income_taxes_usd" in segments.columns:
+            pt_vals = pd.to_numeric(segments["earnings_before_income_taxes_usd"], errors="coerce")
+            total_pt = float(pt_vals.sum()) if pt_vals.notna().any() else None
+            if total_pt is not None and total_pt > 0:
+                owner_earnings = total_pt
+    if owner_earnings is None or owner_earnings <= 0:
+        return pd.DataFrame()
+
+    rows = []
+    for multiple in pe_multiples:
+        implied_opco = owner_earnings * multiple
+        implied_total = known_assets + implied_opco
+        implied_price = implied_total / share_count
+        upside = ((implied_price / float(last_price)) - 1.0) if last_price and float(last_price) > 0 else None
+        rows.append({
+            "scenario": f"{multiple:.0f}× {earnings_label}",
+            "implied_opco_value_usd": implied_opco,
+            "implied_total_value_usd": implied_total,
+            "implied_brk_b_price_usd": implied_price,
+            "vs_current_price_pct": upside,
+        })
+    return pd.DataFrame(rows)
+
+
+def build_book_value_history_table(
+    company_facts: dict,
+    share_count: float | None,
+    *,
+    limit: int = 5,
+) -> pd.DataFrame:
+    """Show stockholders' equity and optional book value per BRK.B across annual periods.
+
+    Uses build_key_facts_table to find the latest equity value, and
+    company_facts_to_table for the multi-year annual series.
+    """
+    from valuation.company.statements import build_statement_table
+
+    balance = build_statement_table(company_facts, statement="balance", period="annual", limit=limit)
+    if balance.empty:
+        return pd.DataFrame()
+
+    # Find stockholders_equity row
+    eq_rows = balance[balance["metric"] == "stockholders_equity"]
+    if eq_rows.empty:
+        return pd.DataFrame()
+
+    # period columns are all columns except 'metric', 'unit', and 'cagr_pct'
+    non_period_cols = {"metric", "unit", "cagr_pct"}
+    period_cols = [c for c in eq_rows.columns if c not in non_period_cols]
+    if not period_cols:
+        return pd.DataFrame()
+
+    equity_row = eq_rows.iloc[0][period_cols].to_dict()
+    rows = [{"metric": "stockholders_equity_usd", "unit": "USD", **equity_row}]
+
+    if share_count is not None and share_count > 0:
+        bvps = {}
+        for col in period_cols:
+            v = equity_row.get(col)
+            if v is not None and not (isinstance(v, float) and pd.isna(v)):
+                bvps[col] = float(v) / share_count
+            else:
+                bvps[col] = None
+        rows.append({"metric": "book_value_per_brk_b_usd", "unit": "USD", **bvps})
+
+    result = pd.DataFrame(rows)
+    # Compute CAGR on the equity row
+    result["cagr_pct"] = result.apply(
+        lambda row: _row_cagr([row.get(c) for c in period_cols]), axis=1
+    )
+    return result
+
+
+def _period_col_sort_key(label: str) -> tuple[int, int]:
+    """Sort period labels chronologically. FY YYYY → (year, 0); YYYY Qn → (year, quarter)."""
+    import re as _re
+    m_fy = _re.match(r"FY (\d{4})$", label)
+    if m_fy:
+        return (int(m_fy.group(1)), 0)
+    m_q = _re.match(r"(\d{4}) Q(\d)$", label)
+    if m_q:
+        return (int(m_q.group(1)), int(m_q.group(2)))
+    return (0, 0)
+
+
+def _row_cagr(values: list) -> float | None:
+    """Compute annualised CAGR from first to last positive value in the list."""
+    clean = [float(v) for v in values if v is not None and not (isinstance(v, float) and pd.isna(v))]
+    if len(clean) < 2 or clean[0] <= 0 or clean[-1] <= 0:
+        return None
+    periods = len(clean) - 1
+    if periods == 0:
+        return None
+    return (clean[-1] / clean[0]) ** (1.0 / periods) - 1.0
 
 
 def build_segment_report_summary_table(filings: Sequence[BrkSegmentFiling]) -> pd.DataFrame:
@@ -1200,7 +1952,9 @@ def build_segment_period_sections(
         table = build_top_level_operating_segments_table(filing.reports, period=period)
         if table.empty:
             continue
-        sections.append((_segment_period_title(filing, table, period=period), table))
+        title = _segment_period_title(filing, table, period=period)
+        table = table.drop(columns=["period_end", "period_type"], errors="ignore")
+        sections.append((title, table))
     return sections
 
 
@@ -1228,26 +1982,52 @@ def _live_holdings_metrics(
     *,
     yahoo_client=None,
     enriched_holdings: pd.DataFrame | None = None,
-) -> dict[str, float | int | None]:
+    equity_valuation_basis: str = "live",
+    max_live_holdings: int | None = None,
+) -> dict[str, float | int | str | None]:
     if holdings.empty:
         return {
             "positions_total": 0,
             "resolved_positions": 0,
+            "unresolved_positions": 0,
             "reported_value_usd": None,
             "resolved_reported_value_usd": None,
             "unresolved_reported_value_usd": None,
             "live_value_usd": None,
             "blended_value_usd": None,
+            "selected_value_usd": None,
+            "selected_basis": None,
+            "live_pricing_limit": None,
+            "latest_price_date": None,
+            "coverage_ratio": None,
+        }
+    basis = normalize_public_equity_valuation_basis(equity_valuation_basis)
+    aggregated = aggregate_13f_holdings(holdings)
+    reported_value = aggregated["value_usd"].dropna().sum()
+    if basis == "reported":
+        return {
+            "positions_total": int(len(aggregated)),
+            "resolved_positions": 0,
+            "unresolved_positions": int(len(aggregated)),
+            "reported_value_usd": reported_value if pd.notna(reported_value) else None,
+            "resolved_reported_value_usd": None,
+            "unresolved_reported_value_usd": reported_value if pd.notna(reported_value) else None,
+            "live_value_usd": None,
+            "blended_value_usd": reported_value if pd.notna(reported_value) else None,
+            "selected_value_usd": reported_value if pd.notna(reported_value) else None,
+            "selected_basis": "reported_13f",
+            "live_pricing_limit": None,
+            "latest_price_date": None,
             "coverage_ratio": None,
         }
     enriched = _enriched_holdings_frame(
-        holdings,
+        aggregated,
         reference,
         yahoo_client=yahoo_client,
         enriched_holdings=enriched_holdings,
+        max_live_holdings=max_live_holdings,
     )
     resolved = enriched[enriched["market_value_live_usd"].notna()].copy()
-    reported_value = enriched["value_usd"].dropna().sum()
     resolved_reported_value = resolved["value_usd"].dropna().sum()
     live_value = resolved["market_value_live_usd"].dropna().sum()
     unresolved_reported_value = enriched.loc[
@@ -1258,14 +2038,24 @@ def _live_holdings_metrics(
     coverage_ratio = None
     if reported_value:
         coverage_ratio = resolved_reported_value / reported_value
+    latest_price_date = None
+    if "latest_price_date" in enriched.columns:
+        dates = [value for value in enriched["latest_price_date"].dropna().tolist() if value]
+        if dates:
+            latest_price_date = max(dates)
     return {
         "positions_total": int(len(enriched)),
         "resolved_positions": int(len(resolved)),
+        "unresolved_positions": int(len(enriched) - len(resolved)),
         "reported_value_usd": reported_value if pd.notna(reported_value) else None,
         "resolved_reported_value_usd": resolved_reported_value if pd.notna(resolved_reported_value) else None,
         "unresolved_reported_value_usd": unresolved_reported_value if pd.notna(unresolved_reported_value) else None,
         "live_value_usd": live_value if pd.notna(live_value) else None,
         "blended_value_usd": blended_value if blended_value is not None and pd.notna(blended_value) else None,
+        "selected_value_usd": blended_value if blended_value is not None and pd.notna(blended_value) else None,
+        "selected_basis": "live_revalued_13f",
+        "live_pricing_limit": max_live_holdings,
+        "latest_price_date": latest_price_date,
         "coverage_ratio": coverage_ratio,
     }
 
@@ -1277,6 +2067,7 @@ def _enriched_holdings_frame(
     yahoo_client=None,
     price_change_window: str | None = None,
     enriched_holdings: pd.DataFrame | None = None,
+    max_live_holdings: int | None = None,
 ) -> pd.DataFrame:
     if enriched_holdings is not None:
         return enriched_holdings.copy()
@@ -1286,7 +2077,29 @@ def _enriched_holdings_frame(
         reference,
         yahoo_client=yahoo_client,
         price_change_window=price_change_window,
+        max_holdings=max_live_holdings,
     )
+
+
+def normalize_public_equity_valuation_basis(value: str | None) -> str:
+    normalized = str(value or "live").strip().lower()
+    if normalized in {"current", "current_price", "market", "market_price"}:
+        normalized = "live"
+    if normalized not in PUBLIC_EQUITY_VALUATION_BASES:
+        allowed = ", ".join(PUBLIC_EQUITY_VALUATION_BASES)
+        raise ValueError(f"Unsupported public equity valuation basis '{value}'. Use one of: {allowed}")
+    return normalized
+
+
+def _public_equity_note(metrics: dict[str, object]) -> str:
+    if metrics.get("selected_basis") == "reported_13f":
+        return "Latest 13F reported market values from the filing"
+    coverage = metrics.get("coverage_ratio")
+    limit = metrics.get("live_pricing_limit")
+    scope = "mapped holdings" if limit is None else f"top {limit} mapped holdings"
+    if coverage is not None:
+        return f"Current-price 13F estimate for {scope}; live price coverage {float(coverage) * 100:.1f}%"
+    return f"Current-price 13F estimate for {scope}; reported values used where prices are unresolved"
 
 
 def _latest_segments_table(
@@ -1314,6 +2127,30 @@ def _metric_value(frame: pd.DataFrame, metric: str) -> float | None:
         return None
     value = rows.iloc[0]["value_usd"]
     if value is None or pd.isna(value):
+        return None
+    return float(value)
+
+
+def _metric_per_share(frame: pd.DataFrame, metric: str) -> float | None:
+    if frame.empty or "metric" not in frame.columns or "per_brk_b_share_usd" not in frame.columns:
+        return None
+    rows = frame[frame["metric"] == metric]
+    if rows.empty:
+        return None
+    value = rows.iloc[0]["per_brk_b_share_usd"]
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    return float(value)
+
+
+def _metric_weight(frame: pd.DataFrame, metric: str) -> float | None:
+    if frame.empty or "metric" not in frame.columns or "market_cap_weight" not in frame.columns:
+        return None
+    rows = frame[frame["metric"] == metric]
+    if rows.empty:
+        return None
+    value = rows.iloc[0]["market_cap_weight"]
+    if value is None or (isinstance(value, float) and pd.isna(value)):
         return None
     return float(value)
 
@@ -1499,15 +2336,47 @@ def _extract_liquidity_values(frame: pd.DataFrame) -> tuple[str | None, dict[str
     if period_end is None:
         return None, {}
     values = {}
-    for metric, label in BRK_LIQUIDITY_REPORT_LABELS.items():
-        matched = frame[labels == label]
+    for metric, label in {
+        **BRK_LIQUIDITY_REPORT_LABELS,
+        **BRK_BALANCE_SHEET_CONTEXT_LABELS,
+    }.items():
+        matched = frame[labels.isin(_label_aliases(label))]
         if matched.empty:
             continue
         parsed_value = _parse_balance_sheet_value(matched.iloc[0, current_column_index])
         if parsed_value is None:
             continue
         values[metric] = parsed_value
+    for metric, label in BRK_BALANCE_SHEET_CONTEXT_SUM_LABELS.items():
+        matched = frame[labels.isin(_label_aliases(label))]
+        if matched.empty:
+            continue
+        parsed_values = [
+            parsed
+            for parsed in (
+                _parse_balance_sheet_value(value)
+                for value in matched.iloc[:, current_column_index].tolist()
+            )
+            if parsed is not None
+        ]
+        if parsed_values:
+            values[metric] = sum(parsed_values)
     return period_end, values
+
+
+def _label_aliases(label: str) -> tuple[str, ...]:
+    return BRK_REPORT_LABEL_ALIASES.get(label, (label,))
+
+
+def _report_label_for_metric(metric: str) -> str:
+    for labels in (
+        BRK_LIQUIDITY_REPORT_LABELS,
+        BRK_BALANCE_SHEET_CONTEXT_LABELS,
+        BRK_BALANCE_SHEET_CONTEXT_SUM_LABELS,
+    ):
+        if metric in labels:
+            return labels[metric]
+    return metric
 
 
 def _latest_date_column_index(columns) -> int | None:

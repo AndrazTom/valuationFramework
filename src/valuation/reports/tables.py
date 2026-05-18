@@ -18,6 +18,9 @@ DISPLAY_COLUMN_ALIASES = {
     "accepted_at": "accepted at",
     "as_of": "as of",
     "cash_and_equivalents_usd": "cash",
+    "deferred_income_taxes_usd": "deferred taxes",
+    "equity_method_investments_usd": "equity method",
+    "equity_securities_usd": "equity securities",
     "coverage_ratio": "coverage",
     "earnings_before_income_taxes_usd": "pre-tax earnings",
     "expected_metric_count": "expected metrics",
@@ -30,9 +33,12 @@ DISPLAY_COLUMN_ALIASES = {
     "depreciation_and_amortization_usd": "depr & amort",
     "interest_expense_usd": "interest expense",
     "latest_price_date": "price date",
-    "liquid_investments_total_usd": "gross liquidity",
+    "liquid_investments_total_usd": "cash/T-bills + fixed mat.",
+    "live_value_delta_pct": "live delta %",
+    "live_value_delta_usd": "live delta",
     "metric_count": "metrics",
-    "net_liquid_investments_usd": "net liquidity",
+    "net_liquid_investments_usd": "net incl fixed mat.",
+    "notes_payable_and_other_borrowings_usd": "notes & borrowings",
     "payable_for_purchase_of_us_treasury_bills_usd": "T-bill payable",
     "period_count": "periods",
     "period_end": "as of",
@@ -45,6 +51,24 @@ DISPLAY_COLUMN_ALIASES = {
     "identifier_kind": "id kind",
     "query_used": "query",
     "short_term_us_treasury_bills_usd": "T-bills",
+    # Segment history and implied allocation
+    "revenues_usd": "revenues",
+    "capex_usd": "capex",
+    "pretax_earnings_usd": "pre-tax earnings",
+    "owner_earnings_usd": "owner earnings",
+    "pretax_share_pct": "% of total",
+    "implied_value_usd": "implied value",
+    "implied_pe_multiple": "implied P/E",
+    "implied_p_oe_multiple": "implied P/OE",
+    # Book value and OpCo sensitivity
+    "stockholders_equity_usd": "stockholders equity",
+    "book_value_per_brk_b_usd": "BV/BRK.B",
+    "implied_opco_value_usd": "implied opco value",
+    "implied_total_value_usd": "implied total value",
+    "implied_brk_b_price_usd": "implied BRK.B price",
+    "vs_current_price_pct": "vs current price",
+    "scenario": "scenario",
+    "cagr_pct": "CAGR",
 }
 
 DISPLAY_VALUE_ALIASES = {
@@ -52,13 +76,57 @@ DISPLAY_VALUE_ALIASES = {
     "residual_operating_and_other_usd": "residual opco + other",
     "residual_to_pretax_earnings_multiple": "residual / pretax earnings",
     "residual_market_cap_weight": "residual % mkt cap",
-    "public_equity_holdings_blended": "13F equities",
-    "quoted_holdings_plus_net_liquidity": "13F + net liquidity",
+    "public_equity_holdings_blended": "selected 13F equities",
+    "quoted_holdings_plus_net_cash": "13F + net cash/T-bills",
+    "net_cash_and_treasury_bills": "net cash + T-bills",
+    "fixed_maturity_securities_context": "fixed maturity (context)",
+    "deferred_tax_on_equity_context": "deferred tax on equities (context)",
     "residual_operating_and_other": "residual opco + other",
+    "deferred_income_taxes_usd": "deferred taxes",
+    "equity_method_investments_usd": "equity method",
+    "equity_securities_usd": "equity securities",
     "payable_for_purchase_of_us_treasury_bills": "T-bill payable",
+    "notes_payable_and_other_borrowings": "notes & borrowings",
+    "notes_payable_and_other_borrowings_usd": "notes & borrowings",
     "short_term_us_treasury_bills": "T-bills",
+    "total_assets_usd": "total assets",
+    "total_liabilities_usd": "total liabilities",
     "fixed_maturity_securities": "fixed maturities",
     "cash_and_equivalents": "cash",
+    "13f_live_resolved_value_usd": "13F live resolved",
+    "13f_reported_value_usd": "13F reported value",
+    "13f_blended_value_usd": "13F blended value",
+    "13f_live_coverage_pct": "13F live coverage",
+    "13f_selected_basis": "13F basis",
+    "13f_selected_value_usd": "13F selected value",
+    "blended_13f_value_usd": "13F blended value",
+    "brk_b_last_price": "BRK.B last price",
+    "brk_b_price_change_pct": "BRK.B change",
+    "holdings_minus_brk_b_change_pct": "holdings vs BRK.B",
+    "live_price_coverage_pct": "live price coverage",
+    "live_resolved_13f_value_usd": "live 13F value",
+    "market_cap_usd": "market cap",
+    "market_value_live_resolved_usd": "live resolved value",
+    "net_core_liquidity_usd": "net cash + T-bills",
+    "positions_without_live_price": "without live price",
+    "price_brk_b": "BRK.B price",
+    "reported_value_resolved_usd": "reported resolved value",
+    "resolved_holdings_weighted_change_pct": "holdings change",
+    "residual_per_brk_b_usd": "residual / BRK.B",
+    "implied_growth_at_10_pct": "implied growth @ 10%",
+    "resolved_positions_count": "resolved positions",
+    "resolved_positions_live_value_usd": "resolved live value",
+    "resolved_positions_reported_value_usd": "resolved reported value",
+    "segment_pretax_earnings_usd": "segment pre-tax earnings",
+    "top_holdings_minus_brk_b_change_pct": "top holdings vs BRK.B",
+    "top_holdings_reported_value_usd": "top holdings reported",
+    "top_holdings_weighted_change_pct": "top holdings change",
+    "unresolved_13f_value_reported_usd": "unresolved 13F reported",
+    "zero_growth_value_per_brk_b_usd": "zero-growth value / BRK.B",
+    "selected_13f_basis": "13F basis",
+    "selected_13f_value_usd": "selected 13F value",
+    "equity_valuation_basis": "equity basis",
+    "equity_live_pricing_limit": "live pricing limit",
 }
 
 TERMINAL_SECONDARY_COLUMNS = [
@@ -80,7 +148,7 @@ TERMINAL_SECONDARY_COLUMNS = [
     "metrics",
     "as of",
     "period type",
-    "gross liquidity",
+    "cash/T-bills + fixed mat.",
     "goodwill",
     "assets",
     "interest expense",
@@ -133,6 +201,8 @@ def write_json(data: object, path: str | Path) -> None:
 
 def _prepare_display_frame(frame: pd.DataFrame, *, target: str) -> pd.DataFrame:
     display = humanize_frame(frame)
+    # "unit" is a formatting-hint column; always drop it from any rendered output
+    display = display.drop(columns=["unit"], errors="ignore")
     display = display.rename(columns={column: _display_column_name(str(column), target=target) for column in display.columns})
     for column in display.columns:
         if str(column).lower() in {"field", "metric"}:
@@ -252,6 +322,8 @@ def _wrap_terminal_cell(value, *, column: str):
         width = 26
     elif column_name in {"field", "metric"}:
         width = 26
+    elif column_name in {"name", "issuer", "top holding"}:
+        width = 36
     elif column_name in {"concept", "primary document", "description", "filing url", "reason", "website"}:
         width = 30
     elif column_name == "accession":

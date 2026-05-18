@@ -1,6 +1,61 @@
 from valuation.data.providers.sec import SecClient, SecCompany
 
 
+def test_fetch_submissions_uses_persistent_cache(tmp_path):
+    client = SecClient(cache_root=tmp_path)
+    calls = {"count": 0}
+
+    def fake_fetch_json(url):
+        calls["count"] += 1
+        return {"filings": {"recent": {"form": ["10-K"]}}}
+
+    client._fetch_json_uncached = fake_fetch_json
+
+    first = client.fetch_submissions("1067983")
+    second = client.fetch_submissions("1067983")
+
+    assert first == second
+    assert calls["count"] == 1
+
+
+def test_fetch_submissions_refresh_cache_bypasses_cached_payload(tmp_path):
+    first = SecClient(cache_root=tmp_path)
+    first._fetch_json_uncached = lambda url: {"version": 1}
+    assert first.fetch_submissions("1067983") == {"version": 1}
+
+    refreshed = SecClient(cache_root=tmp_path, refresh_cache=True)
+    refreshed._fetch_json_uncached = lambda url: {"version": 2}
+
+    assert refreshed.fetch_submissions("1067983") == {"version": 2}
+
+
+def test_fetch_submissions_refresh_cache_env_bypasses_cached_payload(tmp_path, monkeypatch):
+    first = SecClient(cache_root=tmp_path)
+    first._fetch_json_uncached = lambda url: {"version": 1}
+    assert first.fetch_submissions("1067983") == {"version": 1}
+
+    monkeypatch.setenv("VALUATION_REFRESH_CACHE", "1")
+    refreshed = SecClient(cache_root=tmp_path)
+    refreshed._fetch_json_uncached = lambda url: {"version": 2}
+
+    assert refreshed.fetch_submissions("1067983") == {"version": 2}
+
+
+def test_fetch_submissions_ignores_expired_cache(tmp_path, monkeypatch):
+    client = SecClient(cache_root=tmp_path)
+    monkeypatch.setattr("valuation.data.providers.sec.SEC_SUBMISSIONS_TTL_SECONDS", 0)
+    calls = {"count": 0}
+
+    def fake_fetch_json(url):
+        calls["count"] += 1
+        return {"version": calls["count"]}
+
+    client._fetch_json_uncached = fake_fetch_json
+
+    assert client.fetch_submissions("1067983") == {"version": 1}
+    assert client.fetch_submissions("1067983") == {"version": 2}
+
+
 def test_lookup_company_normalizes_dot_ticker(monkeypatch):
     client = SecClient()
 
@@ -23,7 +78,7 @@ def test_lookup_company_normalizes_dot_ticker(monkeypatch):
 
 
 def test_fetch_company_tickers_uses_cache(monkeypatch):
-    client = SecClient()
+    client = SecClient(use_cache=False)
     calls = {"count": 0}
 
     def fake_fetch_json(url):

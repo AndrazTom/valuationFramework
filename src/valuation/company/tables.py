@@ -452,6 +452,117 @@ def build_valuation_ratios_table(
     return pd.DataFrame(rows)
 
 
+_DEFAULT_OE_MULTIPLES = (10, 15, 20, 25, 30)
+
+
+def build_implied_value_range_table(
+    market_snapshot: Mapping[str, object],
+    financials: Mapping[str, float | None],
+    *,
+    multiples: tuple[int, ...] | list[int] = _DEFAULT_OE_MULTIPLES,
+    period_label: str | None = None,
+) -> pd.DataFrame:
+    """Return implied price per share at different owner-earnings multiples.
+
+    Returns empty DataFrame when owner earnings are zero or negative (table
+    is not meaningful), or when current price or shares are unavailable.
+
+    Columns: multiple, implied_price, current_price, upside_pct, as_of
+    ``upside_pct`` is (implied_price - current_price) / current_price * 100;
+    positive means the stock is below that implied value, negative means it
+    trades above it.
+    """
+    shares = _to_float(market_snapshot.get("shares"))
+    price = _to_float(market_snapshot.get("last_price"))
+    if not price or not shares:
+        return pd.DataFrame()
+
+    net_income = _to_float(financials.get("net_income"))
+    capex = _to_float(financials.get("capex"))
+    da = _to_float(financials.get("depreciation_amortization"))
+    if net_income is None or capex is None or da is None:
+        return pd.DataFrame()
+
+    owner_earnings = net_income + da - capex
+    if owner_earnings <= 0:
+        return pd.DataFrame()
+
+    per_share_oe = owner_earnings / shares
+    rows = []
+    for m in multiples:
+        implied = per_share_oe * m
+        upside = (implied - price) / price  # 0-1 decimal; positive = upside, negative = overvalued
+        rows.append(
+            {
+                "multiple": m,
+                "implied_price": implied,
+                "current_price": price,
+                "upside_pct": upside,
+                "as_of": period_label,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+_DEFAULT_REQUIRED_RETURNS = (0.08, 0.10, 0.12)
+
+
+def build_reverse_dcf_table(
+    market_snapshot: Mapping[str, object],
+    financials: Mapping[str, float | None],
+    *,
+    required_returns: tuple[float, ...] | list[float] = _DEFAULT_REQUIRED_RETURNS,
+    period_label: str | None = None,
+) -> pd.DataFrame:
+    """Return implied perpetual growth rate at each assumed required return.
+
+    Uses the Gordon Growth model solved for g:
+      Market Cap = Owner Earnings / (r - g)  →  g = r - OE / Market Cap
+
+    ``zero_growth_price`` is the price per share that would be justified if
+    owner earnings are expected never to grow: per_share_OE / r.
+
+    Returns empty DataFrame when owner earnings are zero or negative, or when
+    price/shares/market cap are unavailable.
+
+    Columns: assumed_return, implied_growth, zero_growth_price, as_of
+    ``assumed_return`` and ``implied_growth`` are 0-1 decimals.
+    """
+    shares = _to_float(market_snapshot.get("shares"))
+    price = _to_float(market_snapshot.get("last_price"))
+    market_cap = _to_float(market_snapshot.get("market_cap"))
+    if market_cap is None and price and shares:
+        market_cap = price * shares
+    if not price or not shares or not market_cap:
+        return pd.DataFrame()
+
+    net_income = _to_float(financials.get("net_income"))
+    capex = _to_float(financials.get("capex"))
+    da = _to_float(financials.get("depreciation_amortization"))
+    if net_income is None or capex is None or da is None:
+        return pd.DataFrame()
+
+    owner_earnings = net_income + da - capex
+    if owner_earnings <= 0:
+        return pd.DataFrame()
+
+    oe_yield = owner_earnings / market_cap
+    per_share_oe = owner_earnings / shares
+    rows = []
+    for r in required_returns:
+        implied_g = r - oe_yield
+        zero_growth_price = per_share_oe / r
+        rows.append(
+            {
+                "assumed_return": r,
+                "implied_growth": implied_g,
+                "zero_growth_price": zero_growth_price,
+                "as_of": period_label,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def extract_financials_from_company_facts(company_facts: Mapping[str, object]) -> dict[str, float | None]:
     """Extract a flat metric→value dict from SEC companyfacts for ratio calculation."""
     facts_table = company_facts_to_table(company_facts, COMMON_FACT_DEFINITIONS)

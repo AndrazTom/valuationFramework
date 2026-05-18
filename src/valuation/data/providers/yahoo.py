@@ -3,7 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict
+import hashlib
+import json
+import os
+import time
+
+from valuation.config import cache_dir
+
+YAHOO_SNAPSHOT_TTL_SECONDS = 60 * 60
+YAHOO_HISTORY_TTL_SECONDS = 24 * 60 * 60
 
 
 @dataclass(frozen=True)
@@ -29,7 +39,16 @@ class YahooSearchQuote:
 class YahooFinanceClient:
     """Thin wrapper over yfinance for a stable repo-level interface."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        use_cache: bool = True,
+        refresh_cache: bool = False,
+        cache_root: str | Path | None = None,
+    ) -> None:
+        self.use_cache = use_cache and os.getenv("VALUATION_DISABLE_CACHE") != "1"
+        self.refresh_cache = refresh_cache or os.getenv("VALUATION_REFRESH_CACHE") == "1"
+        self.cache_root = Path(cache_root).expanduser() if cache_root is not None else cache_dir() / "yahoo"
         self._snapshot_cache: dict[str, Dict[str, Any]] = {}
         self._history_cache: dict[tuple[str, str, str], "pd.DataFrame"] = {}
 
@@ -38,6 +57,15 @@ class YahooFinanceClient:
         cache_key = ticker.upper()
         if cache_key in self._snapshot_cache:
             return dict(self._snapshot_cache[cache_key])
+        if self.use_cache and not self.refresh_cache:
+            cached = _read_cache_entry(
+                self.cache_root / "snapshots",
+                cache_key,
+                max_age_seconds=YAHOO_SNAPSHOT_TTL_SECONDS,
+            )
+            if isinstance(cached, dict):
+                self._snapshot_cache[cache_key] = dict(cached)
+                return dict(cached)
         yf = _load_yfinance()
         instrument = yf.Ticker(ticker)
         info = _safe_fast_info(instrument)
@@ -100,6 +128,8 @@ class YahooFinanceClient:
             "source": "yfinance",
         }
         self._snapshot_cache[cache_key] = dict(snapshot)
+        if self.use_cache:
+            _write_cache_entry(self.cache_root / "snapshots", cache_key, snapshot)
         return snapshot
 
     def fetch_history(
@@ -114,6 +144,17 @@ class YahooFinanceClient:
         cache_key = (ticker.upper(), period, interval)
         if cache_key in self._history_cache:
             return self._history_cache[cache_key].copy()
+        persistent_cache_key = "|".join(cache_key)
+        if self.use_cache and not self.refresh_cache:
+            cached = _read_cache_entry(
+                self.cache_root / "history",
+                persistent_cache_key,
+                max_age_seconds=YAHOO_HISTORY_TTL_SECONDS,
+            )
+            if isinstance(cached, list):
+                frame = pd.DataFrame(cached)
+                self._history_cache[cache_key] = frame.copy()
+                return frame
         yf = _load_yfinance()
         instrument = yf.Ticker(ticker)
         history = _safe_history(
@@ -125,6 +166,8 @@ class YahooFinanceClient:
         if history.empty:
             empty = pd.DataFrame()
             self._history_cache[cache_key] = empty
+            if self.use_cache:
+                _write_cache_entry(self.cache_root / "history", persistent_cache_key, [])
             return empty.copy()
         normalized = history.reset_index()
         normalized.columns = [
@@ -132,6 +175,12 @@ class YahooFinanceClient:
         ]
         normalized["ticker"] = ticker.upper()
         self._history_cache[cache_key] = normalized.copy()
+        if self.use_cache:
+            _write_cache_entry(
+                self.cache_root / "history",
+                persistent_cache_key,
+                _frame_cache_records(normalized),
+            )
         return normalized
 
     def search_quotes(self, query: str, max_results: int = 10) -> list[YahooSearchQuote]:
@@ -254,3 +303,58 @@ def _statement_attribute(*, statement: str, period: str) -> str:
         ("cashflow", "quarterly"): "quarterly_cashflow",
     }
     return mapping[(statement, period)]
+
+
+def _cache_path(root: Path, key: str) -> Path:
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return root / f"{digest}.json"
+
+
+def _read_cache_entry(root: Path, key: str, *, max_age_seconds: int | None) -> Any | None:
+    path = _cache_path(root, key)
+    if not path.is_file():
+        return None
+    try:
+        entry = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if entry.get("key") != key:
+        return None
+    fetched_at = entry.get("fetched_at")
+    if max_age_seconds is not None:
+        try:
+            age = time.time() - float(fetched_at)
+        except (TypeError, ValueError):
+            return None
+        if age > max_age_seconds:
+            return None
+    return entry.get("payload")
+
+
+def _write_cache_entry(root: Path, key: str, payload: Any) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    path = _cache_path(root, key)
+    tmp_path = path.with_suffix(".tmp")
+    entry = {
+        "key": key,
+        "fetched_at": time.time(),
+        "payload": payload,
+    }
+    tmp_path.write_text(json.dumps(entry), encoding="utf-8")
+    tmp_path.replace(path)
+
+
+def _frame_cache_records(frame) -> list[dict]:
+    records = []
+    for row in frame.to_dict(orient="records"):
+        cached_row = {}
+        for key, value in row.items():
+            if hasattr(value, "isoformat"):
+                try:
+                    cached_row[key] = value.isoformat()
+                    continue
+                except TypeError:
+                    pass
+            cached_row[key] = value
+        records.append(cached_row)
+    return records
