@@ -2,102 +2,89 @@
 
 AI-only note for generic single-company workflows.
 
-This package is where `main` should become useful on its own.
+This package is where `main` provides standalone value for any issuer.
 
-Current intent:
+## Purpose
 
-- accept flexible identifiers such as ticker, CIK, CUSIP, and ISIN when the free data path supports them
+- accept flexible identifiers (ticker, CIK, CUSIP, ISIN) when the free data path supports them
 - resolve them into one canonical company/ticker view
 - produce a TradingView-like baseline focused on financials, filings, and balance-sheet visibility
-- keep the workflow generic and reusable, not Berkshire-specific
+- keep the workflow generic and reusable; no Berkshire assumptions
 
-Rules:
+## Module Ownership
 
-- keep the public entrypoint simple: one identifier in, several clean tables out
-- prefer official SEC facts for financial statements
-- use Yahoo only for search and market snapshot convenience
-- if a metric is missing, leave it blank rather than inventing heuristics
-- keep the compact `overview` layer stable before expanding deeper metric sets
-- current `overview` rows should expose:
-  - `metric`
-  - `value`
-  - `unit`
-  - `source`
-  - `source_table`
-  - `statement`
-  - `period_type`
-  - `as_of`
-  - `status`
-  - `completeness`
-  - `taxonomy`
-  - `concept`
-  - `matched_label`
-  - `form`
-  - `filed`
-  - `reason`
-- `company` should present overview before key financials and statement availability
-- overview completeness should stay simple:
-  - `current`
-  - `stale`
-  - `missing`
-- SEC overview rows should carry real `companyfacts` provenance when available
-- SEC overview concept coverage should stay aligned with statement coverage where concepts are semantically reusable:
-  - bank-style revenue concepts such as `RevenuesNetOfInterestExpense`
-  - alternate net-income concepts such as common-stockholder net income and `ProfitLoss`
-  - equity including noncontrolling interest when plain `StockholdersEquity` is absent or stale
-- Yahoo overview rows should carry statement + matched-label provenance when available
-- market overview rows should carry yfinance provenance in the existing columns:
-  - `taxonomy=yfinance`
-  - `concept` as the snapshot metric name
-  - `matched_label` as the provider field or market-cap derivation source
-- market overview completeness uses `latest_price_date`:
-  - `current` within 7 days
-  - `stale` when older
-  - `missing` when values exist without a quote date
-- unavailable overview reasons should stay metric-specific:
-  - SEC missing rows should distinguish absent concepts, missing requested units, and present-but-blank values
-  - Yahoo missing rows with non-empty frames should distinguish missing labels from labels present with blank values
-- statement availability rows should distinguish:
-  - `available`
-  - `partial`
-  - `unavailable`
-- statement availability should expose expected metric counts and coverage, not just raw present counts
-- partial statement-availability reasons should name the available/expected count and the first missing metrics, capped with `+N more` when needed
+- `service.py` — resolve identifiers; choose SEC-backed vs Yahoo-backed path; fetch provider bundles
+- `tables.py` — company-facing tables: summary, overview, statement availability, valuation ratios, implied value range, reverse DCF
+- `statements.py` — SEC statement concept sets and quarterly reconstruction rules
+- `yahoo_statements.py` — Yahoo label mapping for fallback statements and key financials
+- `comps.py` — multi-ticker TTM comparison table (see below)
+- `ratios.py` — historical per-fiscal-year valuation ratios (see below)
 
-Module ownership:
+## Commands
 
-- `service.py`
-  - resolve identifiers
-  - choose SEC-backed versus Yahoo-backed path
-  - fetch provider bundles concurrently where useful
-- `tables.py`
-  - define compact company-facing tables and overview/availability summaries
-- `statements.py`
-  - own SEC statement concept sets and quarterly reconstruction rules
-- `yahoo_statements.py`
-  - own Yahoo label mapping for fallback statements and Yahoo key financials
+- `./vf company <identifier>` — company overview, key financials, statement availability, recent filings, valuation ratios, implied value range, reverse DCF
+- `./vf comps AAPL MSFT GOOG` — side-by-side TTM comparison across multiple tickers
+- `./vf ratios AAPL --limit 5` — annual historical valuation ratios going back N years
 
-Statement rules:
+## comps.py
+
+`fetch_comps_entries(tickers, ...)` fetches TTM financials in parallel; `build_comps_table(entries)` renders the comparison.
+
+Columns: ticker, name, price, market_cap, revenue, net_income, owner_earnings, oe_margin_pct, pe_ratio, price_to_oe, oe_yield_pct, ev_to_ebitda, implied_growth_pct
+
+`implied_growth_pct = 0.10 − (owner_earnings / market_cap)` (Gordon Growth at 10% required return); shown only when owner earnings are positive.
+
+## ratios.py
+
+- `build_historical_ratios_table(ticker, company_facts, price_history, limit)` — SEC path using annual companyfacts + Yahoo monthly price history
+- `build_historical_ratios_table_from_yahoo(ticker, frames, price_history, limit)` — Yahoo annual frames path
+- `_annual_period_end_dates(company_facts)` — recovers actual FY end dates from raw companyfacts (period labels lose the date)
+- `_price_for_date(date, month_map)` — searches ±3 months in monthly price map for closest bar
+
+Columns: fiscal_year, end_date, price, market_cap, net_income, revenue, owner_earnings, pe_ratio, price_to_oe, oe_yield_pct, pb_ratio, ev_to_ebitda
+
+## Overview Schema
+
+Current `overview` rows expose:
+- `metric`, `value`, `unit`, `source`, `source_table`, `statement`, `period_type`, `as_of`
+- `status`, `completeness`, `taxonomy`, `concept`, `matched_label`, `form`, `filed`, `reason`
+
+Completeness states: `current`, `stale`, `missing`.
+
+Market rows: `current` within 7 days of `latest_price_date`, `stale` otherwise, `missing` when date absent.
+
+SEC rows: `current` when metric is from the latest available period in its statement group; `stale` otherwise.
+
+## Valuation Sections (./vf company)
+
+- **Valuation Ratios**: P/E, P/B, P/S, P/FCF, P/OE, earnings/FCF/OE yields, EV/Revenue, EV/EBITDA, per-share OE — uses TTM financials; rows omitted silently when denominator unavailable
+- **Implied Value Range**: implied price per share at 10x/15x/20x/25x/30x owner earnings multiples; `upside_pct` vs current price (0-1 decimal); only shown when owner earnings are positive
+- **Reverse DCF**: Gordon Growth implied perpetual growth rate at 8%/10%/12% required return; `zero_growth_price` = per-share OE / r; only shown when owner earnings are positive
+
+Both sections work for SEC and Yahoo paths.
+
+## Statement Rules
 
 - SEC quarterly flows may derive quarter values from YTD/FY facts
-- balance-sheet items should stay instant and avoid subtraction logic
-- diluted EPS / diluted shares should prefer direct-quarter values
-- BRK is the one current generic `statements` special case: `valuation.brk.statements` supplements annual/direct-quarterly Class B EPS and equivalent-share rows from filing report tables because SEC companyfacts omits those concepts for Berkshire
-- missing statement rows should be explainable through an explicit diagnostic path; do not make users infer whether a row is absent because the concept is missing, stale, wrong-unit, or has no usable period
-- `./vf statements ... --diagnostics` / `--include-missing` emits `Statement Diagnostics` for SEC-backed statements; keep default statement output clean
-- cash flow statement appends a derived `free_cash_flow = operating_cash_flow - capex` row when both are present; capex is `PaymentsToAcquirePropertyPlantAndEquipment`, a positive outflow
-- `./vf company` emits a `Valuation Ratios` section with P/E, P/B, P/S, P/FCF, P/OE, owner earnings yield, FCF yield, EV/Revenue, EV/EBITDA, and per-share owner earnings using TTM financials; works for both SEC and Yahoo paths; rows are omitted silently when a denominator is unavailable
-- `./vf company` emits an `Implied Value Range` section after Valuation Ratios when owner earnings are positive: shows implied price per share at 10x/15x/20x/25x/30x owner earnings multiples with upside_pct vs current price (0-1 decimal)
-- `./vf company` emits a `Reverse DCF` section when owner earnings are positive: uses Gordon Growth model to show implied perpetual growth rate at 8%/10%/12% required return, plus zero-growth fair value per share at each rate
-- helper heuristics are acceptable only when they are narrow and defensible
-- Yahoo statement handling should stay explicit and shallow; do not build complex inference layers on vendor-standardized rows
-- Yahoo Europe hardening notes from `fix/european-yahoo-statements`:
-  - several European issuers have real Yahoo quarterly gaps; do not "fix" those with synthetic quarter inference in the Yahoo path
-  - bank/insurance statement shapes differ materially from generic industrials; missing `gross_profit`, `current_assets`, or `current_liabilities` can be real
-  - avoid semantic drift in label fallbacks:
-    - do not map `Cash Cash Equivalents And Short Term Investments` to `short_term_investments`
-    - do not map `Total Debt` to `long_term_debt`
-  - after Yahoo-focused fixes, run targeted unit tests plus live README/basic-flow verification before calling the branch merge-ready
-- Berkshire alias note:
-  - plain `BRK` may resolve from Yahoo search to `BRK-B`
-  - when that happens, retry SEC lookup on the resolved Yahoo symbol so `company` and `statements` stay on the SEC-backed path instead of degrading to Yahoo fallback tables
+- balance-sheet items stay instant; no subtraction logic
+- diluted EPS / diluted shares prefer direct-quarter values
+- BRK is the one current `statements` special case: `valuation.brk.statements` supplements Class B EPS/share rows for annual and direct-quarterly income statements when companyfacts omits them
+- missing statement rows are explainable via `--diagnostics` / `--include-missing`; default output stays clean
+- cash flow statement appends `free_cash_flow = operating_cash_flow − capex`; capex = `PaymentsToAcquirePropertyPlantAndEquipment` (always positive in SEC GAAP)
+- SEC concept coverage extends to bank-style revenues (`RevenuesNetOfInterestExpense`) and alternate net-income/equity concepts so industrial defaults do not silently miss financial-institution issuers
+
+## Yahoo Statement Constraints
+
+- label mapping should stay explicit and shallow; no complex inference
+- do not map `Cash Cash Equivalents And Short Term Investments` to `short_term_investments` (double-counts cash)
+- do not map `Total Debt` to `long_term_debt` (includes current debt)
+- European issuers may have genuine Yahoo quarterly gaps; do not synthesize quarters
+- bank/insurance shapes can legitimately lack `gross_profit`, `current_assets`, `current_liabilities`
+
+## Berkshire Alias Note
+
+Plain `BRK` may resolve via Yahoo search to `BRK-B`. When that happens, retry the SEC lookup on the resolved symbol so `company` and `statements` stay on the SEC-backed path.
+
+## Output Order (./vf company)
+
+resolution → company → market snapshot → overview → key financials → statement availability → recent filings → valuation ratios → implied value range → reverse DCF

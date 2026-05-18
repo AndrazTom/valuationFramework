@@ -4,7 +4,7 @@ AI-only module note for future chats.
 
 This subtree should stay generic unless a module is explicitly under `valuation.brk`.
 
-Rules:
+## Rules
 
 - prefer reusable primitives here
 - keep raw values precise in backend tables
@@ -24,3 +24,17 @@ Rules:
   - `company` assembles generic single-security views
   - `reports` renders or exports those views
 - avoid pushing rendering concerns back into `company` or `data`
+
+## Current Top-Level Modules
+
+- `cli.py` — top-level command routing; stays thin
+- `company/` — generic single-security backend (see `company/CLAUDE.md`)
+- `brk/` — Berkshire-specific proving ground (see `brk/CLAUDE.md`)
+- `data/providers/` — SEC and Yahoo transport wrappers (see `data/providers/CLAUDE.md`)
+- `data/normalize/` — table contracts and latest-fact selection (see `data/normalize/CLAUDE.md`)
+- `reports/` — rendering, formatting, export helpers (see `reports/CLAUDE.md`)
+- `securities/` — canonical identifier logic (see `securities/CLAUDE.md`)
+- `watchlist.py` — persistent ticker watchlist at `~/.config/valuationFramework/watchlist.toml`
+  - `./vf watchlist add/remove/list/show` subcommands
+  - `show` delegates to `run_comps` on the full watchlist
+  - case-insensitive deduplication
