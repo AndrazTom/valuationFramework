@@ -20,7 +20,7 @@ Current branch priority:
 - as of 2026-05-18, `brk` is mature; all prior hardening complete (liquidity, segments, SOTP, holdings history, price windows, diagnostics, valuation tables, valuation report, public-equity tax sensitivity)
 - 2026-05-18 live QA sweep passed for `./vf brk holdings --history --filings-limit 2 --limit 10`, `./vf brk sotp --details`, and `./vf brk sotp --price-change 1M`
 - `./vf brk valuation-report` now functional: self-contained Markdown artifact, findings-first order, terminal key-numbers preview, dynamic methodology notes, `--segment-filings`, selectable public-equity basis (`--equity-valuation-basis reported|live`), and public-equity tax context/sensitivity
-- 320 tests passing as of 2026-05-18 (post-hardening batch + buyback/oe-per-share/float/intrinsic additions + logic bug fixes)
+- 324 tests passing as of 2026-05-18 (post-hardening + logic bug fixes + bottoms-up segment valuation)
 - temporary hardening branches should be merged back quickly, then deleted
 
 Long-term direction:
@@ -301,33 +301,26 @@ Steps 1-4 done. Next hardening pass:
 
 These are the highest-value next steps for improving the quality and trust of the BRK valuation output:
 
-**Liability awareness in the SOTP bridge (highest priority conceptual improvement):**
-- The current bridge shows deferred tax on unrealized equity gains as a context row when the balance-sheet filing exposes it
-  - This is a real contingent liability: selling the equity portfolio triggers ~21% capital gains tax on the unrealized gain
-  - The 13F portfolio is valued pre-tax, so the "true" after-tax value is lower if realized
-  - Future refinement: split deferred tax attributable to equity gains from broader deferred tax liabilities where filing detail allows it
-- Insurance float treatment: the methodology notes now explain this correctly; no code change needed unless a separate float-funded investment yield table becomes worthwhile
-- Holding-company debt vs subsidiary debt: balance sheet context already shows `notes_payable_and_other_borrowings`; consider splitting into holding-company debt (Senior notes issued by BRK parent) vs consolidated debt in a future pass
+**Liability awareness in the SOTP bridge** ✓ (completed 2026-05-18):
+- Deferred tax methodology note now shows equity-specific investment DTL (extracted from equity_tax_context, shows fraction of total balance-sheet DTA attributable to unrealized equity gains per 10-K tax note)
+- Subsidiary debt note now shows actual consolidated notes payable from filing balance sheet when available
+- Insurance float and fixed maturity treatment already correct in methodology notes
 
-**Valuation report quality:**
-- Run `./vf brk valuation-report` live and QA the output Markdown for:
-  - Fixed maturity figure is pulled from actual data (not hardcoded ~$25B)
-  - Fixed maturities are framed as insurance investment context, not deployable liquidity
-  - All sections render without empty tables
-  - Methodology notes are factually accurate with actual balance sheet context values
-- Use `--equity-valuation-basis reported` for old filing-date 13F values; default live mode prices all mapped holdings, or use `--equity-live-limit N` for a bounded current-price estimate
-- Consider adding a `--price-change` flag to the valuation report so holdings can be revalued with a window (e.g. 1M price change context)
+**Valuation report quality** ✓ (completed 2026-05-18):
+- Fixed stale "~$25B" fixed maturity fallback → "(see balance sheet context)"
+- All dynamic figures (deferred tax, float, fixed maturity, notes payable) now pulled from actual data when available
+- Segment Bottoms-Up Valuation added to core_md section (items 1+3 combined)
+- Remaining optional enhancement: `--price-change` flag on valuation report for holdings with a window
 
-**Independent operating business valuation (medium-term):**
-- The SOTP residual is market-implied (circular). A higher-quality report would also include a bottoms-up range estimate for the operating businesses
-- BNSF: could use rail-industry EV/EBITDA multiples applied to BNSF segment EBITDA
-- BHE: similar approach with utility multiples, noting the ongoing BHE utility wildfire liability
-- Insurance / other: harder to value independently; keep as residual
-- This is a larger project but the segment data + reverse DCF are already in place to support it
+**Independent operating business valuation** ✓ (completed 2026-05-18):
+- `build_opco_segment_industry_multiples_table` added to `brk/tables.py`
+- Applies segment-specific low/mid/high EV/pre-tax-earnings multiples: BNSF 9-15×, BHE 8-13× (wildfire discount), Manufacturing 7-13×, Insurance 8-14×, Service/Retailing 7-12×, Pilot 6-11×, McLane 5-9×
+- Appends market-implied residual as context row for direct comparison; shows per-BRK-B mid estimate for total and residual
+- Wired into `./vf brk sotp --details` and `./vf brk valuation-report` core section
+- Methodology note explains it is an independent cross-check, not a precise liquidation model
 
-**Merge readiness:**
-- after next live QA sweep, port `brk` clean to `main`
-- keep pushing reusable pieces back into `main` when genuinely generic
+**Merge readiness** ✓ (completed 2026-05-18):
+- `brk` branch fast-forwarded to `main` (all brk-specific code was already developed on `main`)
 
 Latest Berkshire live check on 2026-05-16:
 
