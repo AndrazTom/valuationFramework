@@ -20,7 +20,7 @@ Current branch priority:
 - as of 2026-05-18, `brk` is mature; all prior hardening complete (liquidity, segments, SOTP, holdings history, price windows, diagnostics, valuation tables, valuation report, public-equity tax sensitivity)
 - 2026-05-18 live QA sweep passed for `./vf brk holdings --history --filings-limit 2 --limit 10`, `./vf brk sotp --details`, and `./vf brk sotp --price-change 1M`
 - `./vf brk valuation-report` now functional: self-contained Markdown artifact, findings-first order, terminal key-numbers preview, dynamic methodology notes, `--segment-filings`, selectable public-equity basis (`--equity-valuation-basis reported|live`), and public-equity tax context/sensitivity
-- 316 tests passing as of 2026-05-18 (post-hardening batch + buyback/oe-per-share/float/intrinsic additions)
+- 320 tests passing as of 2026-05-18 (post-hardening batch + buyback/oe-per-share/float/intrinsic additions + logic bug fixes)
 - temporary hardening branches should be merged back quickly, then deleted
 
 Long-term direction:
@@ -469,6 +469,17 @@ Next concrete tasks (updated 2026-05-18):
 - `Implied Value Range` and `Reverse DCF` confirmed for both AAPL and BRK-B
 - note: BRK-B owner earnings ARE available from SEC TTM (D&A + capex + net income all in Q1 2026 10-Q); earlier assumption of suppression was incorrect
 - BRK quarterly diagnostics confirmed: diluted_eps and diluted_shares absent from SEC companyfacts; operating_income stale since 2013
+
+**7. Logic bug hardening sweep completed 2026-05-18:**
+- `build_book_value_history_table` CAGR direction fixed: period_cols were newest-first; now sorted oldest-first before `_row_cagr` (same pattern as all segment/float/buyback tables)
+- `_safe_float` duplicate removed from `brk/tables.py`; all sites use `_none_if_nan_float`
+- Yahoo capex sign normalized to positive magnitude (abs) at all extraction and derived-row computation sites: `extract_financials_from_yahoo_frames`, `extract_financials_ttm_from_yahoo_frames`, `build_historical_ratios_table_from_yahoo`, `_append_yahoo_owner_earnings_row`, `_add_yahoo_free_cash_flow_row` — FCF and owner earnings previously inflated by ~2× capex
+- `service.py` SEC bundle fetch wrapped in try/except: SEC network/parse failure no longer crashes when Yahoo market data succeeds; `.get("company_facts")` replaces hard key access
+- `yahoo.py` history Close read switched from `float()` to `_coerce_float()` to avoid TypeError when column absent; `latest_date` guarded with `hasattr(strftime)` to avoid AttributeError on non-DatetimeIndex
+- `yahoo.py` `latest_price_date` now populated with today's date when `fast_info` supplies `last_price`; previously always `None` in the fast-info path, causing market rows to appear stale/missing
+- `_price_by_month_map` date column search list extended with `"datetime"` for lowercased intraday yfinance index name; removes silent all-None price map for intraday-resolution history
+- `_emit_sections`/`_named_tables` in `brk/cli.py` annotated `Sequence` (not `Iterable`) since they iterate twice
+- 4 new tests: book value CAGR direction, SEC failure isolation, `latest_price_date` from fast-info, missing Close safe degradation; suite at 320
 
 ### Deferred / lower priority
 

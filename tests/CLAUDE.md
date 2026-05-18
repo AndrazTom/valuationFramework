@@ -11,7 +11,7 @@ Rules:
 - when adding a new `company` section, test both file outputs and JSON bundle keys
 - CLI tests should stay offline and use monkeypatches or fixtures rather than live providers
 - keep assertions focused on backend behavior and stable contracts, not incidental table formatting
-- current full-suite baseline after hardening batch: `316 passed`
+- current full-suite baseline after hardening batch: `320 passed`
 
 Coverage map:
 
@@ -36,3 +36,7 @@ Coverage map:
 - `test_brk_tables.py` covers `build_buyback_history_table`: basic buyback row, CAGR direction (oldest→newest), implied price per share when shares-retired data present, per-current-share row, and empty return when concept absent
 - `test_ratios.py` covers `oe_per_share` in both SEC and Yahoo paths
 - `test_brk_tables.py` covers `build_insurance_float_table`: basic multi-component, positive CAGR direction, partial components (only losses), empty return when concepts absent
+- `test_brk_tables.py` covers `build_book_value_history_table` CAGR direction: positive CAGR for growing equity (guards against newest-first bug)
+- `test_company_service.py` covers SEC failure isolation: SEC bundle crash does not propagate when Yahoo market data succeeds
+- `test_yahoo_provider.py` covers `latest_price_date` populated from fast-info path, and missing Close column safe degradation
+- `test_ratios.py` Yahoo path `oe_per_share` uses correct capex sign (abs normalization)
