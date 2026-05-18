@@ -76,6 +76,8 @@ Both sections work for SEC and Yahoo paths.
 ## Yahoo Statement Constraints
 
 - label mapping should stay explicit and shallow; no complex inference
+- revenue fallbacks: `"Total Revenue"` → `"Net Revenue"` → `"Total Net Revenue"` (covers banks where top line is net interest + fees)
+- stockholders_equity fallback: `"Common Stock Equity"` (covers European issuers where Yahoo omits `"Stockholders Equity"`)
 - do not map `Cash Cash Equivalents And Short Term Investments` to `short_term_investments` (double-counts cash)
 - do not map `Total Debt` to `long_term_debt` (includes current debt)
 - European issuers may have genuine Yahoo quarterly gaps; do not synthesize quarters

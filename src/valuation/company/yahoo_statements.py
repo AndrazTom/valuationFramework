@@ -9,7 +9,11 @@ import pandas as pd
 
 YAHOO_STATEMENT_LABELS = {
     "income": {
-        "revenue": ("Total Revenue",),
+        "revenue": (
+            "Total Revenue",
+            "Net Revenue",
+            "Total Net Revenue",
+        ),
         "gross_profit": ("Gross Profit",),
         "operating_income": ("Operating Income", "EBIT"),
         "pretax_income": ("Pretax Income",),
@@ -38,7 +42,11 @@ YAHOO_STATEMENT_LABELS = {
             "Long Term Capital Lease Obligation",
         ),
         "total_liabilities": ("Total Liabilities Net Minority Interest", "Total Liabilities"),
-        "stockholders_equity": ("Stockholders Equity", "Total Equity Gross Minority Interest"),
+        "stockholders_equity": (
+            "Stockholders Equity",
+            "Total Equity Gross Minority Interest",
+            "Common Stock Equity",
+        ),
     },
     "cashflow": {
         "operating_cash_flow": ("Operating Cash Flow", "Cash Flow From Continuing Operating Activities"),
