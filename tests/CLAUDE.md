@@ -11,7 +11,7 @@ Rules:
 - when adding a new `company` section, test both file outputs and JSON bundle keys
 - CLI tests should stay offline and use monkeypatches or fixtures rather than live providers
 - keep assertions focused on backend behavior and stable contracts, not incidental table formatting
-- current full-suite baseline after Yahoo bank/insurance hardening: `298 passed`
+- current full-suite baseline after ratios builder coverage: `303 passed`
 
 Coverage map:
 
@@ -29,4 +29,5 @@ Coverage map:
 - `test_brk_tables.py` covers reported vs live selected 13F equity values, live revaluation detail rows, and public-equity tax context/sensitivity tables for the BRK SOTP/report tables
 - `test_brk_tables.py` also covers tax edge cases: None context, empty equity note, underwater portfolio, after-tax value invariant
 - `test_yahoo_statement_tables.py` covers bank/insurance shapes (no gross_profit, no current items), Net Revenue fallback, TTM on partial quarters, Common Stock Equity fallback
+- `test_ratios.py` now covers `build_historical_ratios_table` (SEC path) and `build_historical_ratios_table_from_yahoo` in addition to helpers
 - `test_yahoo_provider.py` covers Yahoo provider fallbacks when fast-info or history calls fail

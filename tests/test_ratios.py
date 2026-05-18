@@ -11,6 +11,8 @@ from valuation.company.ratios import (
     _price_by_month_map,
     _price_for_date,
     _r,
+    build_historical_ratios_table,
+    build_historical_ratios_table_from_yahoo,
 )
 
 
@@ -137,3 +139,89 @@ def test_annual_period_end_dates_limit():
 def test_annual_period_end_dates_empty():
     result = _annual_period_end_dates({"facts": {}}, limit=5)
     assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# build_historical_ratios_table (SEC path)
+# ---------------------------------------------------------------------------
+
+def _make_full_company_facts(years: list[int]) -> dict:
+    """Minimal companyfacts with income, balance, cashflow for given FY years."""
+    def _entries(vals: dict[int, float]) -> list[dict]:
+        return [
+            {"end": f"{y}-12-31", "val": v, "fp": "FY", "form": "10-K", "filed": f"{y+1}-02-01", "accn": f"acc-{y}"}
+            for y, v in vals.items()
+        ]
+
+    return {
+        "facts": {
+            "us-gaap": {
+                "NetIncomeLoss": {"units": {"USD": _entries({y: 10_000_000_000 for y in years})}},
+                "Revenues": {"units": {"USD": _entries({y: 100_000_000_000 for y in years})}},
+                "WeightedAverageNumberOfDilutedSharesOutstanding": {"units": {"shares": _entries({y: 2_000_000_000 for y in years})}},
+                "CashAndCashEquivalentsAtCarryingValue": {"units": {"USD": _entries({y: 20_000_000_000 for y in years})}},
+                "StockholdersEquity": {"units": {"USD": _entries({y: 100_000_000_000 for y in years})}},
+                "LongTermDebt": {"units": {"USD": _entries({y: 15_000_000_000 for y in years})}},
+                "OperatingIncomeLoss": {"units": {"USD": _entries({y: 12_000_000_000 for y in years})}},
+                "DepreciationAndAmortization": {"units": {"USD": _entries({y: 3_000_000_000 for y in years})}},
+                "PaymentsToAcquirePropertyPlantAndEquipment": {"units": {"USD": _entries({y: 5_000_000_000 for y in years})}},
+                "NetCashProvidedByUsedInOperatingActivities": {"units": {"USD": _entries({y: 18_000_000_000 for y in years})}},
+            }
+        }
+    }
+
+
+def test_build_historical_ratios_table_basic():
+    company_facts = _make_full_company_facts([2024, 2023])
+    price_history = pd.DataFrame([
+        {"date": "2024-12-01", "close": 200.0},
+        {"date": "2023-12-01", "close": 180.0},
+    ])
+    result = build_historical_ratios_table(company_facts, price_history, limit=2)
+    assert not result.empty
+    assert "fiscal_year" in result.columns
+    assert "pe_ratio" in result.columns
+    fy2024 = result[result["fiscal_year"] == "FY 2024"].iloc[0]
+    assert fy2024["price"] == pytest.approx(200.0)
+    assert fy2024["pe_ratio"] is not None
+
+
+def test_build_historical_ratios_table_no_price_history():
+    company_facts = _make_full_company_facts([2024])
+    result = build_historical_ratios_table(company_facts, pd.DataFrame(), limit=1)
+    assert not result.empty
+    fy2024 = result[result["fiscal_year"] == "FY 2024"].iloc[0]
+    assert fy2024["price"] is None
+    assert fy2024["pe_ratio"] is None
+
+
+def test_build_historical_ratios_table_empty_company_facts():
+    result = build_historical_ratios_table({"facts": {}}, pd.DataFrame(), limit=5)
+    assert result.empty
+
+
+# ---------------------------------------------------------------------------
+# build_historical_ratios_table_from_yahoo
+# ---------------------------------------------------------------------------
+
+def test_build_historical_ratios_table_from_yahoo_basic():
+    ts1 = pd.Timestamp("2024-12-31")
+    ts2 = pd.Timestamp("2023-12-31")
+    income = pd.DataFrame({ts1: {"Total Revenue": 100e9, "Net Income": 10e9, "Diluted Average Shares": 2e9}, ts2: {"Total Revenue": 90e9, "Net Income": 9e9, "Diluted Average Shares": 2e9}})
+    balance = pd.DataFrame({ts1: {"Total Assets": 300e9, "Cash And Cash Equivalents": 20e9, "Long Term Debt": 15e9, "Stockholders Equity": 100e9}, ts2: {"Total Assets": 280e9, "Cash And Cash Equivalents": 18e9, "Long Term Debt": 14e9, "Stockholders Equity": 95e9}})
+    cashflow = pd.DataFrame({ts1: {"Operating Cash Flow": 18e9, "Capital Expenditure": -5e9, "Depreciation And Amortization": 3e9}, ts2: {"Operating Cash Flow": 16e9, "Capital Expenditure": -4e9, "Depreciation And Amortization": 2.8e9}})
+    price_history = pd.DataFrame([
+        {"date": "2024-12-01", "close": 200.0},
+        {"date": "2023-12-01", "close": 180.0},
+    ])
+    result = build_historical_ratios_table_from_yahoo(income, balance, cashflow, price_history, limit=2)
+    assert not result.empty
+    assert "fiscal_year" in result.columns
+    fy2024 = result[result["fiscal_year"] == "FY 2024"].iloc[0]
+    assert fy2024["revenue"] == pytest.approx(100e9)
+    assert fy2024["net_income"] == pytest.approx(10e9)
+
+
+def test_build_historical_ratios_table_from_yahoo_empty_income():
+    result = build_historical_ratios_table_from_yahoo(pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
+    assert result.empty
