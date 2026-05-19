@@ -192,8 +192,11 @@ def render_terminal_table(frame: pd.DataFrame, *, max_width: int | None = None) 
     display = _prepare_display_frame(frame, target="terminal")
     width = max_width or _terminal_width()
     display = _fit_terminal_frame(display, max_width=width)
-    if width > 0 and _rendered_width(display) > width and _terminal_period_columns(display):
-        return _tabulate_terminal_period_blocks(display, max_width=width)
+    if width > 0 and _rendered_width(display) > width:
+        if _terminal_period_columns(display):
+            return _tabulate_terminal_period_blocks(display, max_width=width)
+        if len(display.columns) > 2:
+            return _tabulate_terminal_column_blocks(display, max_width=width)
     return _tabulate_terminal(display)
 
 
@@ -292,6 +295,29 @@ def _tabulate_terminal_period_blocks(frame: pd.DataFrame, *, max_width: int) -> 
         blocks.append(f"Period block {index}/{len(chunks)}")
         blocks.append(_tabulate_terminal(frame.loc[:, columns]))
     return "\n\n".join(blocks)
+
+
+def _tabulate_terminal_column_blocks(frame: pd.DataFrame, *, max_width: int) -> str:
+    """Split a wide non-period table into column blocks, repeating the first column as anchor."""
+    all_cols = list(frame.columns)
+    anchor = [all_cols[0]]
+    remaining = all_cols[1:]
+    blocks: list[str] = []
+    current: list[str] = []
+    for col in remaining:
+        candidate = frame[anchor + current + [col]]
+        if current and _rendered_width(candidate) > max_width:
+            blocks.append(_tabulate_terminal(frame[anchor + current]))
+            current = [col]
+        else:
+            current.append(col)
+    if current:
+        blocks.append(_tabulate_terminal(frame[anchor + current]))
+    if len(blocks) <= 1:
+        return _tabulate_terminal(frame)
+    return "\n\n".join(
+        f"Column block {i + 1}/{len(blocks)}\n{b}" for i, b in enumerate(blocks)
+    )
 
 
 def _terminal_period_column_chunks(
