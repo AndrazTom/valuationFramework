@@ -42,7 +42,7 @@ def run_portfolio_show(
     outdir: str,
     output_format: str,
     use_cache: bool = True,
-    fx_auto: bool = False,
+    fx_auto: bool = True,
 ) -> int:
     """Show open positions with cost basis, unrealized P&L, and Slovenian tax tier."""
     paths = _resolve_statement_paths(file)
@@ -73,7 +73,7 @@ def run_portfolio_tax(
     year: int,
     outdir: str,
     output_format: str,
-    fx_auto: bool = False,
+    fx_auto: bool = True,
 ) -> int:
     """Show realized gains for a tax year and compute Slovenian CGT owed."""
     paths = _resolve_statement_paths(file)
@@ -110,7 +110,7 @@ def run_portfolio_dividends(
     year: int,
     outdir: str,
     output_format: str,
-    fx_auto: bool = False,
+    fx_auto: bool = True,
 ) -> int:
     """Show dividend income for a tax year and compute Slovenian dividend tax owed."""
     paths = _resolve_statement_paths(file)
@@ -271,8 +271,8 @@ def _build_tax_summary(realized: list[RealizedGain], year: int) -> pd.DataFrame:
         {
             "metric": "Note",
             "value": (
-                "Some EUR amounts missing (non-EUR trades, no FX rates). "
-                "Re-run with --fx-auto or provide ECB rates. Tax figures are partial."
+                "Some EUR amounts missing (non-EUR trades, ECB FX fetch returned no data). "
+                "Tax figures are partial."
                 if needs_fx
                 else "Losses offset gains within the same year (ZDoh-2). Verify with FURS."
             ),
@@ -340,7 +340,7 @@ def _build_dividend_summary(
         {
             "metric": "Note",
             "value": (
-                "Some EUR amounts missing — re-run with --fx-auto for full totals."
+                "Some EUR amounts missing — ECB FX fetch returned no data for these dates."
                 if partial
                 else "Verify with FURS before filing (DOHDSP-2 form)."
             ),
@@ -458,7 +458,7 @@ def _resolve_statement_paths(file: str | None) -> list[Path]:
 
 def _load_combined_statement(
     paths: list[Path],
-    fx_auto: bool = False,
+    fx_auto: bool = True,
 ):
     """Load and merge trades/dividends from one or more statement files.
 
@@ -506,7 +506,7 @@ def _load_combined_statement(
     return deduped_trades, deduped_divs, meta
 
 
-def _load_flex_as_trades(path: Path, *, fx_auto: bool = False):
+def _load_flex_as_trades(path: Path, *, fx_auto: bool = True):
     """Load a Flex Query XML and return (trades, dividends, meta).
 
     The flex path uses IBKR's pre-computed FIFO <Lot> elements directly.
@@ -642,7 +642,7 @@ def _warn_needs_fx(open_lots: list[Lot]) -> None:
     if non_eur:
         print(
             f"\nNote: EUR cost basis unavailable for {', '.join(sorted(non_eur))} "
-            "(non-EUR trades). Re-run with --fx-auto to fetch ECB historical rates.",
+            "(non-EUR trades). ECB FX fetch failed or returned no data for these dates.",
             file=sys.stderr,
         )
 
@@ -652,6 +652,6 @@ def _warn_needs_fx_realized(realized: list[RealizedGain]) -> None:
     if non_eur:
         print(
             f"\nNote: EUR amounts incomplete for {', '.join(sorted(non_eur))}. "
-            "Re-run with --fx-auto for full tax calculation.",
+            "ECB FX fetch failed or returned no data for these dates.",
             file=sys.stderr,
         )

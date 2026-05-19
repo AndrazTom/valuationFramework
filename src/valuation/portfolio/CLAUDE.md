@@ -25,8 +25,8 @@ The `.gitignore` already excludes `*.activity.csv`, `*_statement.csv`, `ibkr_*.c
 # Dividend income + SI dividend tax (with WHT credit)
 ./vf portfolio dividends --file /path/to/statement.csv --year 2026
 
-# Auto-fetch ECB historical FX rates for non-EUR trades
-./vf portfolio tax --file /path/to/statement.csv --year 2026 --fx-auto
+# Disable ECB FX auto-fetch (on by default)
+./vf portfolio tax --file /path/to/statement.csv --year 2026 --no-fx-auto
 ```
 
 ## Architecture
@@ -71,6 +71,11 @@ In IBKR Account Management:
 - CGT: reported on DOHDSP-1 form, due 28 Feb of following year (verify with FURS)
 - Dividends: reported on DOHDSP-2 form; foreign WHT from 15% US treaty rate offsets 25% SI rate
 - Losses offset gains within the same tax year only; no carry-forward under ZDoh-2
+- Real estate capital losses (same year) also offset securities CGT — both fall under dohodek iz kapitala
+- **Wash-sale rule**: 30-day window — selling at a loss and buying back the *same* instrument within
+  30 days disallows the loss. Workaround: buy a *different* instrument for equivalent exposure, or
+  wait 30 days. FIFO constraint means you cannot selectively sell a specific loss lot if earlier
+  (gain) lots of the same symbol exist; use a different instrument to harvest the loss cleanly.
 - Verify all rates and deadlines with FURS (https://www.fu.gov.si) before filing
 
 ## Flex Query vs Activity Statement

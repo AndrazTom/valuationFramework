@@ -199,9 +199,11 @@ def _register_portfolio_parser(subparsers) -> None:
     show_parser.add_argument("--outdir", default="outputs/tables")
     show_parser.add_argument("--format", choices=("table", "json"), default="table")
     show_parser.add_argument(
-        "--fx-auto",
-        action="store_true",
-        help="Fetch ECB historical FX rates to convert non-EUR trades to EUR.",
+        "--no-fx-auto",
+        action="store_false",
+        dest="fx_auto",
+        default=True,
+        help="Disable automatic ECB historical FX rate fetching (on by default).",
     )
 
     tax_parser = portfolio_sub.add_parser(
@@ -222,9 +224,11 @@ def _register_portfolio_parser(subparsers) -> None:
     tax_parser.add_argument("--outdir", default="outputs/tables")
     tax_parser.add_argument("--format", choices=("table", "json"), default="table")
     tax_parser.add_argument(
-        "--fx-auto",
-        action="store_true",
-        help="Fetch ECB historical FX rates to convert non-EUR trades to EUR.",
+        "--no-fx-auto",
+        action="store_false",
+        dest="fx_auto",
+        default=True,
+        help="Disable automatic ECB historical FX rate fetching (on by default).",
     )
 
     div_parser = portfolio_sub.add_parser(
@@ -245,9 +249,11 @@ def _register_portfolio_parser(subparsers) -> None:
     div_parser.add_argument("--outdir", default="outputs/tables")
     div_parser.add_argument("--format", choices=("table", "json"), default="table")
     div_parser.add_argument(
-        "--fx-auto",
-        action="store_true",
-        help="Fetch ECB historical FX rates to convert non-EUR dividends to EUR.",
+        "--no-fx-auto",
+        action="store_false",
+        dest="fx_auto",
+        default=True,
+        help="Disable automatic ECB historical FX rate fetching (on by default).",
     )
 
 
@@ -763,7 +769,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.command == "portfolio":
             import datetime as _dt
             year = getattr(args, "year", None) or _dt.date.today().year
-            fx_auto = getattr(args, "fx_auto", False)
+            fx_auto = getattr(args, "fx_auto", True)
             if args.portfolio_command == "show":
                 return run_portfolio_show(
                     file=getattr(args, "file", None),
