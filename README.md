@@ -192,4 +192,3 @@ Prints a machine-readable bundle to stdout and writes per-section `.json` files 
 
 - `README.md` — this file
 - `docs/portfolio.md` — portfolio commands, IBKR Flex Query setup, FURS filing guide
-- `docs/ARCHITECTURE.md` — AI/dev notes: product-area split, repo structure, hardening plan

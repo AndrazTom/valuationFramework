@@ -750,6 +750,32 @@ Next concrete tasks (updated 2026-05-18):
 - keep tests that protect real behavior; skip decorative or low-signal tests
 - preserve a clean path for later API/UI work without adding that surface too early
 
+## Product Areas
+
+Two areas, one repo.
+
+### Portfolio
+- personal IBKR portfolio accounting and Slovenian tax reporting
+- import Flex Query XML → track holdings, realized gains, dividends, WHT, FX
+- produce eDavki XML: `Doh-KDVP`, `Doh-Div`, `Doh-Obr`
+- correctness standard: outputs auditable from source broker rows; private files stay gitignored
+- user-facing guide: `docs/portfolio.md`
+
+### Research
+- company and security analysis via SEC EDGAR + Yahoo Finance
+- identifier resolution (ticker, CIK, ISIN, CUSIP), statements, ratios, comps, watchlist, BRK SOTP
+- possible future CLI grouping: `./vf research company/statements/ratios/comps/watchlist/brk`
+
+## One Repo Or Two
+
+Keep one repo. Both areas share CLI, cache, FX, table rendering, tests, and provider conventions.
+Portfolio and research overlap in real use (holdings → company research). Split only if:
+- portfolio must go private while research stays public
+- portfolio logic becomes jurisdiction-specific enough for separate release
+- research becomes a reusable public package with a different audience
+
+Logical split if it happens: `valuation-research` vs `portfolio-tax`.
+
 ## Commit Authorship
 
 - Do NOT add `Co-Authored-By: Claude` or any AI co-author trailers to commits
