@@ -192,7 +192,7 @@ def test_render_terminal_table_splits_period_columns_to_fit_width():
 def test_render_terminal_table_uses_compact_value_aliases():
     frame = pd.DataFrame(
         [
-            {"field": "residual_to_pretax_earnings_multiple", "value": 7.2},
+            {"field": "residual_to_aftertax_earnings_multiple", "value": 7.2},
             {"field": "short_term_us_treasury_bills", "value": 286_000_000_000.0},
             {"field": "resolved_holdings_weighted_change_pct", "value": 0.045},
             {"field": "top_holdings_minus_brk_b_change_pct", "value": 0.027},
@@ -201,7 +201,7 @@ def test_render_terminal_table_uses_compact_value_aliases():
 
     rendered = render_terminal_table(frame)
 
-    assert "residual / pretax earnings" in rendered
+    assert "residual / after-tax" in rendered
     assert "T-bills" in rendered
     assert "holdings change" in rendered
     assert "top holdings vs BRK.B" in rendered

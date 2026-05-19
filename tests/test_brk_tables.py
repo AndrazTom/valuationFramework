@@ -2069,28 +2069,28 @@ def test_build_opco_segment_industry_multiples_basic():
 
 
 def test_build_opco_segment_industry_multiples_uses_correct_multiples():
-    """BNSF mid multiple = 12; BHE mid multiple = 11. Implied EVs reflect this."""
+    """BNSF mid multiple = 16; BHE mid multiple = 14. Applied to after-tax earnings (×0.75)."""
     from valuation.brk.tables import build_opco_segment_industry_multiples_table
     bundle = _make_multiples_bundle(bnsf_pretax=10 * B, bhe_pretax=5 * B, mktcap=2000 * B)
     reference = pd.DataFrame()
     table = build_opco_segment_industry_multiples_table(bundle, reference, yahoo_client=FakeYahooClient())
     bnsf = table[table["segment"] == "BNSF"].iloc[0]
     bhe = table[table["segment"] == "BHE"].iloc[0]
-    assert bnsf["multiple_mid"] == pytest.approx(12.0)
-    assert bhe["multiple_mid"] == pytest.approx(11.0)
-    assert bnsf["implied_ev_mid_usd"] == pytest.approx(10 * B * 12.0)
-    assert bhe["implied_ev_mid_usd"] == pytest.approx(5 * B * 11.0)
+    assert bnsf["multiple_mid"] == pytest.approx(16.0)
+    assert bhe["multiple_mid"] == pytest.approx(14.0)
+    assert bnsf["implied_value_mid_usd"] == pytest.approx(10 * B * 0.75 * 16.0)
+    assert bhe["implied_value_mid_usd"] == pytest.approx(5 * B * 0.75 * 14.0)
 
 
 def test_build_opco_segment_industry_multiples_total_sums_segments():
-    """Total implied_ev_mid_usd equals sum of individual segment mid EVs."""
+    """Total implied_value_mid_usd equals sum of individual segment mid values."""
     from valuation.brk.tables import build_opco_segment_industry_multiples_table
     bundle = _make_multiples_bundle(bnsf_pretax=10 * B, bhe_pretax=5 * B, mktcap=2000 * B)
     reference = pd.DataFrame()
     table = build_opco_segment_industry_multiples_table(bundle, reference, yahoo_client=FakeYahooClient())
     total = table[table["segment"] == "Total Operating Businesses"].iloc[0]
-    seg_sum = (10 * B * 12.0) + (5 * B * 11.0)
-    assert total["implied_ev_mid_usd"] == pytest.approx(seg_sum)
+    seg_sum = (10 * B * 0.75 * 16.0) + (5 * B * 0.75 * 14.0)
+    assert total["implied_value_mid_usd"] == pytest.approx(seg_sum)
 
 
 def test_build_opco_segment_industry_multiples_empty_without_segments():

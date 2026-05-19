@@ -1838,7 +1838,8 @@ def build_segment_implied_allocation_table(
         pretax = float(row["earnings_before_income_taxes_usd"])
         share_pct = pretax / total_pretax
         implied_val = residual * share_pct
-        implied_pe = implied_val / pretax if pretax != 0 else None
+        aftertax = pretax * _BRK_OPCO_TAX_FACTOR
+        implied_pe = implied_val / aftertax if aftertax != 0 else None
         rec: dict = {
             "segment": row.get("segment"),
             "pretax_earnings_usd": pretax,
@@ -1852,20 +1853,20 @@ def build_segment_implied_allocation_table(
             if dna is not None and capex is not None and not any(
                 isinstance(v, float) and pd.isna(v) for v in [dna, capex]
             ):
-                oe = pretax + float(dna) - float(capex)
+                oe = aftertax + float(dna) - float(capex)
                 rec["owner_earnings_usd"] = oe
                 rec["implied_p_oe_multiple"] = implied_val / oe if oe != 0 else None
         rows.append(rec)
     if not rows:
         return pd.DataFrame()
     result = pd.DataFrame(rows)
-    # Append totals row
+    total_aftertax = total_pretax * _BRK_OPCO_TAX_FACTOR
     total: dict = {
         "segment": "Total",
         "pretax_earnings_usd": total_pretax,
         "pretax_share_pct": 1.0,
         "implied_value_usd": residual,
-        "implied_pe_multiple": residual / total_pretax if total_pretax != 0 else None,
+        "implied_pe_multiple": residual / total_aftertax if total_aftertax != 0 else None,
     }
     if has_oe and "owner_earnings_usd" in result.columns:
         total_oe = pd.to_numeric(result["owner_earnings_usd"], errors="coerce").sum()
@@ -1924,15 +1925,16 @@ def build_opco_valuation_sensitivity_table(
             total_dna = dna_vals.sum() if dna_vals.notna().any() else None
             total_capex = capex_vals.sum() if capex_vals.notna().any() else None
             if all(v is not None for v in [total_pt, total_dna, total_capex]):
-                oe = float(total_pt) + float(total_dna) - float(total_capex)
+                oe = float(total_pt) * _BRK_OPCO_TAX_FACTOR + float(total_dna) - float(total_capex)
                 if oe > 0:
                     owner_earnings = oe
-                    earnings_label = "owner earnings"
+                    earnings_label = "after-tax OE"
         if owner_earnings is None and "earnings_before_income_taxes_usd" in segments.columns:
             pt_vals = pd.to_numeric(segments["earnings_before_income_taxes_usd"], errors="coerce")
             total_pt = float(pt_vals.sum()) if pt_vals.notna().any() else None
             if total_pt is not None and total_pt > 0:
-                owner_earnings = total_pt
+                owner_earnings = total_pt * _BRK_OPCO_TAX_FACTOR
+                earnings_label = "after-tax earnings"
     if owner_earnings is None or owner_earnings <= 0:
         return pd.DataFrame()
 
@@ -1952,19 +1954,19 @@ def build_opco_valuation_sensitivity_table(
     return pd.DataFrame(rows)
 
 
-# EV / pre-tax-earnings multiples (low, mid, high) by BRK reporting segment name.
-# Rail and utilities are capital-intensive; insurance and distribution trade at lower multiples.
-# BHE high end is discounted vs generic utility peers given disclosed wildfire liability.
+# P/E-style multiples (low, mid, high) applied to after-tax earnings approximation
+# (pre-tax × _BRK_OPCO_TAX_FACTOR). Calibrated as equity-value multiples for comparison
+# to the market-implied residual. BHE discounted vs generic utility peers given wildfire liability.
 _SEGMENT_INDUSTRY_MULTIPLES: dict[str, tuple[float, float, float]] = {
-    "BNSF": (9.0, 12.0, 15.0),
-    "BHE": (8.0, 11.0, 13.0),
-    "Manufacturing": (7.0, 10.0, 13.0),
-    "Service and Retailing": (7.0, 9.0, 12.0),
-    "Pilot": (6.0, 8.0, 11.0),
-    "McLane": (5.0, 7.0, 9.0),
-    "Insurance Group": (8.0, 11.0, 14.0),
+    "BNSF": (12.0, 16.0, 20.0),
+    "BHE": (10.0, 14.0, 17.0),
+    "Manufacturing": (10.0, 13.0, 17.0),
+    "Service and Retailing": (9.0, 12.0, 16.0),
+    "Pilot": (8.0, 11.0, 15.0),
+    "McLane": (7.0, 9.0, 12.0),
+    "Insurance Group": (11.0, 14.0, 18.0),
 }
-_SEGMENT_INDUSTRY_MULTIPLES_DEFAULT: tuple[float, float, float] = (7.0, 9.0, 12.0)
+_SEGMENT_INDUSTRY_MULTIPLES_DEFAULT: tuple[float, float, float] = (9.0, 12.0, 16.0)
 
 
 def build_opco_segment_industry_multiples_table(
@@ -1977,11 +1979,12 @@ def build_opco_segment_industry_multiples_table(
     equity_valuation_basis: str = "live",
     max_live_holdings: int | None = None,
 ) -> pd.DataFrame:
-    """Bottoms-up operating business valuation using industry EV/pre-tax-earnings multiples.
+    """Bottoms-up operating business valuation using segment-specific P/E-style multiples.
 
-    Applies segment-specific low/mid/high multiples to produce an independent (non-circular)
-    operating business value estimate. Appends the market-implied residual as a context row
-    for direct comparison. Skips segments with zero or negative pre-tax earnings.
+    Applies after-tax earnings approximation (pre-tax × _BRK_OPCO_TAX_FACTOR) × industry
+    P/E multiples to produce an independent (non-circular) equity-value estimate per segment.
+    Appends the market-implied residual as a context row for direct comparison.
+    Skips segments with zero or negative pre-tax earnings.
     """
     segments = _latest_segments_table(bundle.segments.filings, period=period)
     if segments.empty or "earnings_before_income_taxes_usd" not in segments.columns:
@@ -2010,6 +2013,7 @@ def build_opco_segment_industry_multiples_table(
         pretax = float(row["earnings_before_income_taxes_usd"])
         if pretax <= 0:
             continue
+        aftertax = pretax * _BRK_OPCO_TAX_FACTOR
         mult_low, mult_mid, mult_high = _SEGMENT_INDUSTRY_MULTIPLES.get(
             seg_name, _SEGMENT_INDUSTRY_MULTIPLES_DEFAULT
         )
@@ -2019,10 +2023,10 @@ def build_opco_segment_industry_multiples_table(
             "multiple_low": mult_low,
             "multiple_mid": mult_mid,
             "multiple_high": mult_high,
-            "implied_ev_low_usd": pretax * mult_low,
-            "implied_ev_mid_usd": pretax * mult_mid,
-            "implied_ev_high_usd": pretax * mult_high,
-            "implied_ev_mid_per_brk_b_usd": float("nan"),
+            "implied_value_low_usd": aftertax * mult_low,
+            "implied_value_mid_usd": aftertax * mult_mid,
+            "implied_value_high_usd": aftertax * mult_high,
+            "implied_value_mid_per_brk_b_usd": float("nan"),
         })
 
     if not rows:
@@ -2032,9 +2036,9 @@ def build_opco_segment_industry_multiples_table(
         return v / share_count if share_count and share_count > 0 else float("nan")
 
     total_pretax = float(sum(r["pretax_earnings_usd"] for r in rows))
-    total_low = float(sum(r["implied_ev_low_usd"] for r in rows))
-    total_mid = float(sum(r["implied_ev_mid_usd"] for r in rows))
-    total_high = float(sum(r["implied_ev_high_usd"] for r in rows))
+    total_low = float(sum(r["implied_value_low_usd"] for r in rows))
+    total_mid = float(sum(r["implied_value_mid_usd"] for r in rows))
+    total_high = float(sum(r["implied_value_high_usd"] for r in rows))
 
     all_rows = list(rows)
     all_rows.append({
@@ -2043,10 +2047,10 @@ def build_opco_segment_industry_multiples_table(
         "multiple_low": float("nan"),
         "multiple_mid": float("nan"),
         "multiple_high": float("nan"),
-        "implied_ev_low_usd": total_low,
-        "implied_ev_mid_usd": total_mid,
-        "implied_ev_high_usd": total_high,
-        "implied_ev_mid_per_brk_b_usd": _ps(total_mid),
+        "implied_value_low_usd": total_low,
+        "implied_value_mid_usd": total_mid,
+        "implied_value_high_usd": total_high,
+        "implied_value_mid_per_brk_b_usd": _ps(total_mid),
     })
 
     if market_residual is not None:
@@ -2056,10 +2060,10 @@ def build_opco_segment_industry_multiples_table(
             "multiple_low": float("nan"),
             "multiple_mid": float("nan"),
             "multiple_high": float("nan"),
-            "implied_ev_low_usd": float(market_residual),
-            "implied_ev_mid_usd": float(market_residual),
-            "implied_ev_high_usd": float(market_residual),
-            "implied_ev_mid_per_brk_b_usd": _ps(float(market_residual)),
+            "implied_value_low_usd": float(market_residual),
+            "implied_value_mid_usd": float(market_residual),
+            "implied_value_high_usd": float(market_residual),
+            "implied_value_mid_per_brk_b_usd": _ps(float(market_residual)),
         })
 
     return pd.DataFrame(all_rows)
