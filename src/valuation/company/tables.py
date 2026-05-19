@@ -494,7 +494,7 @@ def build_implied_value_range_table(
         upside = (implied - price) / price  # 0-1 decimal; positive = upside, negative = overvalued
         rows.append(
             {
-                "multiple": m,
+                "oe_multiple": m,
                 "implied_price": implied,
                 "current_price": price,
                 "upside_pct": upside,

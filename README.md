@@ -2,9 +2,13 @@
 
 CLI-first investing toolkit for company research and personal portfolio/tax reporting.
 
-The project currently has two product areas:
-- research: statements, balance-sheet visibility, ratios, comps, and valuation from SEC EDGAR + Yahoo Finance
-- portfolio: IBKR holdings, realized gains, dividends, withholding tax, FX, and Slovenian tax-report reconciliation
+The project has three product areas:
+
+**Berkshire Hathaway deep analysis** — the most developed part of the tool. A market-implied SOTP bridge breaks the current market cap into public equity holdings, net liquidity, and an implied operating-business residual. Segment earnings, insurance float, book value history, buyback history, and a full valuation report are all built from SEC EDGAR filings. The operating-business residual is cross-checked with a reverse DCF to expose the implied growth assumption. This is not a generic template applied to BRK — it encodes the specific structure of the business (insurance, railroad, utilities, manufacturing/services, equity portfolio, liquidity stack) and produces output that is hard to replicate from a filing review alone.
+
+**Generic company research** — statements, balance-sheet visibility, ratios, comps, and valuation for any US issuer (SEC EDGAR) or international issuer (Yahoo Finance fallback). Includes TTM key financials, valuation ratios (P/E, P/OE, P/FCF, EV/EBITDA), implied value range at P/OE multiples, and a reverse DCF showing the growth rate embedded in today's price.
+
+**Portfolio and tax reporting** — IBKR holdings, realized gains, dividends, withholding tax, FX, and Slovenian FURS tax-report generation (Doh-KDVP, Doh-Div, Doh-Obr XML).
 
 ## What it produces
 

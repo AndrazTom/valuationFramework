@@ -364,7 +364,7 @@ def run_company(identifier: str, identifier_kind: str, outdir: str, filings_limi
             bundle.market_snapshot, _ttm_financials, period_label=_ratio_label
         )
         if not _oe_range.empty:
-            sections.append(("Implied Value Range", _oe_range))
+            sections.append(("Implied Value Range (P/OE)", _oe_range))
         _rdcf = build_reverse_dcf_table(
             bundle.market_snapshot, _ttm_financials, period_label=_ratio_label
         )

@@ -60,6 +60,7 @@ DISPLAY_COLUMN_ALIASES = {
     "owner_earnings_usd": "owner earnings",
     "pretax_share_pct": "% of total",
     "implied_value_usd": "implied value",
+    "oe_multiple": "P/OE multiple",
     "implied_pe_multiple": "implied P/E",
     "implied_p_oe_multiple": "implied P/OE",
     # Book value and OpCo sensitivity

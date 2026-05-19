@@ -971,7 +971,7 @@ def test_build_implied_value_range_table_basic():
     }
     table = build_implied_value_range_table(snapshot, financials, multiples=[10, 20])
     assert len(table) == 2
-    rows = {row["multiple"]: row for _, row in table.iterrows()}
+    rows = {row["oe_multiple"]: row for _, row in table.iterrows()}
     assert rows[10]["implied_price"] == pytest.approx(6.0)
     assert rows[20]["implied_price"] == pytest.approx(12.0)
     # current price 500, implied at 10x = 6 → upside = (6-500)/500 = -0.988 (stored as 0-1 decimal)
@@ -1028,7 +1028,7 @@ def test_build_implied_value_range_table_uses_default_multiples():
         "capex": 10.0,
     }
     table = build_implied_value_range_table(snapshot, financials)
-    assert list(table["multiple"]) == [10, 15, 20, 25, 30]
+    assert list(table["oe_multiple"]) == [10, 15, 20, 25, 30]
 
 
 def test_build_implied_value_range_table_carries_period_label():
