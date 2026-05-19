@@ -175,12 +175,6 @@ TERMINAL_SECONDARY_COLUMNS = [
     "goodwill",
     "assets",
     "interest expense",
-    # comps / ratios: drop least-useful columns first when table is too wide
-    "oe margin pct",
-    "oe yield pct",
-    "net income",
-    "implied growth pct",
-    "ev to ebitda",
 ]
 
 TERMINAL_PERIOD_COLUMN_PATTERN = re.compile(r"^(FY \d{4}|\d{4} Q[1-4]|\d{4})$")
