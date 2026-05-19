@@ -901,6 +901,54 @@ def test_flex_wht_only_no_div_type_yields_empty_without_trades():
     assert dividends == []
 
 
+def test_flex_wht_debit_credit_pairs_net_correctly():
+    """3 debit + 2 credit WHT entries should net to 1 debit, not triple."""
+    xml = _textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <FlexQueryResponse>
+          <FlexStatements>
+            <FlexStatement accountId="X" fromDate="20250101" toDate="20251231">
+              <Trades>
+                <Trade symbol="BNP" assetCategory="STK" currency="EUR"
+                       tradeDate="20250101" dateTime="20250101;093000" quantity="32" />
+              </Trades>
+              <CashTransactions>
+                <CashTransaction type="Dividends" symbol="BNP" currency="EUR"
+                                 dateTime="20250521;000000" amount="153.28"
+                                 description="BNP CASH DIVIDEND EUR 4.79 PER SHARE" />
+                <CashTransaction type="Withholding Tax" symbol="BNP" currency="EUR"
+                                 dateTime="20250521;000000" amount="-38.32"
+                                 description="BNP(FR0000131104) CASH DIVIDEND EUR 4.79 PER SHARE - FR TAX" />
+                <CashTransaction type="Withholding Tax" symbol="BNP" currency="EUR"
+                                 dateTime="20250521;000000" amount="-38.32"
+                                 description="BNP(FR0000131104) CASH DIVIDEND EUR 4.79 PER SHARE - FR TAX" />
+                <CashTransaction type="Withholding Tax" symbol="BNP" currency="EUR"
+                                 dateTime="20250521;000000" amount="-38.32"
+                                 description="BNP(FR0000131104) CASH DIVIDEND EUR 4.79 PER SHARE - FR TAX" />
+                <CashTransaction type="Withholding Tax" symbol="BNP" currency="EUR"
+                                 dateTime="20250521;000000" amount="38.32"
+                                 description="BNP(FR0000131104) CASH DIVIDEND EUR 4.79 PER SHARE - FR TAX" />
+                <CashTransaction type="Withholding Tax" symbol="BNP" currency="EUR"
+                                 dateTime="20250521;000000" amount="38.32"
+                                 description="BNP(FR0000131104) CASH DIVIDEND EUR 4.79 PER SHARE - FR TAX" />
+              </CashTransactions>
+            </FlexStatement>
+          </FlexStatements>
+        </FlexQueryResponse>
+    """)
+    import tempfile, os
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".xml", delete=False) as f:
+        f.write(xml)
+        fname = f.name
+    try:
+        _, dividends, _ = load_flex_query(fname)
+    finally:
+        os.unlink(fname)
+
+    assert len(dividends) == 1
+    assert dividends[0].withholding_tax == pytest.approx(38.32)
+
+
 def test_flex_proceeds_native_property():
     from datetime import date
     lot = FlexLot(

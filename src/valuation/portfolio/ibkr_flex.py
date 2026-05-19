@@ -171,10 +171,11 @@ def _parse_dividends(root) -> list[IbkrDividend]:
                 "description": desc,
             })
         elif tx_type == "Withholding Tax" and symbol and "CASH DIVIDEND" in desc:
-            # Only accumulate negative (actual WHT deductions), not reversals
-            if amount < 0:
-                key = (symbol, dt)
-                wht_index[key] = wht_index.get(key, 0.0) + abs(amount)
+            # Accumulate signed amounts: IBKR sometimes emits reversal/re-entry pairs
+            # (e.g. 3× debit + 2× credit = 1× net debit). Summing only debits triples
+            # the WHT when this happens. Net signed sum gives the correct deduction.
+            key = (symbol, dt)
+            wht_index[key] = wht_index.get(key, 0.0) + amount  # keep sign
 
     # If no explicit Dividends transactions, attempt to derive from WHT + description
     if not div_rows and wht_index:
@@ -184,7 +185,7 @@ def _parse_dividends(root) -> list[IbkrDividend]:
     for row in div_rows:
         symbol = row["symbol"]
         dt = row["date"]
-        wht = wht_index.get((symbol, dt), 0.0)
+        wht = abs(wht_index.get((symbol, dt), 0.0))
         dividends.append(IbkrDividend(
             symbol=symbol,
             currency=row["currency"],
@@ -224,7 +225,7 @@ def _derive_dividends_from_wht(root, wht_index: dict) -> list[dict]:
 
         per_share = _parse_per_share_from_desc(desc)
         div_currency = _parse_currency_from_desc(desc) or currency
-        total_wht = wht_index.get((symbol, dt), 0.0)
+        total_wht = abs(wht_index.get((symbol, dt), 0.0))
 
         if per_share is None or per_share <= 0 or total_wht <= 0:
             continue
