@@ -298,10 +298,11 @@ def _tabulate_terminal_period_blocks(frame: pd.DataFrame, *, max_width: int) -> 
 
 
 def _tabulate_terminal_column_blocks(frame: pd.DataFrame, *, max_width: int) -> str:
-    """Split a wide non-period table into column blocks, repeating the first column as anchor."""
+    """Split a wide non-period table into column blocks, repeating anchor columns in each block."""
     all_cols = list(frame.columns)
-    anchor = [all_cols[0]]
-    remaining = all_cols[1:]
+    # Use first 2 columns as anchors (ticker+name for comps, fiscal_year+end_date for ratios)
+    anchor = all_cols[:2] if len(all_cols) > 2 else all_cols[:1]
+    remaining = all_cols[len(anchor):]
     blocks: list[str] = []
     current: list[str] = []
     for col in remaining:
