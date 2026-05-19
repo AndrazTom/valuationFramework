@@ -12,7 +12,14 @@ from typing import Iterable, Optional, Sequence
 
 from valuation.brk.cli import register_brk_parser, run_brk_command
 from valuation.brk.statements import supplement_brk_income_statement_eps_shares
-from valuation.portfolio.cli import run_portfolio_dividends, run_portfolio_show, run_portfolio_tax
+from valuation.portfolio.cli import (
+    run_portfolio_dividends,
+    run_portfolio_furs_xml,
+    run_portfolio_interest,
+    run_portfolio_reconcile,
+    run_portfolio_show,
+    run_portfolio_tax,
+)
 from valuation.company.service import fetch_company_facts, fetch_company_snapshot
 from valuation.company.statements import build_statement_diagnostics_table, build_statement_table, build_statement_table_ttm
 from valuation.company.tables import (
@@ -249,6 +256,86 @@ def _register_portfolio_parser(subparsers) -> None:
     div_parser.add_argument("--outdir", default="outputs/tables")
     div_parser.add_argument("--format", choices=("table", "json"), default="table")
     div_parser.add_argument(
+        "--no-fx-auto",
+        action="store_false",
+        dest="fx_auto",
+        default=True,
+        help="Disable automatic ECB historical FX rate fetching (on by default).",
+    )
+
+    interest_parser = portfolio_sub.add_parser(
+        "interest",
+        help="Show broker interest income for a year from IBKR Flex XML.",
+    )
+    interest_parser.add_argument(
+        "--file",
+        metavar="PATH",
+        help="Path to IBKR Flex XML. Falls back to IBKR_STATEMENT_PATH env var.",
+    )
+    interest_parser.add_argument(
+        "--year",
+        type=int,
+        default=None,
+        help="Tax year to report (default: current calendar year).",
+    )
+    interest_parser.add_argument("--outdir", default="outputs/tables")
+    interest_parser.add_argument("--format", choices=("table", "json"), default="table")
+    interest_parser.add_argument(
+        "--no-fx-auto",
+        action="store_false",
+        dest="fx_auto",
+        default=True,
+        help="Disable automatic ECB historical FX rate fetching (on by default).",
+    )
+
+    reconcile_parser = portfolio_sub.add_parser(
+        "reconcile",
+        help="Reconcile IBKR source rows to yearly tax/dividend summary totals.",
+    )
+    reconcile_parser.add_argument(
+        "--file",
+        metavar="PATH",
+        help="Path to IBKR CSV/XML statement. Falls back to IBKR_STATEMENT_PATH env var.",
+    )
+    reconcile_parser.add_argument(
+        "--year",
+        type=int,
+        default=None,
+        help="Tax year to reconcile (default: current calendar year).",
+    )
+    reconcile_parser.add_argument("--outdir", default="outputs/tables")
+    reconcile_parser.add_argument("--format", choices=("table", "json"), default="table")
+    reconcile_parser.add_argument(
+        "--no-fx-auto",
+        action="store_false",
+        dest="fx_auto",
+        default=True,
+        help="Disable automatic ECB historical FX rate fetching (on by default).",
+    )
+
+    furs_parser = portfolio_sub.add_parser(
+        "furs-xml",
+        help="Generate FURS eDavki XML forms (Doh-KDVP, Doh-Div, Doh-Obr) from IBKR Flex XML.",
+    )
+    furs_parser.add_argument(
+        "--file",
+        metavar="PATH",
+        help="Path to IBKR Flex XML. Falls back to IBKR_STATEMENT_PATH env var.",
+    )
+    furs_parser.add_argument(
+        "--year",
+        type=int,
+        default=None,
+        help="Tax year (default: current calendar year).",
+    )
+    furs_parser.add_argument(
+        "--forms",
+        choices=("all", "kdvp", "div", "obr"),
+        default="all",
+        help="Which forms to generate (default: all).",
+    )
+    furs_parser.add_argument("--outdir", default="outputs/tables")
+    furs_parser.add_argument(
         "--no-fx-auto",
         action="store_false",
         dest="fx_auto",
@@ -791,6 +878,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     year=year,
                     outdir=args.outdir,
                     output_format=args.format,
+                    fx_auto=fx_auto,
+                )
+            if args.portfolio_command == "interest":
+                return run_portfolio_interest(
+                    file=getattr(args, "file", None),
+                    year=year,
+                    outdir=args.outdir,
+                    output_format=args.format,
+                    fx_auto=fx_auto,
+                )
+            if args.portfolio_command == "reconcile":
+                return run_portfolio_reconcile(
+                    file=getattr(args, "file", None),
+                    year=year,
+                    outdir=args.outdir,
+                    output_format=args.format,
+                    fx_auto=fx_auto,
+                )
+            if args.portfolio_command == "furs-xml":
+                return run_portfolio_furs_xml(
+                    file=getattr(args, "file", None),
+                    year=year,
+                    outdir=args.outdir,
+                    forms=getattr(args, "forms", "all"),
                     fx_auto=fx_auto,
                 )
     except (LookupError, RuntimeError, ValueError) as exc:

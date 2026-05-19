@@ -21,16 +21,19 @@ Correctness standard:
 - tax reports should have reconciliation tables before any final XML generation
 - private files stay under ignored paths such as `/portfolio/`, `outputs/`, or `.env`
 
-Candidate CLI shape:
+Current repo-root launcher:
 
 ```bash
-vf portfolio holdings
-vf portfolio tax kdvp --year 2025
-vf portfolio tax dividends --year 2025
-vf portfolio tax interest --year 2025
-vf portfolio reconcile --year 2025
-vf portfolio doh --year 2025 --outdir ...
+./vf portfolio show
+./vf portfolio tax --year 2025
+./vf portfolio dividends --year 2025
+./vf portfolio interest --year 2025
+./vf portfolio reconcile --year 2025
 ```
+
+Tax commands should keep moving toward filing-shaped rows first:
+`Doh-KDVP`, `Doh-Div`, and `Doh-Obr`. FURS XML comes after those row contracts
+are boring and repeatable.
 
 ### Research
 
@@ -43,15 +46,15 @@ Primary jobs:
 - compute ratios, comps, reverse DCF, and watchlist views
 - support specialized Berkshire Hathaway workflows
 
-Candidate CLI shape:
+Possible future grouped CLI shape:
 
 ```bash
-vf research company AAPL
-vf research statements AAPL --statement income
-vf research ratios AAPL
-vf research comps AAPL MSFT GOOGL
-vf research watchlist show
-vf research brk sotp
+./vf research company AAPL
+./vf research statements AAPL --statement income
+./vf research ratios AAPL
+./vf research comps AAPL MSFT GOOGL
+./vf research watchlist show
+./vf research brk sotp
 ```
 
 Existing top-level commands can remain as compatibility aliases while the
@@ -96,9 +99,9 @@ Until then, the right split is conceptual and CLI-level, not a physical repo spl
 1. Make the README describe the two product areas clearly.
 2. Add compatibility-safe command grouping:
    - keep current commands working
-   - introduce `vf research ...` aliases gradually
-   - refine `vf portfolio ...` names around holdings, tax, and reconciliation
-3. Build `portfolio reconcile --year 2025` before any FURS XML generator.
+   - introduce `./vf research ...` aliases gradually
+   - refine `./vf portfolio ...` names around holdings, tax, and reconciliation
+3. Keep hardening `./vf portfolio reconcile --year 2025` before any FURS XML generator.
 4. Keep private brokerage and tax files out of Git with `.gitignore` and checks.
 5. Add tests at the contract boundary: parser rows in, reconciled report rows out.
 

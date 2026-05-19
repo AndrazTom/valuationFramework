@@ -25,6 +25,12 @@ The `.gitignore` already excludes `*.activity.csv`, `*_statement.csv`, `ibkr_*.c
 # Dividend income + SI dividend tax (with WHT credit)
 ./vf portfolio dividends --file /path/to/statement.csv --year 2026
 
+# Broker interest income from Flex XML (Doh-Obr-shaped output)
+./vf portfolio interest --file /path/to/flex.xml --year 2026
+
+# Audit source coverage, FX, realized gains, and dividend totals
+./vf portfolio reconcile --file /path/to/flex.xml --year 2026
+
 # Disable ECB FX auto-fetch (on by default)
 ./vf portfolio tax --file /path/to/statement.csv --year 2026 --no-fx-auto
 ```
@@ -75,7 +81,39 @@ The `.gitignore` already excludes `*.activity.csv`, `*_statement.csv`, `ibkr_*.c
 - `tax_si.py` — Slovenian tax rules (ZDoh-2)
   - CGT: 25% → 20% → 15% → 0% at 5/10/15 complete years held
   - Dividends: 25% flat, crediting foreign WHT; `si_dividend_tax(gross, wht)` returns net additional tax
+  - Interest: 25% flat estimate, crediting foreign WHT; `si_interest_tax(gross, wht)` returns estimated top-up
   - `next_si_cgt_threshold(acquired, as_of)` — when the next rate tier kicks in
+
+## Filing-shaped rows
+
+- `./vf portfolio tax --year YYYY` now emits:
+  - `Realized Gains YYYY` — current readable realized-lot table
+  - `KDVP Filing Rows YYYY` — Doh-KDVP-shaped rows with F4/F5/F8/F9-like columns
+  - `Tax Summary`
+- `./vf portfolio dividends --year YYYY` now emits:
+  - `Dividends YYYY`
+  - `Dividend Filing Rows YYYY` — Doh-Div-shaped gross/WHT/top-up rows
+  - `Dividend Tax Summary`
+- `./vf portfolio interest --year YYYY` emits:
+  - `Interest YYYY`
+  - `Interest Filing Rows YYYY` — Doh-Obr-shaped gross/WHT/tax rows
+  - `Interest Tax Summary`
+- FURS XML is still intentionally deferred. The next durable milestone is stable filing row contracts, not XML formatting.
+- Activity CSV can support trade/dividend rows when exported with enough history, but Flex XML remains preferred for tax-grade lots and broker interest.
+
+## Reconciliation workflow
+
+- `./vf portfolio reconcile --year YYYY` is the audit step before any future FURS XML generator.
+- It reuses the existing CSV/Flex loaders and FIFO/tax helpers; do not add separate parser logic just for reconciliation.
+- Output sections:
+  - `Input Files`: source filename, type, masked account, period, parsed row counts
+  - `Coverage Summary`: calendar-year coverage, parsed trade/dividend rows, realized/dividend rows in year, missing FX count
+  - `Realized Reconciliation`: proceeds, cost basis, gross gains/losses, net gain, 25% same-year-offset CGT estimate
+  - `Dividend Reconciliation`: gross dividends, foreign WHT, Slovenian top-up tax
+  - `FX Coverage`: non-EUR currency/date pairs, ECB rate status
+  - `Warnings`: full-year coverage, FX, and no-row review flags
+- Keep account IDs masked in generated reconciliation tables; private source files are still the audit authority.
+- The 25% CGT estimate mirrors the current portfolio tax summary convention; a later pass should refine mixed-rate disposal years before official XML generation.
 
 ## IBKR statement export
 
@@ -101,11 +139,33 @@ In IBKR Account Management:
 
 - Flex Query XML (`.xml`): preferred for CGT — IBKR pre-computes FIFO `<Lot>` elements with
   cost basis and acquisition date even for lots opened before the statement period.
-  Eliminates "unmatched sell" warnings. Configure flex query to include Trades + Lots +
-  CashTransactions (Dividends + Withholding Tax + Broker Interest Received).
+  Eliminates "unmatched sell" warnings. See "Flex Query setup" below for required sections.
 - Activity Statement CSV (`.csv`): suitable when flex query is unavailable; requires combining
   multiple year exports for full FIFO history.
 - `--file` accepts comma-separated paths for combining multiple files of either format.
+
+## Flex Query setup
+
+Configure an **Activity Flex Query** in IBKR (Performance & Reports → Flex Queries → "+"):
+
+| Section | Options / Fields |
+|---|---|
+| Account Information | IB Entity, Account ID |
+| Trades | Options: **Executions** + **Closed Lots**; then **Select All** fields |
+| Corporate Actions | **Select All** fields |
+| Cash Transactions | Options: **Dividends**, **Payment in Lieu of Dividends**, **Withholding Tax**, **Broker Fees**, **Broker Interest Received**; then **Select All** fields |
+| Financial Instrument Information | **Select All** fields |
+
+Leave date settings at default when saving. When running the report, set Period → **Custom Date
+Range** → Jan 1–Dec 31 of the target year. Generate one file per calendar year. Also generate
+a report for the current year even when filing a past year, because some WHT entries are reported
+retroactively.
+
+**Multi-account note**: On the Reports page use "Select Account(s)" and filter to show
+Open + Closed + Migrated accounts to capture accounts from the IBUK→IBCE→IBIE migrations.
+
+Credit: Flex Query configuration instructions adapted from
+[ib-edavki](https://github.com/ib-edavki/ib-edavki) (see also `furs_xml.py` attribution).
 
 ## Fees-in-price (FURS requirement)
 

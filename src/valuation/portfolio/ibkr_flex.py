@@ -45,6 +45,8 @@ class FlexLot:
     quantity: float
     cost_native: float       # IBKR FIFO cost basis in trade currency
     pnl_native: float        # fifoPnlRealized in trade currency
+    isin: str = ""
+    description: str = ""
 
     @property
     def proceeds_native(self) -> float:
@@ -151,6 +153,8 @@ def _parse_lots(root) -> list[FlexLot]:
             quantity=abs(qty),
             cost_native=cost,
             pnl_native=pnl,
+            isin=elem.get("isin", "") or "",
+            description=elem.get("description", "") or "",
         ))
 
     return sorted(lots, key=lambda l: l.sold)
@@ -173,6 +177,7 @@ def _parse_dividends(root) -> list[IbkrDividend]:
     """
     div_rows: list[dict] = []
     wht_index: dict[tuple[str, date], float] = {}
+    meta_index: dict[tuple[str, date], dict] = {}
 
     for elem in root.iter("CashTransaction"):
         tx_type = elem.get("type", "")
@@ -191,6 +196,8 @@ def _parse_dividends(root) -> list[IbkrDividend]:
                 "date": dt,
                 "amount": amount,
                 "description": desc,
+                "isin": elem.get("isin", "") or "",
+                "issuer_country": elem.get("issuerCountryCode", "") or "",
             })
         elif tx_type == "Withholding Tax" and symbol and "CASH DIVIDEND" in desc:
             # Accumulate signed amounts: IBKR sometimes emits reversal/re-entry pairs
@@ -198,10 +205,22 @@ def _parse_dividends(root) -> list[IbkrDividend]:
             # the WHT when this happens. Net signed sum gives the correct deduction.
             key = (symbol, dt)
             wht_index[key] = wht_index.get(key, 0.0) + amount  # keep sign
+            if key not in meta_index:
+                meta_index[key] = {
+                    "isin": elem.get("isin", "") or "",
+                    "issuer_country": elem.get("issuerCountryCode", "") or "",
+                }
 
     # If no explicit Dividends transactions, attempt to derive from WHT + description
     if not div_rows and wht_index:
         div_rows = _derive_dividends_from_wht(root, wht_index)
+
+    # Enrich rows that may not have isin/issuer_country from the WHT meta_index
+    for row in div_rows:
+        key = (row["symbol"], row["date"])
+        meta = meta_index.get(key, {})
+        row.setdefault("isin", meta.get("isin", ""))
+        row.setdefault("issuer_country", meta.get("issuer_country", ""))
 
     dividends: list[IbkrDividend] = []
     for row in div_rows:
@@ -215,6 +234,8 @@ def _parse_dividends(root) -> list[IbkrDividend]:
             amount=row["amount"],
             withholding_tax=wht,
             description=row["description"],
+            isin=row.get("isin", ""),
+            issuer_country=row.get("issuer_country", ""),
         ))
 
     return sorted(dividends, key=lambda d: d.payment_date)

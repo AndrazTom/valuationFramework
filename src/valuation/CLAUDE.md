@@ -38,3 +38,6 @@ This subtree should stay generic unless a module is explicitly under `valuation.
   - `./vf watchlist add/remove/list/show` subcommands
   - `show` delegates to `run_comps` on the full watchlist
   - case-insensitive deduplication
+- `portfolio/` — IBKR portfolio, Slovenian tax, and reconciliation workflows
+  - `./vf portfolio show/tax/dividends/interest/reconcile`
+  - tax/dividend/interest commands emit filing-shaped rows before any future FURS XML generator

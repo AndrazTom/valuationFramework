@@ -35,6 +35,8 @@ class IbkrDividend:
     amount: float              # gross dividend in trade currency (positive)
     withholding_tax: float     # foreign WHT already deducted by broker (positive = tax paid)
     description: str
+    isin: str = ""
+    issuer_country: str = ""
 
 
 @dataclass(frozen=True)

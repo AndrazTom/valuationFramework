@@ -102,6 +102,8 @@ Private brokerage and tax files should stay under ignored paths such as `portfol
 ./vf portfolio show                          # open positions, cost basis, P&L, tax tier
 ./vf portfolio tax --year 2025               # realized gains and Slovenian CGT view
 ./vf portfolio dividends --year 2025         # dividends, WHT, and Slovenian dividend tax view
+./vf portfolio interest --year 2025          # broker interest, WHT, and Doh-Obr-shaped rows
+./vf portfolio reconcile --year 2025         # audit source coverage, FX, gains, and dividend totals
 ```
 
 ### Berkshire

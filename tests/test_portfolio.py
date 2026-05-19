@@ -17,12 +17,20 @@ from valuation.portfolio.ibkr import (
     IbkrDividend,
     IbkrOpenPosition,
 )
+from valuation.portfolio.cli import (
+    _periods_cover_year,
+    run_portfolio_dividends,
+    run_portfolio_interest,
+    run_portfolio_reconcile,
+    run_portfolio_tax,
+)
 from valuation.portfolio.lots import build_lots_and_realized, non_eur_currency_dates
 from valuation.portfolio.tax_si import (
     si_cgt_rate,
     si_cgt_tax,
     si_dividend_tax,
     si_dividend_effective_rate,
+    si_interest_tax,
     next_si_cgt_threshold,
     _complete_years,
 )
@@ -723,6 +731,11 @@ def test_si_dividend_effective_rate_zero_gross():
     assert si_dividend_effective_rate(0.0, 0.0) == pytest.approx(0.0)
 
 
+def test_si_interest_tax_basic():
+    assert si_interest_tax(100.0, 0.0) == pytest.approx(25.0)
+    assert si_interest_tax(100.0, 5.0) == pytest.approx(20.0)
+
+
 # ---------------------------------------------------------------------------
 # IBKR Flex Query XML parser
 # ---------------------------------------------------------------------------
@@ -1162,3 +1175,321 @@ def test_flex_interest_wht_matched():
     assert r.currency == "EUR"
     assert r.amount == pytest.approx(30.97)
     assert r.withholding_tax == pytest.approx(6.19)
+
+
+# ---------------------------------------------------------------------------
+# Portfolio reconciliation command
+# ---------------------------------------------------------------------------
+
+_RECONCILE_CSV = textwrap.dedent("""\
+    Statement,Header,Field Name,Field Value
+    Statement,Data,Period,"January 1, 2024 - December 31, 2025"
+    Account Information,Header,Field Name,Field Value
+    Account Information,Data,Base Currency,EUR
+    Account Information,Data,Account,U1234567
+    Trades,Header,DataDiscriminator,Asset Category,Currency,Symbol,Date/Time,Quantity,T. Price,C. Price,Proceeds,Comm/Fee,Basis,Realized P/L,MTM P/L,Code
+    Trades,Data,Order,Stocks,EUR,AAPL,"2024-01-15, 10:30:00",10,100.00,100.00,-1000.00,-2.00,1002.00,0,0,O
+    Trades,Data,Order,Stocks,EUR,AAPL,"2025-03-15, 11:00:00",-10,120.00,120.00,1200.00,-2.00,0,196.00,0,C
+    Dividends,Header,Currency,Date,Description,Amount
+    Dividends,Data,EUR,2025-04-10,AAPL (US0378331005) Cash Dividend EUR 1.00 per Share,10.00
+    Withholding Tax,Header,Currency,Date,Description,Amount,Code
+    Withholding Tax,Data,EUR,2025-04-10,AAPL (US0378331005) Cash Dividend EUR 1.00 per Share - US Tax,-1.50,R
+""")
+
+
+def test_portfolio_reconcile_writes_audit_tables(tmp_path):
+    statement = tmp_path / "statement.csv"
+    statement.write_text(_RECONCILE_CSV, encoding="utf-8")
+    outdir = tmp_path / "outputs"
+
+    code = run_portfolio_reconcile(
+        file=str(statement),
+        year=2025,
+        outdir=str(outdir),
+        output_format="table",
+        fx_auto=True,
+    )
+
+    assert code == 0
+    result_dir = outdir / "portfolio_reconcile_2025"
+    assert (result_dir / "input_files.md").is_file()
+    realized = (result_dir / "realized_reconciliation.md").read_text(encoding="utf-8")
+    dividends = (result_dir / "dividend_reconciliation.md").read_text(encoding="utf-8")
+    warnings = (result_dir / "warnings.md").read_text(encoding="utf-8")
+
+    assert "Net gain / loss" in realized
+    assert "+€196.00" in realized
+    assert "Gross dividend income" in dividends
+    assert "€10.00" in dividends
+    assert "No reconciliation warnings" in warnings
+
+
+def test_portfolio_reconcile_json_bundle_sections(tmp_path, capsys):
+    statement = tmp_path / "statement.csv"
+    statement.write_text(_RECONCILE_CSV, encoding="utf-8")
+
+    code = run_portfolio_reconcile(
+        file=str(statement),
+        year=2025,
+        outdir=str(tmp_path / "outputs"),
+        output_format="json",
+        fx_auto=True,
+    )
+
+    assert code == 0
+    captured = capsys.readouterr()
+    assert '"input_files"' in captured.out
+    assert '"coverage_summary"' in captured.out
+    assert '"realized_reconciliation"' in captured.out
+    assert '"dividend_reconciliation"' in captured.out
+    assert '"fx_coverage"' in captured.out
+
+
+def test_reconcile_period_coverage_detects_statement_gaps():
+    summaries = [
+        {"period_start": date(2025, 1, 1), "period_end": date(2025, 3, 31)},
+        {"period_start": date(2025, 5, 1), "period_end": date(2025, 12, 31)},
+    ]
+
+    assert _periods_cover_year(summaries, 2025) is False
+
+
+def test_portfolio_tax_writes_kdvp_filing_rows(tmp_path):
+    statement = tmp_path / "statement.csv"
+    statement.write_text(_RECONCILE_CSV, encoding="utf-8")
+    outdir = tmp_path / "outputs"
+
+    code = run_portfolio_tax(
+        file=str(statement),
+        year=2025,
+        outdir=str(outdir),
+        output_format="table",
+        fx_auto=True,
+    )
+
+    assert code == 0
+    filing_rows = (
+        outdir / "portfolio_tax_2025" / "kdvp_filing_rows_2025.md"
+    ).read_text(encoding="utf-8")
+    assert "Doh-KDVP" in filing_rows
+    assert "f4 buy value eur" in filing_rows
+    assert "IBKR fees included" in filing_rows
+
+
+def test_portfolio_dividends_writes_filing_rows(tmp_path):
+    statement = tmp_path / "statement.csv"
+    statement.write_text(_RECONCILE_CSV, encoding="utf-8")
+    outdir = tmp_path / "outputs"
+
+    code = run_portfolio_dividends(
+        file=str(statement),
+        year=2025,
+        outdir=str(outdir),
+        output_format="table",
+        fx_auto=True,
+    )
+
+    assert code == 0
+    filing_rows = (
+        outdir / "portfolio_dividends_2025" / "dividend_filing_rows_2025.md"
+    ).read_text(encoding="utf-8")
+    assert "Doh-Div" in filing_rows
+    assert "estimated si topup eur" in filing_rows
+
+
+def test_portfolio_interest_writes_filing_rows(tmp_path):
+    xml = _textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <FlexQueryResponse>
+          <FlexStatements>
+            <FlexStatement accountId="U1234567" fromDate="20250101" toDate="20251231">
+              <AccountInformation currency="EUR" />
+              <CashTransactions>
+                <CashTransaction type="Broker Interest Received" currency="EUR"
+                                 dateTime="20251031;000000" amount="30.00"
+                                 description="EUR CREDIT INT FOR OCT-01 TO OCT-31" />
+                <CashTransaction type="Withholding Tax" currency="EUR"
+                                 dateTime="20251031;000000" amount="-6.00"
+                                 description="WITHHOLDING @ 20% ON CREDIT INT FOR OCT-01 TO OCT-31" />
+              </CashTransactions>
+            </FlexStatement>
+          </FlexStatements>
+        </FlexQueryResponse>
+    """)
+    statement = tmp_path / "flex.xml"
+    statement.write_text(xml, encoding="utf-8")
+    outdir = tmp_path / "outputs"
+
+    code = run_portfolio_interest(
+        file=str(statement),
+        year=2025,
+        outdir=str(outdir),
+        output_format="table",
+        fx_auto=True,
+    )
+
+    assert code == 0
+    result_dir = outdir / "portfolio_interest_2025"
+    interest_rows = (result_dir / "interest_2025.md").read_text(encoding="utf-8")
+    filing_rows = (result_dir / "interest_filing_rows_2025.md").read_text(encoding="utf-8")
+    summary = (result_dir / "interest_tax_summary.md").read_text(encoding="utf-8")
+    assert "€30.00" in interest_rows
+    assert "Doh-Obr" in filing_rows
+    assert "€1.50" in summary
+
+
+# ---------------------------------------------------------------------------
+# FURS XML generator
+# ---------------------------------------------------------------------------
+
+def test_flex_lot_isin_and_description():
+    """FlexLot parser populates isin and description from Lot XML attributes."""
+    xml = _textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <FlexQueryResponse>
+          <FlexStatements>
+            <FlexStatement accountId="X" fromDate="20250101" toDate="20251231">
+              <Lots>
+                <Lot symbol="ASML" description="ASML HOLDING NV" isin="NL0010273215"
+                     assetCategory="STK" currency="EUR" buySell="SELL"
+                     openDateTime="20250514;041538" dateTime="20250804;031250"
+                     quantity="2" cost="1351.05" fifoPnlRealized="-149.26" />
+              </Lots>
+            </FlexStatement>
+          </FlexStatements>
+        </FlexQueryResponse>
+    """)
+    import tempfile, os
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".xml", delete=False) as f:
+        f.write(xml)
+        fname = f.name
+    try:
+        lots, _, _ = load_flex_query(fname)
+    finally:
+        os.unlink(fname)
+
+    assert lots[0].isin == "NL0010273215"
+    assert lots[0].description == "ASML HOLDING NV"
+
+
+def test_build_kdvp_xml_eur_security():
+    """build_kdvp_xml produces correct KDVP elements for an EUR-denominated lot."""
+    from valuation.portfolio.furs_xml import build_kdvp_xml
+
+    lots = [
+        FlexLot(
+            symbol="ASML", currency="EUR",
+            isin="NL0010273215", description="ASML HOLDING NV",
+            acquired=date(2025, 5, 14), sold=date(2025, 8, 4),
+            quantity=2.0, cost_native=1351.05, pnl_native=-149.26,
+        )
+    ]
+    taxpayer = {"tax_number": "0", "name": "T", "email": "t@t.si", "phone": "0"}
+    xml = build_kdvp_xml(lots, 2025, taxpayer)
+
+    assert "Doh_KDVP_9" in xml
+    assert "<ISIN>NL0010273215</ISIN>" in xml
+    assert "<Code>ASML</Code>" in xml
+    assert "<F2>B</F2>" in xml
+    assert "<F5>0</F5>" in xml
+    assert "<F8>2.0000</F8>" in xml   # balance after buy
+    assert "<F8>0.0000</F8>" in xml   # balance after sell
+    # F4 = 1351.05 / 2 = 675.525
+    assert "<F4>675.5250</F4>" in xml
+    # F9 = |1351.05 + (-149.26)| / 2 = 1201.79 / 2 = 600.895
+    assert "<F9>600.8950</F9>" in xml
+
+
+def test_build_kdvp_xml_non_eur_needs_fx():
+    """build_kdvp_xml returns 0.0000 for F4/F9 when no FX rate available for non-EUR lot."""
+    from valuation.portfolio.furs_xml import build_kdvp_xml
+
+    lots = [
+        FlexLot(
+            symbol="GOOGL", currency="USD",
+            isin="US02079K3059", description="ALPHABET INC-CL A",
+            acquired=date(2024, 2, 1), sold=date(2025, 2, 4),
+            quantity=10.0, cost_native=1409.53, pnl_native=642.0,
+        )
+    ]
+    taxpayer = {"tax_number": "0", "name": "T", "email": "t@t.si", "phone": "0"}
+    xml = build_kdvp_xml(lots, 2025, taxpayer, fx_rates=None)
+
+    assert "<F4>0.0000</F4>" in xml
+    assert "<F9>0.0000</F9>" in xml
+
+
+def test_build_kdvp_xml_non_eur_with_fx():
+    """build_kdvp_xml converts USD lot to EUR using provided FX rates."""
+    from valuation.portfolio.furs_xml import build_kdvp_xml
+
+    lots = [
+        FlexLot(
+            symbol="GOOGL", currency="USD",
+            isin="US02079K3059", description="ALPHABET INC-CL A",
+            acquired=date(2024, 2, 1), sold=date(2025, 2, 4),
+            quantity=10.0, cost_native=1409.53, pnl_native=642.0,
+        )
+    ]
+    taxpayer = {"tax_number": "0", "name": "T", "email": "t@t.si", "phone": "0"}
+    fx_rates = {
+        ("USD", "2024-02-01"): 0.9244,
+        ("USD", "2025-02-04"): 0.9610,
+    }
+    xml = build_kdvp_xml(lots, 2025, taxpayer, fx_rates=fx_rates)
+
+    # F4 = (1409.53 / 10) * 0.9244 = 140.953 * 0.9244 ≈ 130.27
+    import re
+    f4_match = re.search(r"<F4>([\d.]+)</F4>", xml)
+    assert f4_match is not None
+    assert abs(float(f4_match.group(1)) - 130.27) < 0.1
+
+
+def test_build_div_xml_known_payer():
+    """build_div_xml emits correct Dividend element with payer details from KNOWN_PAYERS."""
+    from valuation.portfolio.furs_xml import build_div_xml
+    from valuation.portfolio.ibkr import IbkrDividend
+
+    divs = [
+        IbkrDividend(
+            symbol="GOOGL", currency="USD",
+            payment_date=date(2025, 3, 17),
+            amount=4.00, withholding_tax=0.60,
+            description="GOOGL CASH DIVIDEND USD 0.20 PER SHARE - 15% TAX",
+        )
+    ]
+    taxpayer = {"tax_number": "0", "name": "T", "email": "t@t.si", "phone": "0"}
+    fx_rates = {("USD", "2025-03-17"): 0.92}
+    xml = build_div_xml(divs, 2025, taxpayer, fx_rates)
+
+    assert "Doh_Div_3" in xml
+    assert "<Date>2025-03-17</Date>" in xml
+    assert "<Type>1</Type>" in xml
+    assert "Alphabet Inc." in xml
+    assert "<Value>3.68</Value>" in xml   # 4.00 * 0.92 = 3.68
+    assert "<ForeignTax>0.55</ForeignTax>" in xml  # 0.60 * 0.92 = 0.552 → 0.55
+
+
+def test_build_obr_xml_ibkr_payer():
+    """build_obr_xml emits correct Interest element with IBKR Ireland as payer."""
+    from valuation.portfolio.furs_xml import build_obr_xml
+
+    interest = [
+        FlexInterest(
+            currency="EUR",
+            payment_date=date(2025, 3, 5),
+            amount=30.97,
+            withholding_tax=6.19,
+            description="EUR CREDIT INT FOR FEB-2025",
+        )
+    ]
+    taxpayer = {"tax_number": "0", "name": "T", "email": "t@t.si", "phone": "0"}
+    xml = build_obr_xml(interest, 2025, taxpayer, {})
+
+    assert "Doh_Obr_2" in xml
+    assert "<Date>2025-03-05</Date>" in xml
+    assert "<Type>2</Type>" in xml
+    assert "Interactive Brokers Ireland Limited" in xml
+    assert "<Value>30.97</Value>" in xml
+    assert "<ForeignTax>6.19</ForeignTax>" in xml
+    assert "<Country>IE</Country>" in xml

@@ -4,6 +4,21 @@ AI-maintained progress file. Updated continuously during long working sessions.
 
 ---
 
+## Session: 2026-05-19
+
+### Completed
+
+- Added `./vf portfolio reconcile --year YYYY`
+- Reconciliation emits input-file coverage, statement-year coverage, realized-gain totals, dividend/WHT totals, FX coverage, and warning tables
+- JSON output includes stable reconciliation section keys
+- Added filing-shaped portfolio rows:
+  - `./vf portfolio tax --year YYYY` emits `KDVP Filing Rows`
+  - `./vf portfolio dividends --year YYYY` emits `Dividend Filing Rows`
+  - `./vf portfolio interest --year YYYY` emits broker-interest and `Interest Filing Rows` from Flex XML
+- Targeted portfolio tests pass: 84 tests; full suite passes: 409 tests
+
+---
+
 ## Session: 2026-05-17 (full day)
 
 ### Context

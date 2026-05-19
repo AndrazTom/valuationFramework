@@ -12,6 +12,10 @@ Dividends (Article 90–92):
   - Foreign WHT already paid to the source country credits against Slovenian tax
   - Net additional Slovenian tax = max(0, 25 % × gross − foreign WHT paid)
 
+Interest:
+  - 25 % flat tax on taxable interest income under current FURS guidance
+  - Foreign WHT already paid is tracked as a credit candidate in filing-shaped rows
+
 Losses on capital gains can offset gains in the same year and carry forward up
 to 5 years.  This module computes per-disposal/per-dividend gross tax; loss
 offsetting is handled at the summary level in the CLI.
@@ -77,6 +81,7 @@ def next_si_cgt_threshold(acquired: date, as_of: date) -> tuple[date, float] | N
 # ---------------------------------------------------------------------------
 
 _SI_DIVIDEND_RATE = 0.25
+_SI_INTEREST_RATE = 0.25
 
 
 def si_dividend_tax(
@@ -103,6 +108,21 @@ def si_dividend_effective_rate(foreign_wht_eur: float, gross_eur: float) -> floa
         return 0.0
     top_up = si_dividend_tax(gross_eur, foreign_wht_eur)
     return (foreign_wht_eur + top_up) / gross_eur
+
+
+# ---------------------------------------------------------------------------
+# Interest
+# ---------------------------------------------------------------------------
+
+def si_interest_tax(
+    gross_eur: float,
+    foreign_wht_eur: float = 0.0,
+) -> float:
+    """Estimated Slovenian interest tax after crediting foreign withholding tax."""
+    if gross_eur <= 0:
+        return 0.0
+    si_gross_tax = round(gross_eur * _SI_INTEREST_RATE, 2)
+    return max(0.0, round(si_gross_tax - foreign_wht_eur, 2))
 
 
 # ---------------------------------------------------------------------------
