@@ -16,10 +16,24 @@ INCOME_STATEMENT_DEFINITIONS = (
             ("us-gaap", "InterestIncomeOperating"),
             ("us-gaap", "InterestIncomeExpenseNet"),
             ("us-gaap", "NoninterestIncome"),
+            ("ifrs-full", "Revenue"),
+            ("ifrs-full", "RevenueFromContractsWithCustomers"),
         ),
     ),
-    CompanyFactQuery("gross_profit", (("us-gaap", "GrossProfit"),)),
-    CompanyFactQuery("operating_income", (("us-gaap", "OperatingIncomeLoss"),)),
+    CompanyFactQuery(
+        "gross_profit",
+        (
+            ("us-gaap", "GrossProfit"),
+            ("ifrs-full", "GrossProfit"),
+        ),
+    ),
+    CompanyFactQuery(
+        "operating_income",
+        (
+            ("us-gaap", "OperatingIncomeLoss"),
+            ("ifrs-full", "ProfitLossFromOperatingActivities"),
+        ),
+    ),
     CompanyFactQuery(
         "pretax_income",
         (
@@ -32,6 +46,7 @@ INCOME_STATEMENT_DEFINITIONS = (
                 "us-gaap",
                 "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
             ),
+            ("ifrs-full", "ProfitLossBeforeTax"),
         ),
     ),
     CompanyFactQuery(
@@ -41,11 +56,16 @@ INCOME_STATEMENT_DEFINITIONS = (
             ("us-gaap", "NetIncomeLossAvailableToCommonStockholdersDiluted"),
             ("us-gaap", "NetIncomeLossAvailableToCommonStockholdersBasic"),
             ("us-gaap", "ProfitLoss"),
+            ("ifrs-full", "ProfitLoss"),
+            ("ifrs-full", "ProfitLossAttributableToOwnersOfParent"),
         ),
     ),
     CompanyFactQuery(
         "diluted_eps",
-        (("us-gaap", "EarningsPerShareDiluted"),),
+        (
+            ("us-gaap", "EarningsPerShareDiluted"),
+            ("ifrs-full", "DilutedEarningsLossPerShare"),
+        ),
         unit="USD/shares",
         quarterly_value_kind="direct",
     ),
@@ -57,7 +77,10 @@ INCOME_STATEMENT_DEFINITIONS = (
     ),
     CompanyFactQuery(
         "_basic_eps",
-        (("us-gaap", "EarningsPerShareBasic"),),
+        (
+            ("us-gaap", "EarningsPerShareBasic"),
+            ("ifrs-full", "BasicEarningsLossPerShare"),
+        ),
         unit="USD/shares",
         quarterly_value_kind="direct",
     ),
@@ -75,6 +98,7 @@ BALANCE_SHEET_DEFINITIONS = (
         (
             ("us-gaap", "CashAndCashEquivalentsAtCarryingValue"),
             ("us-gaap", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"),
+            ("ifrs-full", "CashAndCashEquivalents"),
         ),
     ),
     CompanyFactQuery(
@@ -85,9 +109,27 @@ BALANCE_SHEET_DEFINITIONS = (
             ("us-gaap", "ShortTermInvestments"),
         ),
     ),
-    CompanyFactQuery("current_assets", (("us-gaap", "AssetsCurrent"),)),
-    CompanyFactQuery("total_assets", (("us-gaap", "Assets"),)),
-    CompanyFactQuery("current_liabilities", (("us-gaap", "LiabilitiesCurrent"),)),
+    CompanyFactQuery(
+        "current_assets",
+        (
+            ("us-gaap", "AssetsCurrent"),
+            ("ifrs-full", "CurrentAssets"),
+        ),
+    ),
+    CompanyFactQuery(
+        "total_assets",
+        (
+            ("us-gaap", "Assets"),
+            ("ifrs-full", "Assets"),
+        ),
+    ),
+    CompanyFactQuery(
+        "current_liabilities",
+        (
+            ("us-gaap", "LiabilitiesCurrent"),
+            ("ifrs-full", "CurrentLiabilities"),
+        ),
+    ),
     CompanyFactQuery(
         "long_term_debt",
         (
@@ -95,14 +137,24 @@ BALANCE_SHEET_DEFINITIONS = (
             ("us-gaap", "LongTermDebtAndFinanceLeaseObligations"),
             ("us-gaap", "LongTermDebtNoncurrent"),
             ("us-gaap", "LongTermDebt"),
+            ("ifrs-full", "NoncurrentPortionOfNoncurrentBondsIssued"),
+            ("ifrs-full", "LongtermBorrowings"),
         ),
     ),
-    CompanyFactQuery("total_liabilities", (("us-gaap", "Liabilities"),)),
+    CompanyFactQuery(
+        "total_liabilities",
+        (
+            ("us-gaap", "Liabilities"),
+            ("ifrs-full", "Liabilities"),
+        ),
+    ),
     CompanyFactQuery(
         "stockholders_equity",
         (
             ("us-gaap", "StockholdersEquity"),
             ("us-gaap", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"),
+            ("ifrs-full", "EquityAttributableToOwnersOfParent"),
+            ("ifrs-full", "Equity"),
         ),
     ),
 )
@@ -110,26 +162,40 @@ BALANCE_SHEET_DEFINITIONS = (
 CASH_FLOW_DEFINITIONS = (
     CompanyFactQuery(
         "operating_cash_flow",
-        (("us-gaap", "NetCashProvidedByUsedInOperatingActivities"),),
+        (
+            ("us-gaap", "NetCashProvidedByUsedInOperatingActivities"),
+            ("ifrs-full", "CashFlowsFromUsedInOperatingActivities"),
+        ),
     ),
     CompanyFactQuery(
         "depreciation_amortization",
         (
             ("us-gaap", "DepreciationDepletionAndAmortization"),
             ("us-gaap", "DepreciationAndAmortization"),
+            ("ifrs-full", "DepreciationExpense"),
+            ("ifrs-full", "AmortisationExpense"),
         ),
     ),
     CompanyFactQuery(
         "capex",
-        (("us-gaap", "PaymentsToAcquirePropertyPlantAndEquipment"),),
+        (
+            ("us-gaap", "PaymentsToAcquirePropertyPlantAndEquipment"),
+            ("ifrs-full", "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities"),
+        ),
     ),
     CompanyFactQuery(
         "investing_cash_flow",
-        (("us-gaap", "NetCashProvidedByUsedInInvestingActivities"),),
+        (
+            ("us-gaap", "NetCashProvidedByUsedInInvestingActivities"),
+            ("ifrs-full", "CashFlowsFromUsedInInvestingActivities"),
+        ),
     ),
     CompanyFactQuery(
         "financing_cash_flow",
-        (("us-gaap", "NetCashProvidedByUsedInFinancingActivities"),),
+        (
+            ("us-gaap", "NetCashProvidedByUsedInFinancingActivities"),
+            ("ifrs-full", "CashFlowsFromUsedInFinancingActivities"),
+        ),
     ),
     CompanyFactQuery(
         "change_in_cash",
@@ -139,6 +205,7 @@ CASH_FLOW_DEFINITIONS = (
                 "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect",
             ),
             ("us-gaap", "CashAndCashEquivalentsPeriodIncreaseDecrease"),
+            ("ifrs-full", "IncreaseDecreaseInCashAndCashEquivalents"),
         ),
     ),
 )

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -12,10 +11,8 @@ import pandas as pd
 
 from valuation.portfolio.ibkr import (
     IbkrDividend,
-    IbkrOpenPosition,
     IbkrStatementMeta,
     load_activity_statement,
-    load_open_positions,
 )
 from valuation.portfolio.ibkr_flex import FlexLot, load_flex_query
 from valuation.portfolio.ibkr_flex import FlexInterest, parse_flex_interest
@@ -30,65 +27,10 @@ from valuation.portfolio.tax_si import (
 
 _ENV_FLEX_PATH = "IBKR_FLEX_PATH"
 
-# IBKR uses exchange-local symbols; Yahoo needs exchange suffixes for non-US listings.
-# Add entries here when a symbol consistently fails Yahoo price lookup.
-_IBKR_YAHOO_OVERRIDES: dict[str, str] = {
-    "BNP": "BNP.PA",    # BNP Paribas — Euronext Paris
-    "FWRA": "FWRA.L",   # Invesco FTSE All-World — London
-    "VWCE": "VWCE.DE",  # Vanguard FTSE All-World — Xetra
-    "PAH3": "PAH3.DE",  # Porsche Automobil Holding — Frankfurt
-    "PAH3d": "PAH3.DE",
-}
-
 
 # ---------------------------------------------------------------------------
 # Command runners
 # ---------------------------------------------------------------------------
-
-def run_portfolio_show(
-    file: str | None,
-    outdir: str,
-    output_format: str,
-    use_cache: bool = True,
-    fx_auto: bool = True,
-) -> int:
-    """Show open positions with cost basis, unrealized P&L, and Slovenian tax tier."""
-    paths = _resolve_statement_paths(file)
-    if not paths:
-        return 1
-
-    snapshot_positions, snapshot_meta = _load_latest_open_positions(paths)
-    if snapshot_positions:
-        holdings_table = _build_open_positions_table(
-            snapshot_positions,
-            as_of=snapshot_meta.to_date,
-        )
-        _print_and_save(
-            [("Holdings", holdings_table)],
-            outdir=outdir,
-            output_format=output_format,
-            slug="portfolio_holdings",
-        )
-        return 0
-
-    trades, _dividends, meta = _load_combined_statement(paths)
-    fx_rates = _maybe_fetch_fx(trades, fx_auto)
-    open_lots, _ = build_lots_and_realized(trades, fx_rates=fx_rates)
-
-    if not open_lots:
-        print("No open positions found in statement.")
-        return 0
-
-    holdings_table = _build_holdings_table(open_lots, use_cache=use_cache)
-    _print_and_save(
-        [("Holdings", holdings_table)],
-        outdir=outdir,
-        output_format=output_format,
-        slug="portfolio_holdings",
-    )
-    _warn_needs_fx(open_lots)
-    return 0
-
 
 def run_portfolio_gains(
     file: str | None,
@@ -96,6 +38,7 @@ def run_portfolio_gains(
     outdir: str,
     output_format: str,
     fx_auto: bool = True,
+    show_fees: bool = False,
 ) -> int:
     """Show realized gains for a tax year and compute Slovenian CGT owed."""
     paths = _resolve_statement_paths(file)
@@ -111,14 +54,18 @@ def run_portfolio_gains(
         print(f"No realized gains/losses found for {year}.")
         return 0
 
-    tax_table = _build_tax_table(year_gains)
-    filing_rows = _build_kdvp_filing_rows(year_gains)
+    lot_fees: dict[int, tuple[float, float]] = {}
+    if show_fees:
+        lot_fees = _extract_flex_fees(paths, year_gains, fx_rates)
+
+    tax_table = _build_tax_table(year_gains, lot_fees=lot_fees, show_fees=show_fees)
     summary_table = _build_tax_summary(year_gains, year)
 
+    note = _GAINS_FEE_NOTE_SHOW_FEES if show_fees else _GAINS_FEE_NOTE
+    print(f"\nNote: {note}")
     _print_and_save(
         [
             (f"Realized Gains {year}", tax_table),
-            (f"KDVP Filing Rows {year}", filing_rows),
             ("Tax Summary", summary_table),
         ],
         outdir=outdir,
@@ -134,7 +81,6 @@ def run_portfolio_dividends(
     year: int,
     outdir: str,
     output_format: str,
-    fx_auto: bool = True,
 ) -> int:
     """Show dividend income for a tax year and compute Slovenian dividend tax owed."""
     paths = _resolve_statement_paths(file)
@@ -143,32 +89,24 @@ def run_portfolio_dividends(
 
     _trades, dividends, meta = _load_combined_statement(paths)
 
-    # Filter to the requested year
     year_divs = [d for d in dividends if d.payment_date.year == year]
     if not year_divs:
         print(f"No dividends found for {year}.")
         return 0
 
-    # For non-EUR dividends we need FX rates; fetch if requested
-    non_eur_pairs = [
-        (d.currency, d.payment_date)
-        for d in year_divs
-        if d.currency != "EUR"
-    ]
     fx_rates: dict = {}
-    if fx_auto and non_eur_pairs:
+    non_eur_pairs = [(d.currency, d.payment_date) for d in year_divs if d.currency != "EUR"]
+    if non_eur_pairs:
         from valuation.portfolio.fx import EcbFxClient
-        client = EcbFxClient()
-        fx_rates = client.build_fx_rates_dict(non_eur_pairs)
+        fx_rates = EcbFxClient().build_fx_rates_dict(non_eur_pairs)
 
     div_table = _build_dividend_table(year_divs, fx_rates)
-    filing_rows = _build_dividend_filing_rows(year_divs, fx_rates)
     summary_table = _build_dividend_summary(year_divs, fx_rates, year)
 
+    print(f"\nNote: {_DIVIDENDS_NOTE}")
     _print_and_save(
         [
             (f"Dividends {year}", div_table),
-            (f"Dividend Filing Rows {year}", filing_rows),
             ("Dividend Tax Summary", summary_table),
         ],
         outdir=outdir,
@@ -198,13 +136,12 @@ def run_portfolio_interest(
 
     fx_rates = _maybe_fetch_interest_fx(year_interest, fx_auto)
     interest_table = _build_interest_table(year_interest, fx_rates)
-    filing_rows = _build_interest_filing_rows(year_interest, fx_rates)
     summary_table = _build_interest_summary(year_interest, fx_rates, year)
 
+    print(f"\nNote: {_INTEREST_NOTE}")
     _print_and_save(
         [
             (f"Interest {year}", interest_table),
-            (f"Interest Filing Rows {year}", filing_rows),
             ("Interest Tax Summary", summary_table),
         ],
         outdir=outdir,
@@ -387,159 +324,48 @@ def run_portfolio_reconcile(
 # Table builders
 # ---------------------------------------------------------------------------
 
-def _build_holdings_table(open_lots: list[Lot], *, use_cache: bool = True) -> pd.DataFrame:
-    today = date.today()
-    by_symbol: dict[str, list[Lot]] = {}
-    for lot in open_lots:
-        by_symbol.setdefault(lot.symbol, []).append(lot)
-
-    prices = _fetch_prices(list(by_symbol.keys()), use_cache=use_cache)
-
-    # Collect all currencies quoted in the snapshots (may differ from trade currency)
-    quote_currencies: set[str] = set()
-    for symbol in by_symbol:
-        snap = prices.get(_ibkr_to_yahoo(symbol), {})
-        qc = (snap.get("currency") or "").upper()
-        if qc and qc != "EUR":
-            quote_currencies.add(qc)
-    # Also include trade currencies in case quote currency is missing from snapshot
-    for lots in by_symbol.values():
-        tc = (lots[0].currency or "").upper()
-        if tc and tc != "EUR":
-            quote_currencies.add(tc)
-    live_fx = _fetch_live_fx_for_currencies(quote_currencies)
-
-    rows = []
-    for symbol, lots in sorted(by_symbol.items()):
-        total_qty = sum(l.quantity for l in lots)
-        total_cost_eur = _sum_optional(l.cost_basis_eur for l in lots)
-        avg_cost_eur = (total_cost_eur / total_qty
-                        if (total_cost_eur is not None and total_qty > 0)
-                        else None)
-
-        oldest = min(lots, key=lambda l: l.acquired)
-        threshold = next_si_cgt_threshold(oldest.acquired, today)
-        current_rate = si_cgt_rate(oldest.acquired, today)
-        days_to_next = (threshold[0] - today).days if threshold else None
-
-        snap = prices.get(_ibkr_to_yahoo(symbol), {})
-        last_price_eur = _to_eur_price(snap, lots[0].currency, live_fx=live_fx)
-        value_eur = last_price_eur * total_qty if last_price_eur is not None else None
-        unrealized_eur = (
-            (value_eur - total_cost_eur)
-            if (value_eur is not None and total_cost_eur is not None)
-            else None
-        )
-
-        rows.append(
-            {
-                "symbol": symbol,
-                "lots": len(lots),
-                "shares": _fmt_qty(total_qty),
-                "avg_cost_eur": _fmt_eur(avg_cost_eur),
-                "last_eur": _fmt_eur(last_price_eur),
-                "value_eur": _fmt_eur(value_eur),
-                "unrealized_eur": _fmt_signed_eur(unrealized_eur),
-                "oldest_lot": oldest.acquired.isoformat(),
-                "cgt_rate": f"{current_rate * 100:.0f}%",
-                "days_to_next_tier": (
-                    str(days_to_next) if days_to_next is not None else "exempt"
-                ),
-                "needs_fx": any(l.cost_basis_eur is None for l in lots),
-            }
-        )
-
-    return pd.DataFrame(rows)
+_GAINS_FEE_NOTE = "Buy and sell commissions are included in cost and proceeds respectively (FURS requirement)."
+_GAINS_FEE_NOTE_SHOW_FEES = (
+    "Buy and sell commissions are included in cost and proceeds respectively (FURS requirement). "
+    "The fee column shows the sell commission already deducted from proceeds — informational only."
+)
 
 
-def _build_open_positions_table(
-    positions: list[IbkrOpenPosition],
+def _build_tax_table(
+    realized: list[RealizedGain],
     *,
-    as_of: date | None,
+    lot_fees: dict[int, tuple[float, float]] | None = None,
+    show_fees: bool = False,
 ) -> pd.DataFrame:
-    """Build holdings from IBKR's explicit Open Positions snapshot."""
-    currencies = {p.currency for p in positions if p.currency != "EUR"}
-    fx_date = as_of or date.today()
-    fx_rates = _fetch_fx_for_position_currencies(currencies, fx_date)
-
-    rows = []
-    for p in sorted(positions, key=lambda p: p.symbol):
-        eur_rate = 1.0 if p.currency == "EUR" else fx_rates.get(p.currency)
-        avg_cost_eur = p.cost_price * eur_rate if eur_rate is not None else None
-        last_eur = p.close_price * eur_rate if eur_rate is not None else None
-        cost_basis_eur = p.cost_basis * eur_rate if eur_rate is not None else None
-        value_eur = p.value * eur_rate if eur_rate is not None else None
-        unrealized_eur = p.unrealized_pnl * eur_rate if eur_rate is not None else None
-
-        rows.append(
-            {
-                "symbol": p.symbol,
-                "currency": p.currency,
-                "shares": _fmt_qty(p.quantity),
-                "avg_cost_native": _fmt_currency(p.cost_price, p.currency),
-                "avg_cost_eur": _fmt_eur(avg_cost_eur),
-                "last_native": _fmt_currency(p.close_price, p.currency),
-                "last_eur": _fmt_eur(last_eur),
-                "cost_basis_eur": _fmt_eur(cost_basis_eur),
-                "value_eur": _fmt_eur(value_eur),
-                "unrealized_eur": _fmt_signed_eur(unrealized_eur),
-                "as_of": fx_date.isoformat(),
-                "needs_fx": eur_rate is None,
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-def _build_tax_table(realized: list[RealizedGain]) -> pd.DataFrame:
-    rows = []
-    for r in realized:
-        rate = si_cgt_rate(r.acquired, r.sold)
-        gain = r.gain_eur
-        tax = si_cgt_tax(gain, r.acquired, r.sold) if gain is not None else None
-        rows.append(
-            {
-                "symbol": r.symbol,
-                "acquired": r.acquired.isoformat(),
-                "sold": r.sold.isoformat(),
-                "quantity": _fmt_qty(r.quantity),
-                "cost_eur": _fmt_eur(r.cost_basis_eur),
-                "proceeds_eur": _fmt_eur(r.proceeds_eur),
-                "gain_eur": _fmt_signed_eur(gain),
-                "years_held": f"{_years_held(r.acquired, r.sold):.1f}",
-                "rate": f"{rate * 100:.0f}%",
-                "tax_eur": _fmt_eur(tax),
-                "needs_fx": r.needs_fx,
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-def _build_kdvp_filing_rows(realized: list[RealizedGain]) -> pd.DataFrame:
     rows = []
     for idx, r in enumerate(realized, start=1):
-        gain = r.gain_eur
         rate = si_cgt_rate(r.acquired, r.sold)
-        tax = si_cgt_tax(gain, r.acquired, r.sold) if gain is not None else None
-        rows.append(
-            {
-                "form": "Doh-KDVP",
-                "row": idx,
-                "symbol": r.symbol,
-                "acquired": r.acquired.isoformat(),
-                "sold": r.sold.isoformat(),
-                "quantity": _fmt_qty(r.quantity),
-                "f4_buy_value_eur": _fmt_eur(r.cost_basis_eur),
-                "f5_buy_costs_eur": _fmt_eur(0.0 if r.cost_basis_eur is not None else None),
-                "f8_sell_value_eur": _fmt_eur(r.proceeds_eur),
-                "f9_sell_costs_eur": _fmt_eur(0.0 if r.proceeds_eur is not None else None),
-                "gain_loss_eur": _fmt_signed_eur(gain),
-                "tax_rate": f"{rate * 100:.0f}%",
-                "estimated_tax_eur": _fmt_eur(tax),
-                "basis_note": "IBKR fees included in F4/F8; F5/F9 shown as 0",
-                "needs_fx": r.needs_fx,
-            }
-        )
+        gain_eur = r.gain_eur
+        tax = si_cgt_tax(gain_eur, r.acquired, r.sold) if gain_eur is not None else None
+
+        cost_val = _fmt_eur(r.cost_basis_eur) if r.cost_basis_eur is not None else _fmt_currency(r.cost_basis_native, r.currency)
+        proceeds_val = _fmt_eur(r.proceeds_eur) if r.proceeds_eur is not None else _fmt_currency(r.proceeds_native, r.currency)
+        gain_val = _fmt_signed_eur(gain_eur) if gain_eur is not None else _fmt_signed_currency(r.gain_native, r.currency)
+
+        row: dict = {
+            "id": idx,
+            "symbol": r.symbol,
+            "acquired": r.acquired.isoformat(),
+            "sold": r.sold.isoformat(),
+            "qty": _fmt_qty(r.quantity),
+            "cost_eur": cost_val,
+            "proceeds_eur": proceeds_val,
+            "gain_eur": gain_val,
+            "tax_rate": f"{rate * 100:.0f}%",
+            "tax_eur": _fmt_eur(tax),
+            "years_held": f"{_years_held(r.acquired, r.sold):.1f}",
+        }
+        if show_fees and lot_fees is not None:
+            _, sell_fee = lot_fees.get(idx - 1, (0.0, 0.0))
+            row["fee_eur"] = _fmt_eur(sell_fee) if sell_fee else "€0.00"
+        rows.append(row)
     return pd.DataFrame(rows)
+
 
 
 def _build_tax_summary(realized: list[RealizedGain], year: int) -> pd.DataFrame:
@@ -578,37 +404,14 @@ def _build_tax_summary(realized: list[RealizedGain], year: int) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+_DIVIDENDS_NOTE = (
+    "File on Doh-Div. SI top-up estimate is informative only — assumes foreign WHT fully offsets "
+    "the 25% SI rate (perfect DTA credit). Actual liability may differ depending on the treaty, "
+    "year, and FURS interpretation. Verify before filing."
+)
+
+
 def _build_dividend_table(
-    dividends: list[IbkrDividend],
-    fx_rates: dict,
-) -> pd.DataFrame:
-    rows = []
-    for d in dividends:
-        eur_rate = fx_rates.get((d.currency, d.payment_date.isoformat()), 1.0 if d.currency == "EUR" else None)
-        gross_eur = d.amount * eur_rate if eur_rate is not None else None
-        wht_eur = d.withholding_tax * eur_rate if eur_rate is not None else None
-        top_up = (
-            si_dividend_tax(gross_eur, wht_eur)
-            if (gross_eur is not None and wht_eur is not None)
-            else None
-        )
-        rows.append(
-            {
-                "symbol": d.symbol,
-                "date": d.payment_date.isoformat(),
-                "currency": d.currency,
-                "gross_native": _fmt_currency(d.amount, d.currency),
-                "wht_native": _fmt_currency(d.withholding_tax, d.currency),
-                "gross_eur": _fmt_eur(gross_eur),
-                "wht_eur": _fmt_eur(wht_eur),
-                "si_topup_eur": _fmt_eur(top_up),
-                "needs_fx": eur_rate is None,
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-def _build_dividend_filing_rows(
     dividends: list[IbkrDividend],
     fx_rates: dict,
 ) -> pd.DataFrame:
@@ -624,18 +427,15 @@ def _build_dividend_filing_rows(
         )
         rows.append(
             {
-                "form": "Doh-Div",
-                "row": idx,
+                "id": idx,
                 "symbol": d.symbol,
-                "payment_date": d.payment_date.isoformat(),
-                "currency": d.currency,
-                "gross_native": _fmt_currency(d.amount, d.currency),
-                "foreign_wht_native": _fmt_currency(d.withholding_tax, d.currency),
+                "date": d.payment_date.isoformat(),
+                "ccy": d.currency,
+                "gross": _fmt_currency(d.amount, d.currency),
+                "wht": _fmt_currency(d.withholding_tax, d.currency),
                 "gross_eur": _fmt_eur(gross_eur),
-                "foreign_wht_eur": _fmt_eur(wht_eur),
-                "estimated_si_topup_eur": _fmt_eur(top_up),
-                "description": d.description,
-                "needs_fx": eur_rate is None,
+                "wht_eur": _fmt_eur(wht_eur),
+                "topup_eur": _fmt_eur(top_up),
             }
         )
     return pd.DataFrame(rows)
@@ -679,37 +479,14 @@ def _build_dividend_summary(
     return pd.DataFrame(rows)
 
 
+_INTEREST_NOTE = (
+    "File on Doh-Obr. SI tax estimate is informative only — assumes foreign WHT fully offsets "
+    "the 25% SI rate (perfect DTA credit). Actual liability may differ; Slovenia's treatment "
+    "of broker interest WHT credits can deviate from a simple offset. Verify before filing."
+)
+
+
 def _build_interest_table(
-    interest: list[FlexInterest],
-    fx_rates: dict,
-) -> pd.DataFrame:
-    rows = []
-    for row in interest:
-        eur_rate = _interest_eur_rate(row, fx_rates)
-        gross_eur = row.amount * eur_rate if eur_rate is not None else None
-        wht_eur = row.withholding_tax * eur_rate if eur_rate is not None else None
-        tax = (
-            si_interest_tax(gross_eur, wht_eur)
-            if (gross_eur is not None and wht_eur is not None)
-            else None
-        )
-        rows.append(
-            {
-                "date": row.payment_date.isoformat(),
-                "currency": row.currency,
-                "gross_native": _fmt_currency(row.amount, row.currency),
-                "wht_native": _fmt_currency(row.withholding_tax, row.currency),
-                "gross_eur": _fmt_eur(gross_eur),
-                "wht_eur": _fmt_eur(wht_eur),
-                "estimated_si_tax_eur": _fmt_eur(tax),
-                "needs_fx": eur_rate is None,
-                "description": row.description,
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-def _build_interest_filing_rows(
     interest: list[FlexInterest],
     fx_rates: dict,
 ) -> pd.DataFrame:
@@ -725,18 +502,14 @@ def _build_interest_filing_rows(
         )
         rows.append(
             {
-                "form": "Doh-Obr",
-                "row": idx,
-                "payer": "Interactive Brokers",
-                "payment_date": row.payment_date.isoformat(),
-                "currency": row.currency,
-                "gross_native": _fmt_currency(row.amount, row.currency),
-                "foreign_wht_native": _fmt_currency(row.withholding_tax, row.currency),
+                "id": idx,
+                "date": row.payment_date.isoformat(),
+                "ccy": row.currency,
+                "gross": _fmt_currency(row.amount, row.currency),
+                "wht": _fmt_currency(row.withholding_tax, row.currency),
                 "gross_eur": _fmt_eur(gross_eur),
-                "foreign_wht_eur": _fmt_eur(wht_eur),
-                "estimated_si_tax_eur": _fmt_eur(tax),
-                "description": row.description,
-                "needs_fx": eur_rate is None,
+                "wht_eur": _fmt_eur(wht_eur),
+                "topup_eur": _fmt_eur(tax),
             }
         )
     return pd.DataFrame(rows)
@@ -1058,6 +831,55 @@ def _maybe_fetch_interest_fx(interest: list[FlexInterest], fx_auto: bool) -> dic
     return client.build_fx_rates_dict(pairs)
 
 
+def _extract_flex_fees(
+    paths: list[Path],
+    year_gains: list[RealizedGain],
+    fx_rates: dict | None,
+) -> dict[int, tuple[float, float]]:
+    """Return {year_gains_index: (buy_fee_eur, sell_fee_eur)} from Flex XML lots.
+
+    Fees are in native currency; converted to EUR using fx_rates when available.
+    Non-EUR lots without FX rate get 0.0 for both fees.
+    """
+    from collections import defaultdict
+
+    all_lots = []
+    for path in paths:
+        if path.suffix.lower() == ".xml":
+            lots, _, _ = load_flex_query(path)
+            all_lots.extend(lots)
+
+    # Build lookup: (symbol, acquired, sold) -> [(buy_comm, sell_comm, currency), ...]
+    fee_by_key: dict = defaultdict(list)
+    for lot in all_lots:
+        fee_by_key[(lot.symbol, lot.acquired, lot.sold)].append(
+            (lot.buy_commission, lot.sell_commission, lot.currency)
+        )
+
+    result: dict[int, tuple[float, float]] = {}
+    counters: dict = defaultdict(int)
+    for i, r in enumerate(year_gains):
+        key = (r.symbol, r.acquired, r.sold)
+        idx = counters[key]
+        entries = fee_by_key.get(key, [])
+        counters[key] += 1
+        if idx >= len(entries):
+            continue
+        buy_comm, sell_comm, currency = entries[idx]
+        if currency == "EUR":
+            rate = 1.0
+        else:
+            rate = (fx_rates or {}).get((currency, r.acquired.isoformat())) if buy_comm else None
+            sell_rate = (fx_rates or {}).get((currency, r.sold.isoformat())) if sell_comm else None
+            buy_fee_eur = buy_comm * rate if rate is not None else 0.0
+            sell_fee_eur = sell_comm * sell_rate if sell_rate is not None else 0.0
+            result[i] = (buy_fee_eur, sell_fee_eur)
+            continue
+        result[i] = (buy_comm * rate, sell_comm * rate)
+
+    return result
+
+
 def _non_eur_dividend_currency_dates(dividends: list[IbkrDividend]) -> list[tuple[str, date]]:
     seen: set[tuple[str, str]] = set()
     result: list[tuple[str, date]] = []
@@ -1094,84 +916,6 @@ def _interest_eur_rate(interest: FlexInterest, fx_rates: dict) -> float | None:
     if interest.currency == "EUR":
         return 1.0
     return fx_rates.get((interest.currency, interest.payment_date.isoformat()))
-
-
-def _fetch_fx_for_position_currencies(currencies: set[str], on: date) -> dict[str, float]:
-    if not currencies:
-        return {}
-    from valuation.portfolio.fx import EcbFxClient
-    client = EcbFxClient()
-    result: dict[str, float] = {}
-    for currency in currencies:
-        rate = client.eur_per_unit(currency, on)
-        if rate is not None:
-            result[currency] = rate
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Price fetching
-# ---------------------------------------------------------------------------
-
-def _fetch_prices(symbols: list[str], *, use_cache: bool) -> dict[str, dict]:
-    from valuation.data.providers.yahoo import YahooFinanceClient
-
-    client = YahooFinanceClient(use_cache=use_cache)
-    yahoo_symbols = [_ibkr_to_yahoo(s) for s in symbols]
-
-    results: dict[str, dict] = {}
-    with ThreadPoolExecutor(max_workers=min(len(yahoo_symbols), 8)) as ex:
-        futures = {s: ex.submit(_safe_fetch, client, s) for s in yahoo_symbols}
-    for symbol, future in futures.items():
-        snap = future.result()
-        if snap:
-            results[symbol] = snap
-    return results
-
-
-def _safe_fetch(client, symbol: str) -> dict | None:
-    try:
-        return client.fetch_price_snapshot(symbol)
-    except Exception:
-        return None
-
-
-def _to_eur_price(
-    snap: dict,
-    trade_currency: str,
-    *,
-    live_fx: dict[str, float] | None = None,
-) -> float | None:
-    if not snap:
-        return None
-    last = snap.get("last_price")
-    if last is None:
-        return None
-    currency = (snap.get("currency") or trade_currency or "").upper()
-    if currency == "EUR":
-        return float(last)
-    if live_fx:
-        rate = live_fx.get(currency)
-        if rate is not None:
-            return float(last) * rate
-    return None
-
-
-def _fetch_live_fx_for_currencies(currencies: set[str]) -> dict[str, float]:
-    """Fetch today's ECB spot rate for each non-EUR currency."""
-    if not currencies:
-        return {}
-    from valuation.portfolio.fx import EcbFxClient
-    client = EcbFxClient()
-    today = date.today()
-    result: dict[str, float] = {}
-    for cur in currencies:
-        if cur == "EUR":
-            continue
-        rate = client.eur_per_unit(cur, today)
-        if rate is not None:
-            result[cur] = rate
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1216,22 +960,6 @@ def _load_interest_from_flex_paths(paths: list[Path]) -> list[FlexInterest]:
             file=sys.stderr,
         )
     return sorted(rows, key=lambda row: row.payment_date)
-
-
-def _load_latest_open_positions(paths: list[Path]) -> tuple[list[IbkrOpenPosition], IbkrStatementMeta]:
-    """Return Open Positions from the latest CSV activity statement, if available."""
-    candidates = []
-    for path in paths:
-        if path.suffix.lower() != ".csv":
-            continue
-        positions, meta = load_open_positions(path)
-        if positions:
-            candidates.append((meta.to_date or date.min, path, positions, meta))
-    if not candidates:
-        return [], IbkrStatementMeta(base_currency="EUR", account_id="", from_date=None, to_date=None)
-
-    _to_date, _path, positions, meta = max(candidates, key=lambda item: (item[0], item[1].name))
-    return positions, meta
 
 
 def _load_combined_statement(
@@ -1327,13 +1055,6 @@ def _load_flex_as_trades(path: Path, *, fx_auto: bool = True):
     return trades, dividends, meta
 
 
-def _ibkr_to_yahoo(symbol: str) -> str:
-    """Normalize IBKR symbol format to Yahoo Finance format."""
-    if symbol in _IBKR_YAHOO_OVERRIDES:
-        return _IBKR_YAHOO_OVERRIDES[symbol]
-    return symbol.replace(" ", "-")
-
-
 def _sum_optional(values) -> float | None:
     total = 0.0
     any_value = False
@@ -1361,8 +1082,12 @@ def _fmt_eur(value: float | None) -> str:
 def _fmt_signed_eur(value: float | None) -> str:
     if value is None:
         return "N/A"
-    prefix = "+" if value > 0 else ""
-    return f"{prefix}€{value:,.2f}"
+    return f"€{value:,.2f}"
+
+
+def _fmt_signed_currency(value: float, currency: str) -> str:
+    symbol = "€" if currency == "EUR" else ("$" if currency == "USD" else currency + " ")
+    return f"{symbol}{value:,.2f}"
 
 
 def _fmt_qty(qty: float) -> str:
@@ -1432,6 +1157,7 @@ def _print_and_save(
 
     from valuation.reports.tables import (
         frame_to_records,
+        rename_for_display,
         render_terminal_table,
         write_csv,
         write_json,
@@ -1443,7 +1169,7 @@ def _print_and_save(
     if output_format == "json":
         bundle = {
             "sections": {
-                title.lower().replace(" ", "_"): frame_to_records(df)
+                title.lower().replace(" ", "_"): frame_to_records(rename_for_display(df))
                 for title, df in sections
             }
         }
@@ -1462,16 +1188,6 @@ def _print_and_save(
         write_markdown(df, out_path / f"{name}.md")
 
     print(f"\nWrote tables to {out_path}")
-
-
-def _warn_needs_fx(open_lots: list[Lot]) -> None:
-    non_eur = {l.symbol for l in open_lots if l.cost_basis_eur is None}
-    if non_eur:
-        print(
-            f"\nNote: EUR cost basis unavailable for {', '.join(sorted(non_eur))} "
-            "(non-EUR trades). ECB FX fetch failed or returned no data for these dates.",
-            file=sys.stderr,
-        )
 
 
 def _warn_needs_fx_realized(realized: list[RealizedGain]) -> None:

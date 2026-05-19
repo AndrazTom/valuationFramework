@@ -37,15 +37,30 @@ COMMON_FACT_DEFINITIONS = (
         (
             ("us-gaap", "CashAndCashEquivalentsAtCarryingValue"),
             ("us-gaap", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"),
+            ("ifrs-full", "CashAndCashEquivalents"),
         ),
     ),
-    CompanyFactQuery("total_assets", (("us-gaap", "Assets"),)),
-    CompanyFactQuery("total_liabilities", (("us-gaap", "Liabilities"),)),
+    CompanyFactQuery(
+        "total_assets",
+        (
+            ("us-gaap", "Assets"),
+            ("ifrs-full", "Assets"),
+        ),
+    ),
+    CompanyFactQuery(
+        "total_liabilities",
+        (
+            ("us-gaap", "Liabilities"),
+            ("ifrs-full", "Liabilities"),
+        ),
+    ),
     CompanyFactQuery(
         "stockholders_equity",
         (
             ("us-gaap", "StockholdersEquity"),
             ("us-gaap", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"),
+            ("ifrs-full", "EquityAttributableToOwnersOfParent"),
+            ("ifrs-full", "Equity"),
         ),
     ),
     CompanyFactQuery(
@@ -57,6 +72,8 @@ COMMON_FACT_DEFINITIONS = (
             ("us-gaap", "InterestIncomeOperating"),
             ("us-gaap", "InterestIncomeExpenseNet"),
             ("us-gaap", "NoninterestIncome"),
+            ("ifrs-full", "Revenue"),
+            ("ifrs-full", "RevenueFromContractsWithCustomers"),
         ),
     ),
     CompanyFactQuery(
@@ -66,11 +83,16 @@ COMMON_FACT_DEFINITIONS = (
             ("us-gaap", "NetIncomeLossAvailableToCommonStockholdersDiluted"),
             ("us-gaap", "NetIncomeLossAvailableToCommonStockholdersBasic"),
             ("us-gaap", "ProfitLoss"),
+            ("ifrs-full", "ProfitLoss"),
+            ("ifrs-full", "ProfitLossAttributableToOwnersOfParent"),
         ),
     ),
     CompanyFactQuery(
         "operating_income",
-        (("us-gaap", "OperatingIncomeLoss"),),
+        (
+            ("us-gaap", "OperatingIncomeLoss"),
+            ("ifrs-full", "ProfitLossFromOperatingActivities"),
+        ),
     ),
     CompanyFactQuery(
         "long_term_debt",
@@ -79,6 +101,8 @@ COMMON_FACT_DEFINITIONS = (
             ("us-gaap", "LongTermDebtAndFinanceLeaseObligations"),
             ("us-gaap", "LongTermDebtNoncurrent"),
             ("us-gaap", "LongTermDebt"),
+            ("ifrs-full", "NoncurrentPortionOfNoncurrentBondsIssued"),
+            ("ifrs-full", "LongtermBorrowings"),
         ),
     ),
     CompanyFactQuery(
@@ -87,15 +111,23 @@ COMMON_FACT_DEFINITIONS = (
             ("us-gaap", "DepreciationDepletionAndAmortization"),
             ("us-gaap", "DepreciationAndAmortization"),
             ("us-gaap", "Depreciation"),
+            ("ifrs-full", "DepreciationExpense"),
+            ("ifrs-full", "AmortisationExpense"),
         ),
     ),
     CompanyFactQuery(
         "operating_cash_flow",
-        (("us-gaap", "NetCashProvidedByUsedInOperatingActivities"),),
+        (
+            ("us-gaap", "NetCashProvidedByUsedInOperatingActivities"),
+            ("ifrs-full", "CashFlowsFromUsedInOperatingActivities"),
+        ),
     ),
     CompanyFactQuery(
         "capex",
-        (("us-gaap", "PaymentsToAcquirePropertyPlantAndEquipment"),),
+        (
+            ("us-gaap", "PaymentsToAcquirePropertyPlantAndEquipment"),
+            ("ifrs-full", "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities"),
+        ),
     ),
 )
 

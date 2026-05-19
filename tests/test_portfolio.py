@@ -1220,7 +1220,7 @@ def test_portfolio_reconcile_writes_audit_tables(tmp_path):
     warnings = (result_dir / "warnings.md").read_text(encoding="utf-8")
 
     assert "Net gain / loss" in realized
-    assert "+€196.00" in realized
+    assert "€196.00" in realized
     assert "Gross dividend income" in dividends
     assert "€10.00" in dividends
     assert "No reconciliation warnings" in warnings
@@ -1256,7 +1256,7 @@ def test_reconcile_period_coverage_detects_statement_gaps():
     assert _periods_cover_year(summaries, 2025) is False
 
 
-def test_portfolio_tax_writes_kdvp_filing_rows(tmp_path):
+def test_portfolio_tax_writes_realized_gains(tmp_path):
     statement = tmp_path / "statement.csv"
     statement.write_text(_RECONCILE_CSV, encoding="utf-8")
     outdir = tmp_path / "outputs"
@@ -1270,15 +1270,19 @@ def test_portfolio_tax_writes_kdvp_filing_rows(tmp_path):
     )
 
     assert code == 0
-    filing_rows = (
-        outdir / "portfolio_gains_2025" / "kdvp_filing_rows_2025.md"
-    ).read_text(encoding="utf-8")
-    assert "Doh-KDVP" in filing_rows
-    assert "f4 buy value eur" in filing_rows
-    assert "IBKR fees included" in filing_rows
+    result_dir = outdir / "portfolio_gains_2025"
+    assert not (result_dir / "kdvp_filing_rows_2025.md").exists()
+    assert (result_dir / "tax_summary.md").is_file()
+    gains = (result_dir / "realized_gains_2025.md").read_text(encoding="utf-8")
+    assert "id" in gains
+    assert "cost €" in gains
+    assert "proceeds €" in gains
+    assert "gain €" in gains
+    assert "buy costs" not in gains
+    assert "sell costs" not in gains
 
 
-def test_portfolio_dividends_writes_filing_rows(tmp_path):
+def test_portfolio_dividends_writes_table(tmp_path):
     statement = tmp_path / "statement.csv"
     statement.write_text(_RECONCILE_CSV, encoding="utf-8")
     outdir = tmp_path / "outputs"
@@ -1288,15 +1292,16 @@ def test_portfolio_dividends_writes_filing_rows(tmp_path):
         year=2025,
         outdir=str(outdir),
         output_format="table",
-        fx_auto=True,
     )
 
     assert code == 0
-    filing_rows = (
-        outdir / "portfolio_dividends_2025" / "dividend_filing_rows_2025.md"
-    ).read_text(encoding="utf-8")
-    assert "Doh-Div" in filing_rows
-    assert "estimated si topup eur" in filing_rows
+    result_dir = outdir / "portfolio_dividends_2025"
+    assert not (result_dir / "dividend_filing_rows_2025.md").exists()
+    divs = (result_dir / "dividends_2025.md").read_text(encoding="utf-8")
+    assert "id" in divs
+    assert "gross €" in divs
+    assert "wht €" in divs
+    assert "topup €" in divs
 
 
 def test_portfolio_interest_writes_filing_rows(tmp_path):
@@ -1332,11 +1337,10 @@ def test_portfolio_interest_writes_filing_rows(tmp_path):
 
     assert code == 0
     result_dir = outdir / "portfolio_interest_2025"
+    assert not (result_dir / "interest_filing_rows_2025.md").exists()
     interest_rows = (result_dir / "interest_2025.md").read_text(encoding="utf-8")
-    filing_rows = (result_dir / "interest_filing_rows_2025.md").read_text(encoding="utf-8")
     summary = (result_dir / "interest_tax_summary.md").read_text(encoding="utf-8")
     assert "€30.00" in interest_rows
-    assert "Doh-Obr" in filing_rows
     assert "€1.50" in summary
 
 

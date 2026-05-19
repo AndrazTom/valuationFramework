@@ -100,10 +100,16 @@ export VALUATION_SEC_USER_AGENT="valuationFramework/0.1 your@email.com"
 
 ### Portfolio
 
-Private brokerage and tax files should stay under ignored paths such as `portfolio/`.
+All portfolio commands require an **IBKR Flex Query XML** export. Set the path once:
 
 ```bash
-./vf portfolio show                               # open positions, cost basis, P&L, tax tier
+# .env (gitignored)
+IBKR_FLEX_PATH=/path/to/your_flex.xml
+```
+
+See [docs/portfolio.md — Flex Query setup](docs/portfolio.md#ibkr-flex-query-setup) for how to configure and export the query from IBKR.
+
+```bash
 ./vf portfolio gains --year 2025                  # realized gains and Slovenian CGT view
 ./vf portfolio dividends --year 2025              # dividends, WHT, and Slovenian dividend tax view
 ./vf portfolio interest --year 2025               # broker interest, WHT, and Doh-Obr-shaped rows
@@ -111,7 +117,7 @@ Private brokerage and tax files should stay under ignored paths such as `portfol
 ./vf portfolio furs-xml --file flex.xml --year 2025   # generate Doh-KDVP, Doh-Div, Doh-Obr XML
 ```
 
-See `docs/portfolio.md` for Flex Query setup, env vars, and FURS filing notes.
+See `docs/portfolio.md` for env vars and FURS filing notes.
 
 ### Berkshire
 

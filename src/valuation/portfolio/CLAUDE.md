@@ -86,20 +86,20 @@ The `.gitignore` already excludes `*.activity.csv`, `*_statement.csv`, `ibkr_*.c
 
 ## Filing-shaped rows
 
-- `./vf portfolio gains --year YYYY` now emits:
-  - `Realized Gains YYYY` — current readable realized-lot table
-  - `KDVP Filing Rows YYYY` — Doh-KDVP-shaped rows with F4/F5/F8/F9-like columns
-  - `Tax Summary`
-- `./vf portfolio dividends --year YYYY` now emits:
-  - `Dividends YYYY`
-  - `Dividend Filing Rows YYYY` — Doh-Div-shaped gross/WHT/top-up rows
-  - `Dividend Tax Summary`
-- `./vf portfolio interest --year YYYY` emits:
-  - `Interest YYYY`
-  - `Interest Filing Rows YYYY` — Doh-Obr-shaped gross/WHT/tax rows
-  - `Interest Tax Summary`
-- FURS XML is still intentionally deferred. The next durable milestone is stable filing row contracts, not XML formatting.
-- Activity CSV can support trade/dividend rows when exported with enough history, but Flex XML remains preferred for tax-grade lots and broker interest.
+- `./vf portfolio gains --year YYYY` emits:
+  - `Realized Gains YYYY` — one row per lot with cost, proceeds, gain, CGT tier
+  - `Tax Summary` — totals and estimated SI CGT
+  - `--show-fees` adds a `fee €` column (sell commission, already deducted from proceeds — informational)
+- `./vf portfolio dividends --year YYYY` emits a single `Dividends YYYY` table with columns:
+  `id`, `symbol`, `date`, `ccy`, `gross`, `wht`, `gross €`, `wht €`, `topup €`
+- `./vf portfolio interest --year YYYY` emits a single `Interest YYYY` table with columns:
+  `id`, `date`, `ccy`, `gross`, `wht`, `gross €`, `wht €`, `topup €`
+- The `topup €` column is the estimated Slovenian top-up tax (see SI tax limitations below).
+- FURS XML generation is intentionally deferred; the filing-shaped row contract above is the stable
+  milestone before tackling XML. Actual Doh-Div and Doh-Obr generation must use hardened treaty
+  logic from the `ib-edavki` reference (see SI tax limitations below).
+- Activity CSV can support trade/dividend rows when exported with enough history, but Flex XML
+  remains preferred for tax-grade lots and broker interest.
 
 ## Reconciliation workflow
 
@@ -134,6 +134,26 @@ In IBKR Account Management:
   wait 30 days. FIFO constraint means you cannot selectively sell a specific loss lot if earlier
   (gain) lots of the same symbol exist; use a different instrument to harvest the loss cleanly.
 - Verify all rates and deadlines with FURS (https://www.fu.gov.si) before filing
+
+## SI dividend and interest tax limitations
+
+The current `si_dividend_tax` and `si_interest_tax` formulas in `tax_si.py` use:
+
+```
+max(0, 0.25 * gross_eur - wht_eur)
+```
+
+This assumes a **perfect DTA credit** — that foreign WHT fully offsets the 25% Slovenian rate.
+This is known to be incorrect in some years (e.g. 2025), where Slovenia's actual liability is
+higher than the simple offset implies. The `topup €` column in dividend and interest output is
+therefore **informative only** and must not be used as-is for filing.
+
+**Before generating actual Doh-Div or Doh-Obr XML**, the treaty logic must be hardened using the
+[ib-edavki](https://github.com/matevzfa/ib-edavki) repository as the reference implementation.
+That repo is also the source of the Flex Query configuration used in this project.
+
+The CLI output includes a note reminding the user that the top-up estimate assumes perfect DTA
+credit and that the actual liability should be verified before filing.
 
 ## Flex Query vs Activity Statement
 

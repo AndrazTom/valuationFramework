@@ -53,10 +53,12 @@ class FlexLot:
     acquired: date
     sold: date
     quantity: float
-    cost_native: float       # IBKR FIFO cost basis in trade currency
+    cost_native: float       # IBKR FIFO cost basis in trade currency (buy fee included)
     pnl_native: float        # fifoPnlRealized in trade currency
     isin: str = ""
     description: str = ""
+    buy_commission: float = 0.0   # ibCommission from <Lot> element, native currency
+    sell_commission: float = 0.0  # allocated from sell <Trade> ibCommission, native currency
 
     @property
     def proceeds_native(self) -> float:
@@ -79,6 +81,7 @@ def load_flex_query(
     stmt = root.find(".//FlexStatement")
     meta = _parse_meta(stmt, root)
     lots = _parse_lots(root)
+    lots = _allocate_sell_commissions(lots, root)
     dividends = _parse_dividends(root)
 
     return lots, dividends, meta
@@ -155,6 +158,8 @@ def _parse_lots(root) -> list[FlexLot]:
         if abs(qty) < 1e-9:
             continue
 
+        buy_comm = abs(_f(elem.get("ibCommission")) or 0.0)
+
         lots.append(FlexLot(
             symbol=symbol,
             currency=currency,
@@ -165,9 +170,56 @@ def _parse_lots(root) -> list[FlexLot]:
             pnl_native=pnl,
             isin=elem.get("isin", "") or "",
             description=elem.get("description", "") or "",
+            buy_commission=buy_comm,
         ))
 
     return sorted(lots, key=lambda l: l.sold)
+
+
+def _allocate_sell_commissions(lots: list[FlexLot], root) -> list[FlexLot]:
+    """Allocate sell-trade ibCommission proportionally across lots closed by the same trade."""
+    sell_trades: dict[tuple[str, date], dict] = {}
+    for elem in root.iter("Trade"):
+        if elem.get("assetCategory", "STK") not in ("STK", ""):
+            continue
+        if elem.get("buySell", "").upper() != "SELL":
+            continue
+        symbol = elem.get("symbol", "").strip()
+        dt = _parse_flex_datetime(elem.get("dateTime", ""))
+        if not symbol or dt is None:
+            continue
+        comm = _f(elem.get("ibCommission"))
+        qty = _f(elem.get("quantity"))
+        if comm is None or qty is None:
+            continue
+        key = (symbol, dt)
+        if key not in sell_trades:
+            sell_trades[key] = {"commission": 0.0, "quantity": 0.0}
+        sell_trades[key]["commission"] += abs(comm)
+        sell_trades[key]["quantity"] += abs(qty)
+
+    result = []
+    for lot in lots:
+        key = (lot.symbol, lot.sold)
+        trade = sell_trades.get(key)
+        if trade and trade["quantity"] > 0:
+            sell_comm = trade["commission"] * (lot.quantity / trade["quantity"])
+        else:
+            sell_comm = 0.0
+        result.append(FlexLot(
+            symbol=lot.symbol,
+            currency=lot.currency,
+            acquired=lot.acquired,
+            sold=lot.sold,
+            quantity=lot.quantity,
+            cost_native=lot.cost_native,
+            pnl_native=lot.pnl_native,
+            isin=lot.isin,
+            description=lot.description,
+            buy_commission=lot.buy_commission,
+            sell_commission=sell_comm,
+        ))
+    return result
 
 
 # ---------------------------------------------------------------------------

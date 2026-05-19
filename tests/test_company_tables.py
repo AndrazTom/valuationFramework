@@ -218,7 +218,7 @@ def test_build_sec_overview_table_includes_market_and_financial_rows():
     assert net_income["reason"] == (
         "No SEC companyfacts concepts found: NetIncomeLoss, "
         "NetIncomeLossAvailableToCommonStockholdersDiluted, "
-        "NetIncomeLossAvailableToCommonStockholdersBasic, ProfitLoss"
+        "NetIncomeLossAvailableToCommonStockholdersBasic, ProfitLoss, +2 more"
     )
 
 

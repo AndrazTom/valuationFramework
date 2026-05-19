@@ -76,6 +76,10 @@ DISPLAY_COLUMN_ALIASES = {
     "cagr_pct": "CAGR",
     "portfolio_weight": "weight",
     "portfolio_weight_live": "live weight",
+    # Portfolio filing rows
+    "row": "#",
+    "tax_rate": "tax %",
+    "years_held": "held [y]",
 }
 
 DISPLAY_VALUE_ALIASES = {
@@ -211,6 +215,13 @@ def write_markdown(frame: pd.DataFrame, path: str | Path) -> None:
     Path(path).write_text(render_markdown_table(frame), encoding="utf-8")
 
 
+def rename_for_display(frame: pd.DataFrame) -> pd.DataFrame:
+    """Rename DataFrame columns to their display names (same as table headers)."""
+    return frame.rename(columns={
+        c: _display_column_name(str(c), target="markdown") for c in frame.columns
+    })
+
+
 def frame_to_records(frame: pd.DataFrame) -> list[dict]:
     if frame.empty:
         return []
@@ -294,7 +305,6 @@ def _tabulate_terminal_period_blocks(frame: pd.DataFrame, *, max_width: int) -> 
 def _tabulate_terminal_column_blocks(frame: pd.DataFrame, *, max_width: int) -> str:
     """Split a wide non-period table into column blocks, repeating anchor columns in each block."""
     all_cols = list(frame.columns)
-    # Use first 2 columns as anchors (ticker+name for comps, fiscal_year+end_date for ratios)
     anchor = all_cols[:2] if len(all_cols) > 2 else all_cols[:1]
     remaining = all_cols[len(anchor):]
     blocks: list[str] = []
@@ -359,7 +369,7 @@ def _is_terminal_period_column(column: object) -> bool:
 
 
 def _display_column_name(column: str, *, target: str) -> str:
-    return DISPLAY_COLUMN_ALIASES.get(column, column.replace("_usd", "").replace("_", " "))
+    return DISPLAY_COLUMN_ALIASES.get(column, column.replace("_usd", "").replace("_eur", " €").replace("_", " "))
 
 
 def _wrap_terminal_cell(value, *, column: str):
@@ -395,6 +405,9 @@ def _humanize_label(value):
     return text
 
 
+_CURRENCY_RE = re.compile(r'^([+-]?)[€$]([0-9,]+(?:\.[0-9]+)?)$')
+
+
 def _json_safe_value(value):
     if value is None:
         return None
@@ -407,4 +420,12 @@ def _json_safe_value(value):
             return value.isoformat()
         except TypeError:
             return value
+    if isinstance(value, str):
+        m = _CURRENCY_RE.match(value)
+        if m:
+            sign, digits = m.groups()
+            try:
+                return float(sign + digits.replace(",", ""))
+            except ValueError:
+                pass
     return value

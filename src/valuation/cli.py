@@ -18,7 +18,6 @@ from valuation.portfolio.cli import (
     run_portfolio_gains,
     run_portfolio_interest,
     run_portfolio_reconcile,
-    run_portfolio_show,
 )
 from valuation.company.service import fetch_company_facts, fetch_company_snapshot
 from valuation.company.statements import build_statement_diagnostics_table, build_statement_table, build_statement_table_ttm
@@ -196,18 +195,6 @@ def _register_portfolio_parser(subparsers) -> None:
 
     _flex_file_help = "Path to IBKR Flex Query XML. Falls back to IBKR_FLEX_PATH env var."
 
-    show_parser = portfolio_sub.add_parser(
-        "show",
-        help="Show open positions with cost basis, unrealized P&L, and tax tier.",
-    )
-    show_parser.add_argument("--file", metavar="PATH", help=_flex_file_help)
-    show_parser.add_argument("--outdir", default="outputs/tables")
-    show_parser.add_argument("--format", choices=("table", "json"), default="table")
-    show_parser.add_argument(
-        "--no-fx-auto", action="store_false", dest="fx_auto", default=True,
-        help="Disable automatic ECB historical FX rate fetching (on by default).",
-    )
-
     gains_parser = portfolio_sub.add_parser(
         "gains",
         help="Show realized gains for a year and compute Slovenian CGT owed.",
@@ -223,6 +210,10 @@ def _register_portfolio_parser(subparsers) -> None:
         "--no-fx-auto", action="store_false", dest="fx_auto", default=True,
         help="Disable automatic ECB historical FX rate fetching (on by default).",
     )
+    gains_parser.add_argument(
+        "--show-fees", action="store_true", default=False,
+        help="Add buy_fee and sell_fee columns showing commissions separately (requires ibCommission in Flex Query).",
+    )
 
     div_parser = portfolio_sub.add_parser(
         "dividends",
@@ -235,10 +226,6 @@ def _register_portfolio_parser(subparsers) -> None:
     )
     div_parser.add_argument("--outdir", default="outputs/tables")
     div_parser.add_argument("--format", choices=("table", "json"), default="table")
-    div_parser.add_argument(
-        "--no-fx-auto", action="store_false", dest="fx_auto", default=True,
-        help="Disable automatic ECB historical FX rate fetching (on by default).",
-    )
 
     interest_parser = portfolio_sub.add_parser(
         "interest",
@@ -805,13 +792,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             import datetime as _dt
             year = getattr(args, "year", None) or _dt.date.today().year
             fx_auto = getattr(args, "fx_auto", True)
-            if args.portfolio_command == "show":
-                return run_portfolio_show(
-                    file=getattr(args, "file", None),
-                    outdir=args.outdir,
-                    output_format=args.format,
-                    fx_auto=fx_auto,
-                )
             if args.portfolio_command == "gains":
                 return run_portfolio_gains(
                     file=getattr(args, "file", None),
@@ -819,6 +799,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     outdir=args.outdir,
                     output_format=args.format,
                     fx_auto=fx_auto,
+                    show_fees=getattr(args, "show_fees", False),
                 )
             if args.portfolio_command == "dividends":
                 return run_portfolio_dividends(
@@ -826,7 +807,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     year=year,
                     outdir=args.outdir,
                     output_format=args.format,
-                    fx_auto=fx_auto,
                 )
             if args.portfolio_command == "interest":
                 return run_portfolio_interest(
