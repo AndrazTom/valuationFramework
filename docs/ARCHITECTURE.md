@@ -24,16 +24,42 @@ Correctness standard:
 Current repo-root launcher:
 
 ```bash
-./vf portfolio show
-./vf portfolio tax --year 2025
-./vf portfolio dividends --year 2025
-./vf portfolio interest --year 2025
-./vf portfolio reconcile --year 2025
+./vf portfolio show                              # open positions with live prices
+./vf portfolio tax --year 2025                   # realized gains + KDVP filing rows
+./vf portfolio dividends --year 2025             # dividend income + Doh-Div filing rows
+./vf portfolio interest --year 2025              # broker interest + Doh-Obr filing rows
+./vf portfolio reconcile --year 2025             # audit coverage before filing
+./vf portfolio furs-xml --file flex.xml --year 2025   # generate eDavki XML
 ```
 
-Tax commands should keep moving toward filing-shaped rows first:
-`Doh-KDVP`, `Doh-Div`, and `Doh-Obr`. FURS XML comes after those row contracts
-are boring and repeatable.
+The `furs-xml` command produces `Doh-KDVP.xml`, `Doh-Div.xml`, and `Doh-Obr.xml`
+under `outputs/tables/portfolio_furs_{year}/`. These can be uploaded directly to
+eDavki. Taxpayer personal details are read from `FURS_*` env vars (set in `.env`
+or exported). Flex Query XML is the required input format; Activity Statement CSV
+is not sufficient for the XML generator.
+
+### IBKR Flex Query setup
+
+Configure an **Activity Flex Query** in IBKR (Performance & Reports → Flex Queries → "+"):
+
+| Section | Options / Fields |
+|---|---|
+| Account Information | IB Entity, Account ID |
+| Trades | Options: **Executions** + **Closed Lots**; then **Select All** fields |
+| Corporate Actions | **Select All** fields |
+| Cash Transactions | Options: **Dividends**, **Payment in Lieu of Dividends**, **Withholding Tax**, **Broker Fees**, **Broker Interest Received**; then **Select All** fields |
+| Financial Instrument Information | **Select All** fields |
+
+When running the report: Period → **Custom Date Range** → Jan 1–Dec 31 of the
+target year. Generate one file per calendar year. Also run a report for the
+current year when filing a past year — some WHT entries are reported retroactively.
+
+**Multi-account**: on the Reports page use "Select Account(s)" and filter to show
+Open + Closed + Migrated accounts to capture accounts from the IBUK → IBCE → IBIE
+migrations.
+
+Flex Query configuration instructions adapted from
+[ib-edavki](https://github.com/ib-edavki/ib-edavki).
 
 ### Research
 
@@ -101,12 +127,12 @@ Until then, the right split is conceptual and CLI-level, not a physical repo spl
    - keep current commands working
    - introduce `./vf research ...` aliases gradually
    - refine `./vf portfolio ...` names around holdings, tax, and reconciliation
-3. Keep hardening `./vf portfolio reconcile --year 2025` before any FURS XML generator.
+3. Keep hardening `./vf portfolio reconcile --year 2025` alongside the FURS XML generator.
 4. Keep private brokerage and tax files out of Git with `.gitignore` and checks.
 5. Add tests at the contract boundary: parser rows in, reconciled report rows out.
 
 ## Non-Goals For Now
 
 - no large directory refactor just to make the tree look cleaner
-- no FURS XML generator until reconciliation is boring and repeatable
+- no FURS XML submission automation (manual eDavki upload is the intended workflow)
 - no second repository until privacy or release boundaries require it
