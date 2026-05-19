@@ -1,8 +1,10 @@
 # valuationFramework
 
-CLI-first stock financials and valuation tool backed by free data (SEC EDGAR + Yahoo Finance).
+CLI-first investing toolkit for company research and personal portfolio/tax reporting.
 
-A personal investing backbone focused on statements, balance-sheet visibility, and company valuation from the terminal.
+The project currently has two product areas:
+- research: statements, balance-sheet visibility, ratios, comps, and valuation from SEC EDGAR + Yahoo Finance
+- portfolio: IBKR holdings, realized gains, dividends, withholding tax, FX, and Slovenian tax-report reconciliation
 
 ## What it produces
 
@@ -92,6 +94,16 @@ export VALUATION_SEC_USER_AGENT="valuationFramework/0.1 your@email.com"
 ./vf watchlist show                          # runs comps across the full watchlist
 ```
 
+### Portfolio
+
+Private brokerage and tax files should stay under ignored paths such as `portfolio/`.
+
+```bash
+./vf portfolio show                          # open positions, cost basis, P&L, tax tier
+./vf portfolio tax --year 2025               # realized gains and Slovenian CGT view
+./vf portfolio dividends --year 2025         # dividends, WHT, and Slovenian dividend tax view
+```
+
 ### Berkshire
 
 ```bash
@@ -174,4 +186,5 @@ Prints a machine-readable bundle to stdout and writes per-section `.json` files 
 ## Documentation
 
 - `README.md` — this file
+- `docs/ARCHITECTURE.md` — product-area split, repo-split guidance, and hardening plan
 - `claude.md` — AI-only architecture and working notes
