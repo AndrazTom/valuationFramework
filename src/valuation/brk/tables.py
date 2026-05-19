@@ -1886,10 +1886,11 @@ def build_opco_valuation_sensitivity_table(
     equity_valuation_basis: str = "live",
     max_live_holdings: int | None = None,
 ) -> pd.DataFrame:
-    """Show implied BRK.B price at various owner-earnings (or pretax-earnings) multiples.
+    """Show implied BRK.B price at various after-tax earnings multiples.
 
-    Total value = (13F blended + net liquidity) + (owner earnings × multiple).
-    Falls back to pretax earnings when OE components are unavailable.
+    Uses the same earnings base as the operating context and reverse DCF:
+    segment pre-tax earnings × _BRK_OPCO_TAX_FACTOR.
+    Total value = (13F blended + net liquidity) + (after-tax earnings × multiple).
     """
     bridge = build_market_implied_sotp_bridge_table(
         bundle,
@@ -1913,39 +1914,23 @@ def build_opco_valuation_sensitivity_table(
         return pd.DataFrame()
 
     segments = _latest_segments_table(bundle.segments.filings, period=period)
-    owner_earnings: float | None = None
-    earnings_label = "pretax earnings"
-    if not segments.empty:
-        required_oe = {"earnings_before_income_taxes_usd", "depreciation_and_amortization_usd", "capex_usd"}
-        if required_oe.issubset(segments.columns):
-            pt_vals = pd.to_numeric(segments["earnings_before_income_taxes_usd"], errors="coerce")
-            dna_vals = pd.to_numeric(segments["depreciation_and_amortization_usd"], errors="coerce")
-            capex_vals = pd.to_numeric(segments["capex_usd"], errors="coerce")
-            total_pt = pt_vals.sum() if pt_vals.notna().any() else None
-            total_dna = dna_vals.sum() if dna_vals.notna().any() else None
-            total_capex = capex_vals.sum() if capex_vals.notna().any() else None
-            if all(v is not None for v in [total_pt, total_dna, total_capex]):
-                oe = float(total_pt) * _BRK_OPCO_TAX_FACTOR + float(total_dna) - float(total_capex)
-                if oe > 0:
-                    owner_earnings = oe
-                    earnings_label = "after-tax OE"
-        if owner_earnings is None and "earnings_before_income_taxes_usd" in segments.columns:
-            pt_vals = pd.to_numeric(segments["earnings_before_income_taxes_usd"], errors="coerce")
-            total_pt = float(pt_vals.sum()) if pt_vals.notna().any() else None
-            if total_pt is not None and total_pt > 0:
-                owner_earnings = total_pt * _BRK_OPCO_TAX_FACTOR
-                earnings_label = "after-tax earnings"
-    if owner_earnings is None or owner_earnings <= 0:
+    after_tax_earnings: float | None = None
+    if not segments.empty and "earnings_before_income_taxes_usd" in segments.columns:
+        pt_vals = pd.to_numeric(segments["earnings_before_income_taxes_usd"], errors="coerce")
+        total_pt = float(pt_vals.sum()) if pt_vals.notna().any() else None
+        if total_pt is not None and total_pt > 0:
+            after_tax_earnings = total_pt * _BRK_OPCO_TAX_FACTOR
+    if after_tax_earnings is None or after_tax_earnings <= 0:
         return pd.DataFrame()
 
     rows = []
     for multiple in pe_multiples:
-        implied_opco = owner_earnings * multiple
+        implied_opco = after_tax_earnings * multiple
         implied_total = known_assets + implied_opco
         implied_price = implied_total / share_count
         upside = ((implied_price / float(last_price)) - 1.0) if last_price and float(last_price) > 0 else None
         rows.append({
-            "scenario": f"{multiple:.0f}× {earnings_label}",
+            "scenario": f"{multiple:.0f}× after-tax earnings",
             "implied_opco_value_usd": implied_opco,
             "implied_total_value_usd": implied_total,
             "implied_brk_b_price_usd": implied_price,
