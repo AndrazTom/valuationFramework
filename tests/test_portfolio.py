@@ -748,6 +748,8 @@ from valuation.portfolio.ibkr_flex import (
     parse_flex_interest,
     _parse_flex_datetime,
     _parse_per_share_from_desc,
+    _parse_country_from_wht_desc,
+    _infer_gross_from_wht_description,
 )
 
 
@@ -1493,3 +1495,52 @@ def test_build_obr_xml_ibkr_payer():
     assert "<Value>30.97</Value>" in xml
     assert "<ForeignTax>6.19</ForeignTax>" in xml
     assert "<Country>IE</Country>" in xml
+
+
+def test_parse_country_from_wht_desc():
+    """_parse_country_from_wht_desc extracts ISO-2 code from '- NL TAX' style."""
+    assert _parse_country_from_wht_desc("ASML(NL0010273215) CASH DIVIDEND EUR 1.60 PER SHARE - NL TAX") == "NL"
+    assert _parse_country_from_wht_desc("GOOGL(US02079K3059) CASH DIVIDEND USD 0.20 PER SHARE - US TAX") == "US"
+    assert _parse_country_from_wht_desc("XYZ CASH DIVIDEND USD 0.50 PER SHARE - 15% TAX") is None
+
+
+def test_infer_gross_country_code_rate(tmp_path):
+    """_infer_gross_from_wht_description falls back to country-code WHT rate."""
+    # ASML: "- NL TAX" (no explicit %), NL rate = 15%, WHT=2.40, per_share=1.60
+    # 2.40 / (1.60 * 0.15) = 10 shares → gross = 16.00
+    from xml.etree.ElementTree import fromstring
+    root = fromstring("<FlexQueryResponse/>")
+    gross = _infer_gross_from_wht_description(
+        total_wht=2.40,
+        per_share=1.60,
+        desc="ASML(NL0010273215) CASH DIVIDEND EUR 1.60 PER SHARE - NL TAX",
+        symbol="ASML",
+        root=root,
+        dt=date(2025, 8, 6),
+    )
+    assert gross == pytest.approx(16.0, abs=0.01)
+
+
+def test_parse_flex_interest_wht_date_offset(tmp_path):
+    """parse_flex_interest matches WHT booked one day after interest payment."""
+    xml = _textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <FlexQueryResponse>
+          <FlexStatements count="1">
+            <FlexStatement accountId="U123" fromDate="20250101" toDate="20251231">
+              <CashTransactions>
+                <CashTransaction currency="EUR" description="EUR CREDIT INT FOR APR-2025"
+                  amount="8.10" type="Broker Interest Received" dateTime="20250505"/>
+                <CashTransaction currency="EUR" description="WITHHOLDING @ 20% ON CREDIT INT FOR APR-2025"
+                  amount="-1.62" type="Withholding Tax" dateTime="20250506"/>
+              </CashTransactions>
+            </FlexStatement>
+          </FlexStatements>
+        </FlexQueryResponse>
+    """)
+    p = tmp_path / "flex.xml"
+    p.write_text(xml)
+    records = parse_flex_interest(str(p))
+    assert len(records) == 1
+    assert records[0].amount == pytest.approx(8.10)
+    assert records[0].withholding_tax == pytest.approx(1.62)

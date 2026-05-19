@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from datetime import date
 
+from valuation.config import load_project_env
 from valuation.portfolio.ibkr import IbkrDividend
 from valuation.portfolio.ibkr_flex import FlexInterest, FlexLot
 
@@ -103,7 +104,12 @@ KNOWN_PAYERS: dict[str, dict] = {
 
 
 def load_taxpayer_from_env() -> dict:
-    """Load taxpayer personal details from FURS_* environment variables."""
+    """Load taxpayer personal details from FURS_* environment variables.
+
+    Reads repo-local .env first (without overriding shell exports), so you can
+    either set FURS_* in .env or export them before running the command.
+    """
+    load_project_env()
     return {
         "tax_number": os.environ.get("FURS_TAX_NUMBER", ""),
         "name": os.environ.get("FURS_NAME", ""),

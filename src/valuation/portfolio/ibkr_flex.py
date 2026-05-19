@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -23,6 +23,16 @@ from valuation.portfolio.ibkr import IbkrDividend, IbkrStatementMeta
 _log = logging.getLogger(__name__)
 
 _FLEX_DATE_FMTS = ("%Y%m%d;%H%M%S", "%Y%m%d")
+
+# Standard WHT rates for SI tax-treaty partners, used when the WHT description
+# says "- NL TAX" instead of "- 15% TAX".
+_COUNTRY_WHT_RATES: dict[str, float] = {
+    "NL": 0.15, "US": 0.15, "DE": 0.25, "FR": 0.25,
+    "NO": 0.15, "CH": 0.35, "GB": 0.00, "IE": 0.00,
+    "SE": 0.15, "DK": 0.15, "HK": 0.00, "KY": 0.00, "TW": 0.15,
+    "BE": 0.30, "AT": 0.25, "FI": 0.15, "IT": 0.15, "ES": 0.15,
+    "PT": 0.15, "LU": 0.15, "DK": 0.15,
+}
 
 
 @dataclass(frozen=True)
@@ -319,8 +329,12 @@ def _infer_gross_from_wht_description(
     2. Structural: count shares from Trade elements (current period) or
        SELL Lot elements (lots open at dt from prior periods).
     """
-    # WHT arithmetic (primary)
+    # WHT arithmetic (primary): explicit % rate, then country-code table fallback
     rate = _parse_wht_rate_from_desc(desc)
+    if rate is None:
+        country = _parse_country_from_wht_desc(desc)
+        if country is not None:
+            rate = _COUNTRY_WHT_RATES.get(country)
     if rate is not None and rate > 0:
         inferred = total_wht / (per_share * rate)
         rounded = round(inferred)
@@ -417,12 +431,20 @@ def _parse_interest(root) -> list[FlexInterest]:
 
     result = []
     for row in int_rows.values():
-        wht = abs(wht_index.get((row["currency"], row["date"]), 0.0))
+        wht_key = (row["currency"], row["date"])
+        wht = wht_index.get(wht_key, 0.0)
+        if wht == 0.0:
+            # IBKR sometimes books interest and its WHT on adjacent calendar days
+            for delta in (1, -1, 2, -2):
+                alt_key = (row["currency"], row["date"] + timedelta(days=delta))
+                if alt_key in wht_index:
+                    wht = wht_index[alt_key]
+                    break
         result.append(FlexInterest(
             currency=row["currency"],
             payment_date=row["date"],
             amount=row["amount"],
-            withholding_tax=wht,
+            withholding_tax=abs(wht),
             description=row["description"],
         ))
 
@@ -481,6 +503,12 @@ def _parse_wht_rate_from_desc(desc: str) -> float | None:
         except ValueError:
             pass
     return None
+
+
+def _parse_country_from_wht_desc(desc: str) -> str | None:
+    """Extract ISO-2 country code from '- NL TAX' style WHT descriptions."""
+    m = re.search(r"[\-–]\s*([A-Z]{2})\s+TAX\b", desc, re.IGNORECASE)
+    return m.group(1).upper() if m else None
 
 
 def _parse_currency_from_desc(desc: str) -> str | None:
