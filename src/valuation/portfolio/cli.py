@@ -269,13 +269,20 @@ def run_portfolio_reconcile(
     year_dividends = [d for d in dividends if d.payment_date.year == year]
     dividend_fx_rates = _maybe_fetch_dividend_fx(year_dividends, fx_auto)
 
+    all_interest = _load_interest_from_flex_paths(paths)
+    year_interest = [r for r in all_interest if r.payment_date.year == year]
+    interest_fx_rates = _maybe_fetch_interest_fx(year_interest, fx_auto)
+
     trade_fx_pairs = non_eur_currency_dates(trades)
     dividend_fx_pairs = _non_eur_dividend_currency_dates(year_dividends)
+    interest_fx_pairs = _non_eur_interest_currency_dates(year_interest)
     fx_table = _build_fx_coverage_table(
         trade_fx_pairs=trade_fx_pairs,
         trade_fx_rates=trade_fx_rates,
         dividend_fx_pairs=dividend_fx_pairs,
         dividend_fx_rates=dividend_fx_rates,
+        interest_fx_pairs=interest_fx_pairs,
+        interest_fx_rates=interest_fx_rates,
         fx_auto=fx_auto,
     )
 
@@ -287,6 +294,7 @@ def run_portfolio_reconcile(
         realized=realized,
         year_realized=year_realized,
         year_dividends=year_dividends,
+        year_interest=year_interest,
         year=year,
         fx_table=fx_table,
     )
@@ -296,10 +304,16 @@ def run_portfolio_reconcile(
         dividend_fx_rates,
         year,
     )
+    interest_table = _build_interest_reconciliation_table(
+        year_interest,
+        interest_fx_rates,
+        year,
+    )
     warning_table = _build_reconcile_warnings_table(
         coverage_table=coverage_table,
         realized=year_realized,
         dividends=year_dividends,
+        interest=year_interest,
         fx_table=fx_table,
         year=year,
     )
@@ -310,12 +324,17 @@ def run_portfolio_reconcile(
             ("Coverage Summary", coverage_table),
             ("Realized Reconciliation", realized_table),
             ("Dividend Reconciliation", dividend_table),
+            ("Interest Reconciliation", interest_table),
             ("FX Coverage", fx_table),
             ("Warnings", warning_table),
         ],
         outdir=outdir,
         output_format=output_format,
         slug=f"portfolio_reconcile_{year}",
+        notes={
+            "Dividend Reconciliation": _DIVIDENDS_NOTE,
+            "Interest Reconciliation": _INTEREST_NOTE,
+        },
     )
     return 0
 
@@ -405,9 +424,8 @@ def _build_tax_summary(realized: list[RealizedGain], year: int) -> pd.DataFrame:
 
 
 _DIVIDENDS_NOTE = (
-    "File on Doh-Div. SI top-up estimate is informative only — assumes foreign WHT fully offsets "
-    "the 25% SI rate (perfect DTA credit). Actual liability may differ depending on the treaty, "
-    "year, and FURS interpretation. Verify before filing."
+    "SI top-up estimate is informative only — assumes foreign WHT fully offsets the 25% SI rate "
+    "(perfect DTA credit). Actual liability may differ."
 )
 
 
@@ -480,9 +498,8 @@ def _build_dividend_summary(
 
 
 _INTEREST_NOTE = (
-    "File on Doh-Obr. SI tax estimate is informative only — assumes foreign WHT fully offsets "
-    "the 25% SI rate (perfect DTA credit). Actual liability may differ; Slovenia's treatment "
-    "of broker interest WHT credits can deviate from a simple offset. Verify before filing."
+    "SI tax estimate is informative only — assumes foreign WHT fully offsets the 25% SI rate "
+    "(perfect DTA credit). Actual liability may differ."
 )
 
 
@@ -609,6 +626,7 @@ def _build_reconcile_coverage_table(
     realized: list[RealizedGain],
     year_realized: list[RealizedGain],
     year_dividends: list[IbkrDividend],
+    year_interest: list[FlexInterest],
     year: int,
     fx_table: pd.DataFrame,
 ) -> pd.DataFrame:
@@ -630,6 +648,7 @@ def _build_reconcile_coverage_table(
         {"metric": "Realized lot rows", "value": str(len(realized))},
         {"metric": f"Realized rows in {year}", "value": str(len(year_realized))},
         {"metric": f"Dividend rows in {year}", "value": str(len(year_dividends))},
+        {"metric": f"Interest rows in {year}", "value": str(len(year_interest))},
         {"metric": "Missing FX pairs", "value": str(missing_fx)},
         {
             "metric": "Status",
@@ -658,7 +677,6 @@ def _build_realized_reconciliation_table(
             {"metric": "Tax year", "value": str(year)},
             {"metric": "Realized lot rows", "value": str(len(realized))},
             {"metric": "Symbols", "value": ", ".join(sorted({r.symbol for r in realized}))},
-            {"metric": "Total quantity sold", "value": _fmt_qty(sum(r.quantity for r in realized))},
             {"metric": "Proceeds", "value": _fmt_eur(proceeds)},
             {"metric": "Cost basis", "value": _fmt_eur(cost)},
             {"metric": "Gross gains", "value": _fmt_eur(sum(gains) if gains else None)},
@@ -704,12 +722,46 @@ def _build_dividend_reconciliation_table(
     )
 
 
+def _build_interest_reconciliation_table(
+    interest: list[FlexInterest],
+    fx_rates: dict,
+    year: int,
+) -> pd.DataFrame:
+    gross_total = 0.0
+    wht_total = 0.0
+    topup_total = 0.0
+    missing_fx_rows = 0
+    for r in interest:
+        eur_rate = _interest_eur_rate(r, fx_rates)
+        if eur_rate is None:
+            missing_fx_rows += 1
+            continue
+        gross_eur = r.amount * eur_rate
+        wht_eur = r.withholding_tax * eur_rate
+        gross_total += gross_eur
+        wht_total += wht_eur
+        topup_total += si_interest_tax(gross_eur, wht_eur)
+
+    return pd.DataFrame(
+        [
+            {"metric": "Tax year", "value": str(year)},
+            {"metric": "Interest rows", "value": str(len(interest))},
+            {"metric": "Gross interest income", "value": _fmt_eur(gross_total)},
+            {"metric": "Foreign WHT already paid", "value": _fmt_eur(wht_total)},
+            {"metric": "Additional SI interest tax due", "value": _fmt_eur(topup_total)},
+            {"metric": "Rows missing FX", "value": str(missing_fx_rows)},
+        ]
+    )
+
+
 def _build_fx_coverage_table(
     *,
     trade_fx_pairs: list[tuple[str, date]],
     trade_fx_rates: dict | None,
     dividend_fx_pairs: list[tuple[str, date]],
     dividend_fx_rates: dict | None,
+    interest_fx_pairs: list[tuple[str, date]],
+    interest_fx_rates: dict | None,
     fx_auto: bool,
 ) -> pd.DataFrame:
     usage: dict[tuple[str, str], set[str]] = {}
@@ -717,6 +769,8 @@ def _build_fx_coverage_table(
         usage.setdefault((currency, day.isoformat()), set()).add("trades")
     for currency, day in dividend_fx_pairs:
         usage.setdefault((currency, day.isoformat()), set()).add("dividends")
+    for currency, day in interest_fx_pairs:
+        usage.setdefault((currency, day.isoformat()), set()).add("interest")
 
     rows = []
     for currency, day in sorted(usage):
@@ -725,6 +779,8 @@ def _build_fx_coverage_table(
             rate = trade_fx_rates.get((currency, day))
         if rate is None and dividend_fx_rates:
             rate = dividend_fx_rates.get((currency, day))
+        if rate is None and interest_fx_rates:
+            rate = interest_fx_rates.get((currency, day))
         if rate is not None:
             status = "available"
         elif fx_auto:
@@ -748,6 +804,7 @@ def _build_reconcile_warnings_table(
     coverage_table: pd.DataFrame,
     realized: list[RealizedGain],
     dividends: list[IbkrDividend],
+    interest: list[FlexInterest],
     fx_table: pd.DataFrame,
     year: int,
 ) -> pd.DataFrame:
@@ -783,6 +840,10 @@ def _build_reconcile_warnings_table(
     if not dividends:
         warnings.append(
             {"severity": "info", "message": f"No dividend rows were found for {year}."}
+        )
+    if not interest:
+        warnings.append(
+            {"severity": "info", "message": f"No broker interest rows were found for {year}."}
         )
     if not warnings:
         warnings.append(
@@ -1152,6 +1213,7 @@ def _print_and_save(
     outdir: str,
     output_format: str,
     slug: str,
+    notes: dict[str, str] | None = None,
 ) -> None:
     import json
 
@@ -1179,6 +1241,8 @@ def _print_and_save(
 
     for title, df in sections:
         print(f"\n## {title}\n")
+        if notes and title in notes:
+            print(f"Note: {notes[title]}\n")
         print(render_terminal_table(df))
 
     out_path.mkdir(parents=True, exist_ok=True)

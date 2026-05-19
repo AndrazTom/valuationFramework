@@ -1223,7 +1223,9 @@ def test_portfolio_reconcile_writes_audit_tables(tmp_path):
     assert "€196.00" in realized
     assert "Gross dividend income" in dividends
     assert "€10.00" in dividends
-    assert "No reconciliation warnings" in warnings
+    assert "review" not in warnings
+    interest = (result_dir / "interest_reconciliation.md").read_text(encoding="utf-8")
+    assert "Gross interest income" in interest
 
 
 def test_portfolio_reconcile_json_bundle_sections(tmp_path, capsys):
@@ -1244,6 +1246,7 @@ def test_portfolio_reconcile_json_bundle_sections(tmp_path, capsys):
     assert '"coverage_summary"' in captured.out
     assert '"realized_reconciliation"' in captured.out
     assert '"dividend_reconciliation"' in captured.out
+    assert '"interest_reconciliation"' in captured.out
     assert '"fx_coverage"' in captured.out
 
 
