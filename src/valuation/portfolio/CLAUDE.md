@@ -146,26 +146,7 @@ In IBKR Account Management:
 
 ## Flex Query setup
 
-Configure an **Activity Flex Query** in IBKR (Performance & Reports → Flex Queries → "+"):
-
-| Section | Options / Fields |
-|---|---|
-| Account Information | IB Entity, Account ID |
-| Trades | Options: **Executions** + **Closed Lots**; then **Select All** fields |
-| Corporate Actions | **Select All** fields |
-| Cash Transactions | Options: **Dividends**, **Payment in Lieu of Dividends**, **Withholding Tax**, **Broker Fees**, **Broker Interest Received**; then **Select All** fields |
-| Financial Instrument Information | **Select All** fields |
-
-Leave date settings at default when saving. When running the report, set Period → **Custom Date
-Range** → Jan 1–Dec 31 of the target year. Generate one file per calendar year. Also generate
-a report for the current year even when filing a past year, because some WHT entries are reported
-retroactively.
-
-**Multi-account note**: On the Reports page use "Select Account(s)" and filter to show
-Open + Closed + Migrated accounts to capture accounts from the IBUK→IBCE→IBIE migrations.
-
-Credit: Flex Query configuration instructions adapted from
-[ib-edavki](https://github.com/ib-edavki/ib-edavki) (see also `furs_xml.py` attribution).
+See `docs/portfolio.md` for the full Flex Query configuration table and export instructions.
 
 ## Fees-in-price (FURS requirement)
 

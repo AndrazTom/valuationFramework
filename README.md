@@ -99,12 +99,15 @@ export VALUATION_SEC_USER_AGENT="valuationFramework/0.1 your@email.com"
 Private brokerage and tax files should stay under ignored paths such as `portfolio/`.
 
 ```bash
-./vf portfolio show                          # open positions, cost basis, P&L, tax tier
-./vf portfolio tax --year 2025               # realized gains and Slovenian CGT view
-./vf portfolio dividends --year 2025         # dividends, WHT, and Slovenian dividend tax view
-./vf portfolio interest --year 2025          # broker interest, WHT, and Doh-Obr-shaped rows
-./vf portfolio reconcile --year 2025         # audit source coverage, FX, gains, and dividend totals
+./vf portfolio show                               # open positions, cost basis, P&L, tax tier
+./vf portfolio tax --year 2025                    # realized gains and Slovenian CGT view
+./vf portfolio dividends --year 2025              # dividends, WHT, and Slovenian dividend tax view
+./vf portfolio interest --year 2025               # broker interest, WHT, and Doh-Obr-shaped rows
+./vf portfolio reconcile --year 2025              # audit source coverage, FX, gains, and dividend totals
+./vf portfolio furs-xml --file flex.xml --year 2025   # generate Doh-KDVP, Doh-Div, Doh-Obr XML
 ```
+
+See `docs/portfolio.md` for Flex Query setup, env vars, and FURS filing notes.
 
 ### Berkshire
 
@@ -188,5 +191,5 @@ Prints a machine-readable bundle to stdout and writes per-section `.json` files 
 ## Documentation
 
 - `README.md` — this file
-- `docs/ARCHITECTURE.md` — product-area split, repo-split guidance, and hardening plan
-- `claude.md` — AI-only architecture and working notes
+- `docs/portfolio.md` — portfolio commands, IBKR Flex Query setup, FURS filing guide
+- `docs/ARCHITECTURE.md` — AI/dev notes: product-area split, repo structure, hardening plan
