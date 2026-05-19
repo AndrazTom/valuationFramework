@@ -598,7 +598,7 @@ def run_brk_sotp(
         ("Operating Business Context", operating_context),
     ]
     if not reverse_dcf.empty:
-        sections.append(("Operating Business Reverse DCF", reverse_dcf, "Pre-tax earnings / pre-tax return. Apply ~0.75x tax-rate factor for an after-tax equivalent. Residual is market-implied (circular)."))
+        sections.append(("Operating Business Reverse DCF", reverse_dcf, "Segment pre-tax earnings scaled by 0.75 (~25% effective rate) before entering the Gordon Growth model. Residual is market-implied (circular)."))
     _append_nonempty(sections, "OpCo Intrinsic Value Estimate", build_opco_valuation_sensitivity_table(
         bundle,
         reference,
@@ -878,7 +878,7 @@ def run_brk_valuation_report(
         ("Operating Business Context", operating_context),
     ]
     if not reverse_dcf.empty:
-        core_md.append(("Operating Business Reverse DCF", reverse_dcf, "Pre-tax earnings / pre-tax return. Apply ~0.75x tax-rate factor for an after-tax equivalent. Residual is market-implied (circular)."))
+        core_md.append(("Operating Business Reverse DCF", reverse_dcf, "Segment pre-tax earnings scaled by 0.75 (~25% effective rate) before entering the Gordon Growth model. Residual is market-implied (circular)."))
     if not opco_intrinsic.empty:
         core_md.append(("OpCo Intrinsic Value Estimate", opco_intrinsic))
     if not segment_bottoms_up.empty:

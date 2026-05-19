@@ -1465,6 +1465,7 @@ def build_operating_business_context_table(
 
 
 _BRK_DEFAULT_REQUIRED_RETURNS = (0.08, 0.10, 0.12)
+_BRK_OPCO_TAX_FACTOR = 0.75  # ~25% effective rate applied to segment pre-tax earnings
 
 
 def _context_field_value(context: pd.DataFrame, field: str) -> float | None:
@@ -1491,14 +1492,16 @@ def build_brk_operating_reverse_dcf_table(
     """Return implied perpetual growth rates for Berkshire operating businesses.
 
     Uses the Gordon Growth model solved for g:
-      residual = pretax_earnings / (r - g)  →  g = r - pretax_earnings / residual
+      residual = after_tax_earnings / (r - g)  →  g = r - after_tax_earnings / residual
+
+    Segment pre-tax earnings are converted to an after-tax approximation using
+    _BRK_OPCO_TAX_FACTOR (~25% effective rate) before entering the model.
 
     ``residual`` is the market-implied operating-and-other residual from the SOTP
     bridge (includes non-13F assets, debt, deferred taxes, and other items, so treat
     the implied growth as an approximation, not a precise business appraisal).
-    ``pretax_earnings`` are the latest reported top-level segment pre-tax earnings.
     ``zero_growth_operating_value_usd`` is what the residual would be worth at that
-    required return with zero growth assumed: pretax_earnings / r.
+    required return with zero growth assumed: after_tax_earnings / r.
 
     Returns empty DataFrame when residual or pretax earnings are unavailable or ≤ 0.
 
@@ -1511,12 +1514,13 @@ def build_brk_operating_reverse_dcf_table(
     if residual is None or pretax_earnings is None or residual <= 0 or pretax_earnings <= 0:
         return pd.DataFrame()
 
+    after_tax_earnings = pretax_earnings * _BRK_OPCO_TAX_FACTOR
     share_count = _implied_brk_b_equivalent_shares(market_snapshot)
-    earnings_yield = pretax_earnings / residual
+    earnings_yield = after_tax_earnings / residual
     rows = []
     for r in required_returns:
         implied_g = r - earnings_yield
-        zero_growth_value = pretax_earnings / r
+        zero_growth_value = after_tax_earnings / r
         rows.append(
             {
                 "assumed_return": r,
