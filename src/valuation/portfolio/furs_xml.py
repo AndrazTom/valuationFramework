@@ -113,10 +113,6 @@ def load_taxpayer_from_env() -> dict:
     return {
         "tax_number": os.environ.get("FURS_TAX_NUMBER", ""),
         "name": os.environ.get("FURS_NAME", ""),
-        "address": os.environ.get("FURS_ADDRESS", ""),
-        "city": os.environ.get("FURS_CITY", ""),
-        "post_number": os.environ.get("FURS_POST_NUMBER", ""),
-        "post_name": os.environ.get("FURS_POST_NAME", ""),
         "email": os.environ.get("FURS_EMAIL", ""),
         "phone": os.environ.get("FURS_PHONE", ""),
     }

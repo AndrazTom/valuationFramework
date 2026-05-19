@@ -82,16 +82,15 @@ Set these in `.env` at the repo root (gitignored). Shell exports take precedence
 # Path to your IBKR Flex Query XML (used as default --file)
 IBKR_STATEMENT_PATH=/home/you/ibkr/2025.xml
 
-# Your personal details for the XML header (required for eDavki upload)
-FURS_TAX_NUMBER=12345678        # davčna številka
-FURS_NAME=Ime Priimek
-FURS_ADDRESS=Ulica 1
-FURS_CITY=Ljubljana
-FURS_POST_NUMBER=1000
-FURS_POST_NAME=Ljubljana
-FURS_EMAIL=your@email.com
-FURS_PHONE=+38641000000
+# Your personal details for the XML header
+FURS_TAX_NUMBER=12345678        # davčna številka — required
+FURS_NAME=Ime Priimek           # required
+FURS_EMAIL=your@email.com       # appears in form body
+FURS_PHONE=+38641000000         # appears in form body
 ```
+
+Address fields (`<edp:address1>`, `<edp:city>`, etc.) are left blank — eDavki
+populates them from the tax register when you're logged in.
 
 ---
 
