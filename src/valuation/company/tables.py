@@ -818,12 +818,13 @@ def _statement_availability_row(
     if period_columns and not table.empty:
         present_metrics = tuple(str(metric) for metric in table["metric"].tolist())
         metric_count = int(len(table))
+        present_expected = len(set(present_metrics) & set(expected_metrics))
         coverage_ratio = (
-            float(metric_count) / float(expected_metric_count)
+            float(present_expected) / float(expected_metric_count)
             if expected_metric_count > 0
             else None
         )
-        is_partial = expected_metric_count > 0 and metric_count < expected_metric_count
+        is_partial = expected_metric_count > 0 and present_expected < expected_metric_count
         return {
             "statement": statement,
             "period": period,
