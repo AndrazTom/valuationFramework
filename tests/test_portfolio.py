@@ -22,7 +22,7 @@ from valuation.portfolio.cli import (
     run_portfolio_dividends,
     run_portfolio_interest,
     run_portfolio_reconcile,
-    run_portfolio_tax,
+    run_portfolio_gains,
 )
 from valuation.portfolio.lots import build_lots_and_realized, non_eur_currency_dates
 from valuation.portfolio.tax_si import (
@@ -1261,7 +1261,7 @@ def test_portfolio_tax_writes_kdvp_filing_rows(tmp_path):
     statement.write_text(_RECONCILE_CSV, encoding="utf-8")
     outdir = tmp_path / "outputs"
 
-    code = run_portfolio_tax(
+    code = run_portfolio_gains(
         file=str(statement),
         year=2025,
         outdir=str(outdir),
@@ -1271,7 +1271,7 @@ def test_portfolio_tax_writes_kdvp_filing_rows(tmp_path):
 
     assert code == 0
     filing_rows = (
-        outdir / "portfolio_tax_2025" / "kdvp_filing_rows_2025.md"
+        outdir / "portfolio_gains_2025" / "kdvp_filing_rows_2025.md"
     ).read_text(encoding="utf-8")
     assert "Doh-KDVP" in filing_rows
     assert "f4 buy value eur" in filing_rows

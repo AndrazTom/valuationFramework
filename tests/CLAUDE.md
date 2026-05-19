@@ -45,4 +45,4 @@ Coverage map:
 - `test_normalize_tables.py` covers `_derive_duration_entry` None-propagation: Q2 derived from (Q2_ytd - Q1) where Q1 val is None must yield None, not 0 or the YTD value
 - `test_portfolio.py` covers `ibkr_flex.py`: FlexLot parsing (symbol/dates/cost/pnl), proceeds_native property, SELL-only filter, zero-quantity skip, dividend with explicit type + WHT match, metadata, datetime format parsing, per-share description regex, WHT rate arithmetic derivation (clean integer check + non-integer rejection), Lot-element fallback for pre-period buys, `parse_flex_interest` (basic records, WHT matching via CREDIT INT)
 - `test_portfolio.py` also covers `portfolio reconcile`: table output artifacts, JSON bundle section names, and statement-gap detection for the audit workflow
-- `test_portfolio.py` covers filing-shaped portfolio outputs: KDVP rows for `portfolio tax`, Doh-Div rows for `portfolio dividends`, and Doh-Obr rows for `portfolio interest`
+- `test_portfolio.py` covers filing-shaped portfolio outputs: KDVP rows for `portfolio gains`, Doh-Div rows for `portfolio dividends`, and Doh-Obr rows for `portfolio interest`

@@ -15,10 +15,10 @@ from valuation.brk.statements import supplement_brk_income_statement_eps_shares
 from valuation.portfolio.cli import (
     run_portfolio_dividends,
     run_portfolio_furs_xml,
+    run_portfolio_gains,
     run_portfolio_interest,
     run_portfolio_reconcile,
     run_portfolio_show,
-    run_portfolio_tax,
 )
 from valuation.company.service import fetch_company_facts, fetch_company_snapshot
 from valuation.company.statements import build_statement_diagnostics_table, build_statement_table, build_statement_table_ttm
@@ -194,47 +194,33 @@ def _register_portfolio_parser(subparsers) -> None:
     )
     portfolio_sub = portfolio_parser.add_subparsers(dest="portfolio_command", required=True)
 
+    _flex_file_help = "Path to IBKR Flex Query XML. Falls back to IBKR_FLEX_PATH env var."
+
     show_parser = portfolio_sub.add_parser(
         "show",
         help="Show open positions with cost basis, unrealized P&L, and tax tier.",
     )
-    show_parser.add_argument(
-        "--file",
-        metavar="PATH",
-        help="Path to IBKR activity statement CSV. Falls back to IBKR_STATEMENT_PATH env var.",
-    )
+    show_parser.add_argument("--file", metavar="PATH", help=_flex_file_help)
     show_parser.add_argument("--outdir", default="outputs/tables")
     show_parser.add_argument("--format", choices=("table", "json"), default="table")
     show_parser.add_argument(
-        "--no-fx-auto",
-        action="store_false",
-        dest="fx_auto",
-        default=True,
+        "--no-fx-auto", action="store_false", dest="fx_auto", default=True,
         help="Disable automatic ECB historical FX rate fetching (on by default).",
     )
 
-    tax_parser = portfolio_sub.add_parser(
-        "tax",
+    gains_parser = portfolio_sub.add_parser(
+        "gains",
         help="Show realized gains for a year and compute Slovenian CGT owed.",
     )
-    tax_parser.add_argument(
-        "--file",
-        metavar="PATH",
-        help="Path to IBKR activity statement CSV. Falls back to IBKR_STATEMENT_PATH env var.",
-    )
-    tax_parser.add_argument(
-        "--year",
-        type=int,
-        default=None,
+    gains_parser.add_argument("--file", metavar="PATH", help=_flex_file_help)
+    gains_parser.add_argument(
+        "--year", type=int, default=None,
         help="Tax year to report (default: current calendar year).",
     )
-    tax_parser.add_argument("--outdir", default="outputs/tables")
-    tax_parser.add_argument("--format", choices=("table", "json"), default="table")
-    tax_parser.add_argument(
-        "--no-fx-auto",
-        action="store_false",
-        dest="fx_auto",
-        default=True,
+    gains_parser.add_argument("--outdir", default="outputs/tables")
+    gains_parser.add_argument("--format", choices=("table", "json"), default="table")
+    gains_parser.add_argument(
+        "--no-fx-auto", action="store_false", dest="fx_auto", default=True,
         help="Disable automatic ECB historical FX rate fetching (on by default).",
     )
 
@@ -242,104 +228,66 @@ def _register_portfolio_parser(subparsers) -> None:
         "dividends",
         help="Show dividend income for a year and compute Slovenian dividend tax.",
     )
+    div_parser.add_argument("--file", metavar="PATH", help=_flex_file_help)
     div_parser.add_argument(
-        "--file",
-        metavar="PATH",
-        help="Path to IBKR activity statement CSV. Falls back to IBKR_STATEMENT_PATH env var.",
-    )
-    div_parser.add_argument(
-        "--year",
-        type=int,
-        default=None,
+        "--year", type=int, default=None,
         help="Tax year to report (default: current calendar year).",
     )
     div_parser.add_argument("--outdir", default="outputs/tables")
     div_parser.add_argument("--format", choices=("table", "json"), default="table")
     div_parser.add_argument(
-        "--no-fx-auto",
-        action="store_false",
-        dest="fx_auto",
-        default=True,
+        "--no-fx-auto", action="store_false", dest="fx_auto", default=True,
         help="Disable automatic ECB historical FX rate fetching (on by default).",
     )
 
     interest_parser = portfolio_sub.add_parser(
         "interest",
-        help="Show broker interest income for a year from IBKR Flex XML.",
+        help="Show broker interest income for a year.",
     )
+    interest_parser.add_argument("--file", metavar="PATH", help=_flex_file_help)
     interest_parser.add_argument(
-        "--file",
-        metavar="PATH",
-        help="Path to IBKR Flex XML. Falls back to IBKR_STATEMENT_PATH env var.",
-    )
-    interest_parser.add_argument(
-        "--year",
-        type=int,
-        default=None,
+        "--year", type=int, default=None,
         help="Tax year to report (default: current calendar year).",
     )
     interest_parser.add_argument("--outdir", default="outputs/tables")
     interest_parser.add_argument("--format", choices=("table", "json"), default="table")
     interest_parser.add_argument(
-        "--no-fx-auto",
-        action="store_false",
-        dest="fx_auto",
-        default=True,
+        "--no-fx-auto", action="store_false", dest="fx_auto", default=True,
         help="Disable automatic ECB historical FX rate fetching (on by default).",
     )
 
     reconcile_parser = portfolio_sub.add_parser(
         "reconcile",
-        help="Reconcile IBKR source rows to yearly tax/dividend summary totals.",
+        help="Reconcile Flex Query rows to yearly gains/dividend/interest totals.",
     )
+    reconcile_parser.add_argument("--file", metavar="PATH", help=_flex_file_help)
     reconcile_parser.add_argument(
-        "--file",
-        metavar="PATH",
-        help="Path to IBKR CSV/XML statement. Falls back to IBKR_STATEMENT_PATH env var.",
-    )
-    reconcile_parser.add_argument(
-        "--year",
-        type=int,
-        default=None,
+        "--year", type=int, default=None,
         help="Tax year to reconcile (default: current calendar year).",
     )
     reconcile_parser.add_argument("--outdir", default="outputs/tables")
     reconcile_parser.add_argument("--format", choices=("table", "json"), default="table")
     reconcile_parser.add_argument(
-        "--no-fx-auto",
-        action="store_false",
-        dest="fx_auto",
-        default=True,
+        "--no-fx-auto", action="store_false", dest="fx_auto", default=True,
         help="Disable automatic ECB historical FX rate fetching (on by default).",
     )
 
     furs_parser = portfolio_sub.add_parser(
         "furs-xml",
-        help="Generate FURS eDavki XML forms (Doh-KDVP, Doh-Div, Doh-Obr) from IBKR Flex XML.",
+        help="Generate FURS eDavki XML forms (Doh-KDVP, Doh-Div, Doh-Obr).",
     )
+    furs_parser.add_argument("--file", metavar="PATH", help=_flex_file_help)
     furs_parser.add_argument(
-        "--file",
-        metavar="PATH",
-        help="Path to IBKR Flex XML. Falls back to IBKR_STATEMENT_PATH env var.",
-    )
-    furs_parser.add_argument(
-        "--year",
-        type=int,
-        default=None,
+        "--year", type=int, default=None,
         help="Tax year (default: current calendar year).",
     )
     furs_parser.add_argument(
-        "--forms",
-        choices=("all", "kdvp", "div", "obr"),
-        default="all",
+        "--forms", choices=("all", "kdvp", "div", "obr"), default="all",
         help="Which forms to generate (default: all).",
     )
     furs_parser.add_argument("--outdir", default="outputs/tables")
     furs_parser.add_argument(
-        "--no-fx-auto",
-        action="store_false",
-        dest="fx_auto",
-        default=True,
+        "--no-fx-auto", action="store_false", dest="fx_auto", default=True,
         help="Disable automatic ECB historical FX rate fetching (on by default).",
     )
 
@@ -864,8 +812,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     output_format=args.format,
                     fx_auto=fx_auto,
                 )
-            if args.portfolio_command == "tax":
-                return run_portfolio_tax(
+            if args.portfolio_command == "gains":
+                return run_portfolio_gains(
                     file=getattr(args, "file", None),
                     year=year,
                     outdir=args.outdir,

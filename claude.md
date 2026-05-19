@@ -215,7 +215,7 @@ As of 2026-05-18, `main` contains (on `brk`, pending merge):
 - historical valuation ratios: `./vf ratios AAPL --limit 5` shows annual P/E, P/OE, OE yield, P/B, EV/EBITDA with price from Yahoo monthly history
 - persistent watchlist: `./vf watchlist add/remove/list/show` backed by `~/.config/valuationFramework/watchlist.toml`
 - portfolio reconciliation: `./vf portfolio reconcile --year YYYY` audits source files, statement coverage, FX coverage, realized gains, and dividend totals before any future FURS XML generation
-- portfolio filing rows: `./vf portfolio tax/dividends/interest --year YYYY` emit Doh-KDVP, Doh-Div, and Doh-Obr-shaped rows as the step before FURS XML
+- portfolio filing rows: `./vf portfolio gains/dividends/interest --year YYYY` emit Doh-KDVP, Doh-Div, and Doh-Obr-shaped rows as the step before FURS XML
 
 ## Current Commands
 
@@ -238,7 +238,7 @@ As of 2026-05-18, `main` contains (on `brk`, pending merge):
 - `./vf watchlist list`
 - `./vf watchlist show`
 - `./vf portfolio show`
-- `./vf portfolio tax --year 2025`
+- `./vf portfolio gains --year 2025`
 - `./vf portfolio dividends --year 2025`
 - `./vf portfolio interest --year 2025`
 - `./vf portfolio reconcile --year 2025`
@@ -272,7 +272,7 @@ As of 2026-05-18, `main` contains (on `brk`, pending merge):
 - keep the new JSON path minimal and backend-oriented rather than turning it into an API surface too early
 - decide where Yahoo fallback is sufficient versus where market-specific filing adapters are worth building
 - keep hardening `portfolio reconcile` as the audit boundary before FURS XML generation
-- keep portfolio tax/dividend/interest row contracts filing-shaped before adding FURS XML output
+- keep portfolio gains/dividend/interest row contracts filing-shaped before adding FURS XML output
 - for Europe, prefer:
   - Yahoo fallback for broad coverage
   - then exchange / OAM / issuer-report adapters only where Yahoo coverage is missing or misleading

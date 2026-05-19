@@ -8,7 +8,7 @@ IBKR activity statement CSV files contain personal financial data and must NEVER
 
 **Always store the statement path in `.env` (gitignored), not in code:**
 ```
-IBKR_STATEMENT_PATH=/path/to/U1234567_activity.csv
+IBKR_FLEX_PATH=/path/to/U1234567_flex.xml
 ```
 
 The `.gitignore` already excludes `*.activity.csv`, `*_statement.csv`, `ibkr_*.csv`, and `ibkr_*.xml`.
@@ -20,7 +20,7 @@ The `.gitignore` already excludes `*.activity.csv`, `*_statement.csv`, `ibkr_*.c
 ./vf portfolio show --file /path/to/statement.csv
 
 # Realized gains + Slovenian CGT for a year
-./vf portfolio tax --file /path/to/statement.csv --year 2026
+./vf portfolio gains --file /path/to/flex.xml --year 2026
 
 # Dividend income + SI dividend tax (with WHT credit)
 ./vf portfolio dividends --file /path/to/statement.csv --year 2026
@@ -32,7 +32,7 @@ The `.gitignore` already excludes `*.activity.csv`, `*_statement.csv`, `ibkr_*.c
 ./vf portfolio reconcile --file /path/to/flex.xml --year 2026
 
 # Disable ECB FX auto-fetch (on by default)
-./vf portfolio tax --file /path/to/statement.csv --year 2026 --no-fx-auto
+./vf portfolio gains --file /path/to/flex.xml --year 2026 --no-fx-auto
 ```
 
 ## Architecture
@@ -86,7 +86,7 @@ The `.gitignore` already excludes `*.activity.csv`, `*_statement.csv`, `ibkr_*.c
 
 ## Filing-shaped rows
 
-- `./vf portfolio tax --year YYYY` now emits:
+- `./vf portfolio gains --year YYYY` now emits:
   - `Realized Gains YYYY` — current readable realized-lot table
   - `KDVP Filing Rows YYYY` — Doh-KDVP-shaped rows with F4/F5/F8/F9-like columns
   - `Tax Summary`

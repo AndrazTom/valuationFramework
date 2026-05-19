@@ -28,7 +28,7 @@ from valuation.portfolio.tax_si import (
     si_interest_tax,
 )
 
-_ENV_STATEMENT_PATH = "IBKR_STATEMENT_PATH"
+_ENV_FLEX_PATH = "IBKR_FLEX_PATH"
 
 # IBKR uses exchange-local symbols; Yahoo needs exchange suffixes for non-US listings.
 # Add entries here when a symbol consistently fails Yahoo price lookup.
@@ -90,7 +90,7 @@ def run_portfolio_show(
     return 0
 
 
-def run_portfolio_tax(
+def run_portfolio_gains(
     file: str | None,
     year: int,
     outdir: str,
@@ -123,7 +123,7 @@ def run_portfolio_tax(
         ],
         outdir=outdir,
         output_format=output_format,
-        slug=f"portfolio_tax_{year}",
+        slug=f"portfolio_gains_{year}",
     )
     _warn_needs_fx_realized(year_gains)
     return 0
@@ -1183,11 +1183,11 @@ def _resolve_statement_paths(file: str | None) -> list[Path]:
 
     --file accepts comma-separated paths for combining multi-year exports.
     """
-    raw = file or os.environ.get(_ENV_STATEMENT_PATH)
+    raw = file or os.environ.get(_ENV_FLEX_PATH)
     if raw is None:
         print(
-            f"Error: no IBKR statement file specified. "
-            f"Use --file <path>[,<path>...] or set {_ENV_STATEMENT_PATH} in .env.",
+            f"Error: no IBKR Flex XML file specified. "
+            f"Use --file <path>[,<path>...] or set {_ENV_FLEX_PATH} in .env.",
             file=sys.stderr,
         )
         return []

@@ -20,7 +20,7 @@ This module imports IBKR data and produces Slovenian tax filings
 
 ```bash
 ./vf portfolio show                               # open positions, cost basis, CGT tier
-./vf portfolio tax --year 2025                    # realized gains + KDVP filing rows
+./vf portfolio gains --year 2025                  # realized gains + KDVP filing rows
 ./vf portfolio dividends --year 2025              # dividends, WHT, Doh-Div filing rows
 ./vf portfolio interest --year 2025               # broker interest, Doh-Obr filing rows
 ./vf portfolio reconcile --year 2025              # audit coverage before filing
@@ -28,7 +28,7 @@ This module imports IBKR data and produces Slovenian tax filings
 ./vf portfolio furs-xml --file flex.xml --year 2025 --forms kdvp  # one form only
 ```
 
-`--file` falls back to `IBKR_STATEMENT_PATH` in `.env` when omitted.
+`--file` falls back to `IBKR_FLEX_PATH` in `.env` when omitted.
 `--file` accepts comma-separated paths to combine multiple years or accounts.
 
 ---
@@ -80,7 +80,7 @@ Set these in `.env` at the repo root (gitignored). Shell exports take precedence
 
 ```bash
 # Path to your IBKR Flex Query XML (used as default --file)
-IBKR_STATEMENT_PATH=/home/you/ibkr/2025.xml
+IBKR_FLEX_PATH=/home/you/ibkr/2025.xml
 
 # Your personal details for the XML header
 FURS_TAX_NUMBER=12345678        # davčna številka — required
