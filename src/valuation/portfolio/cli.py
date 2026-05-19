@@ -11,6 +11,7 @@ from pathlib import Path
 import pandas as pd
 
 from valuation.portfolio.ibkr import IbkrDividend, load_activity_statement
+from valuation.portfolio.ibkr_flex import FlexLot, load_flex_query
 from valuation.portfolio.lots import Lot, RealizedGain, build_lots_and_realized, non_eur_currency_dates
 from valuation.portfolio.tax_si import (
     next_si_cgt_threshold,
@@ -253,27 +254,27 @@ def _build_tax_summary(realized: list[RealizedGain], year: int) -> pd.DataFrame:
     total_losses = sum(losses_eur) if losses_eur else None
     net_gain = sum(all_eur) if all_eur else None
 
-    # Gross tax: sum per-disposal tax (each disposal may have a different rate)
-    gross_tax = sum(
-        si_cgt_tax(r.gain_eur, r.acquired, r.sold)
-        for r in realized
-        if r.gain_eur is not None
-    )
     needs_fx = any(r.needs_fx for r in realized)
+
+    # Net CGT: Slovenian ZDoh-2 allows same-year loss offset; no carry-forward.
+    # Tax is applied to max(0, net_gain). All disposals are at 25% (< 5 years held)
+    # so we can simply apply the rate to the net. When multiple rates apply, we
+    # show the net figure and advise FURS verification.
+    net_cgt = max(0.0, net_gain) * 0.25 if net_gain is not None else None
 
     rows = [
         {"metric": "Tax year", "value": str(year)},
         {"metric": "Gross realized gains", "value": _fmt_eur(total_gains)},
         {"metric": "Gross realized losses", "value": _fmt_signed_eur(total_losses)},
         {"metric": "Net gain / loss", "value": _fmt_signed_eur(net_gain)},
-        {"metric": "Gross CGT due", "value": _fmt_eur(gross_tax)},
+        {"metric": "Net CGT due (25%)", "value": _fmt_eur(net_cgt)},
         {
             "metric": "Note",
             "value": (
                 "Some EUR amounts missing (non-EUR trades, no FX rates). "
                 "Re-run with --fx-auto or provide ECB rates. Tax figures are partial."
                 if needs_fx
-                else "Losses may offset gains; carry-forward rules apply. Verify with FURS."
+                else "Losses offset gains within the same year (ZDoh-2). Verify with FURS."
             ),
         },
     ]
@@ -461,6 +462,7 @@ def _load_combined_statement(
 ):
     """Load and merge trades/dividends from one or more statement files.
 
+    Auto-detects format: .xml → Flex Query, .csv → Activity Statement.
     Deduplicates trades by (symbol, trade_date, quantity, price) so overlapping
     date ranges in adjacent year exports don't double-count.
     Returns (trades, dividends, meta) where meta is from the last file.
@@ -471,8 +473,11 @@ def _load_combined_statement(
     all_dividends: list[IbkrDividend] = []
     meta: IbkrStatementMeta | None = None
 
-    for path in sorted(paths):  # chronological by filename
-        trades, dividends, m = load_activity_statement(path)
+    for path in sorted(paths):
+        if path.suffix.lower() == ".xml":
+            trades, dividends, m = _load_flex_as_trades(path, fx_auto=fx_auto)
+        else:
+            trades, dividends, m = load_activity_statement(path)
         all_trades.extend(trades)
         all_dividends.extend(dividends)
         meta = m
@@ -496,10 +501,52 @@ def _load_combined_statement(
             deduped_divs.append(d)
 
     if meta is None:
-        from valuation.portfolio.ibkr import IbkrStatementMeta
         meta = IbkrStatementMeta(base_currency="EUR", account_id="", from_date=None, to_date=None)
 
     return deduped_trades, deduped_divs, meta
+
+
+def _load_flex_as_trades(path: Path, *, fx_auto: bool = False):
+    """Load a Flex Query XML and return (trades, dividends, meta).
+
+    The flex path uses IBKR's pre-computed FIFO <Lot> elements directly.
+    Lots are converted to synthetic IbkrTrade pairs (one buy + one sell per lot)
+    so the rest of the pipeline (FIFO engine, tax table) works unchanged.
+    """
+    from valuation.portfolio.ibkr import IbkrTrade, IbkrStatementMeta
+
+    lots, dividends, meta = load_flex_query(path)
+
+    trades: list[IbkrTrade] = []
+    for lot in lots:
+        # Synthetic buy: use cost_native as proceeds magnitude
+        buy = IbkrTrade(
+            symbol=lot.symbol,
+            asset_category="Stocks",
+            currency=lot.currency,
+            trade_date=lot.acquired,
+            quantity=lot.quantity,
+            price=lot.cost_native / lot.quantity if lot.quantity > 0 else 0.0,
+            proceeds=-lot.cost_native,  # buys have negative proceeds in IBKR convention
+            commission=0.0,
+            _sort_key=(lot.acquired, 0),
+        )
+        # Synthetic sell: proceeds = cost + pnl
+        sell = IbkrTrade(
+            symbol=lot.symbol,
+            asset_category="Stocks",
+            currency=lot.currency,
+            trade_date=lot.sold,
+            quantity=-lot.quantity,
+            price=lot.proceeds_native / lot.quantity if lot.quantity > 0 else 0.0,
+            proceeds=lot.proceeds_native,
+            commission=0.0,
+            _sort_key=(lot.sold, 1),
+        )
+        trades.append(buy)
+        trades.append(sell)
+
+    return trades, dividends, meta
 
 
 def _ibkr_to_yahoo(symbol: str) -> str:

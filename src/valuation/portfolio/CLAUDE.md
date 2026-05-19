@@ -70,5 +70,15 @@ In IBKR Account Management:
 
 - CGT: reported on DOHDSP-1 form, due 28 Feb of following year (verify with FURS)
 - Dividends: reported on DOHDSP-2 form; foreign WHT from 15% US treaty rate offsets 25% SI rate
-- Losses can offset gains in same year; carry-forward up to 5 years
+- Losses offset gains within the same tax year only; no carry-forward under ZDoh-2
 - Verify all rates and deadlines with FURS (https://www.fu.gov.si) before filing
+
+## Flex Query vs Activity Statement
+
+- Flex Query XML (`.xml`): preferred for CGT — IBKR pre-computes FIFO `<Lot>` elements with
+  cost basis and acquisition date even for lots opened before the statement period.
+  Eliminates "unmatched sell" warnings. Configure flex query to include Trades + Lots +
+  CashTransactions (Dividends + Withholding Tax).
+- Activity Statement CSV (`.csv`): suitable when flex query is unavailable; requires combining
+  multiple year exports for full FIFO history.
+- `--file` accepts comma-separated paths for combining multiple files of either format.
