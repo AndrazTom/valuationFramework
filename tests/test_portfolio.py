@@ -676,3 +676,236 @@ def test_si_dividend_effective_rate():
 
 def test_si_dividend_effective_rate_zero_gross():
     assert si_dividend_effective_rate(0.0, 0.0) == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# IBKR Flex Query XML parser
+# ---------------------------------------------------------------------------
+
+import textwrap as _textwrap
+from valuation.portfolio.ibkr_flex import FlexLot, load_flex_query, _parse_flex_datetime, _parse_per_share_from_desc
+
+
+_FLEX_XML_BASIC = _textwrap.dedent("""\
+    <?xml version="1.0" encoding="UTF-8"?>
+    <FlexQueryResponse>
+      <FlexStatements>
+        <FlexStatement accountId="U1234567" fromDate="20250101" toDate="20251231">
+          <AccountInformation currency="EUR" />
+          <Trades>
+            <Trade symbol="AAPL" assetCategory="STK" currency="USD"
+                   tradeDate="20240601" dateTime="20240601;093000" quantity="10" />
+            <Trade symbol="AAPL" assetCategory="STK" currency="USD"
+                   tradeDate="20250601" dateTime="20250601;093000" quantity="-10" />
+          </Trades>
+          <Lots>
+            <Lot symbol="AAPL" assetCategory="STK" currency="USD"
+                 buySell="SELL"
+                 openDateTime="20240601;093000"
+                 dateTime="20250601;093000"
+                 quantity="-10"
+                 cost="-1500.00"
+                 fifoPnlRealized="200.00" />
+          </Lots>
+          <CashTransactions>
+            <CashTransaction type="Dividends" symbol="AAPL" currency="USD"
+                             dateTime="20250315;000000" amount="25.00"
+                             description="AAPL CASH DIVIDEND USD 0.25 PER SHARE" />
+            <CashTransaction type="Withholding Tax" symbol="AAPL" currency="USD"
+                             dateTime="20250315;000000" amount="-3.75"
+                             description="AAPL(US0378331005) CASH DIVIDEND USD 0.25 PER SHARE - 15% TAX" />
+          </CashTransactions>
+        </FlexStatement>
+      </FlexStatements>
+    </FlexQueryResponse>
+""")
+
+
+def test_flex_lot_parsed():
+    import io, tempfile, os
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".xml", delete=False) as f:
+        f.write(_FLEX_XML_BASIC)
+        fname = f.name
+    try:
+        lots, dividends, meta = load_flex_query(fname)
+    finally:
+        os.unlink(fname)
+
+    assert len(lots) == 1
+    lot = lots[0]
+    assert lot.symbol == "AAPL"
+    assert lot.currency == "USD"
+    assert lot.quantity == pytest.approx(10.0)
+    assert lot.cost_native == pytest.approx(-1500.0)
+    assert lot.pnl_native == pytest.approx(200.0)
+    assert lot.proceeds_native == pytest.approx(-1300.0)
+
+
+def test_flex_lot_acquired_and_sold_dates():
+    import io, tempfile, os
+    from datetime import date
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".xml", delete=False) as f:
+        f.write(_FLEX_XML_BASIC)
+        fname = f.name
+    try:
+        lots, _, _ = load_flex_query(fname)
+    finally:
+        os.unlink(fname)
+
+    assert lots[0].acquired == date(2024, 6, 1)
+    assert lots[0].sold == date(2025, 6, 1)
+
+
+def test_flex_dividend_parsed():
+    import tempfile, os
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".xml", delete=False) as f:
+        f.write(_FLEX_XML_BASIC)
+        fname = f.name
+    try:
+        _, dividends, _ = load_flex_query(fname)
+    finally:
+        os.unlink(fname)
+
+    assert len(dividends) == 1
+    d = dividends[0]
+    assert d.symbol == "AAPL"
+    assert d.amount == pytest.approx(25.0)
+    assert d.withholding_tax == pytest.approx(3.75)
+
+
+def test_flex_meta_parsed():
+    import tempfile, os
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".xml", delete=False) as f:
+        f.write(_FLEX_XML_BASIC)
+        fname = f.name
+    try:
+        _, _, meta = load_flex_query(fname)
+    finally:
+        os.unlink(fname)
+
+    assert meta.account_id == "U1234567"
+    assert meta.base_currency == "EUR"
+
+
+def test_flex_skips_non_sell_lots():
+    """BUY Lot rows (openDateTime == dateTime) should not be included."""
+    xml = _textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <FlexQueryResponse>
+          <FlexStatements>
+            <FlexStatement accountId="X" fromDate="20250101" toDate="20251231">
+              <Lots>
+                <Lot symbol="GOOG" assetCategory="STK" currency="USD"
+                     buySell="BUY"
+                     openDateTime="20240601;093000"
+                     dateTime="20240601;093000"
+                     quantity="5"
+                     cost="-2000.00"
+                     fifoPnlRealized="0.00" />
+                <Lot symbol="GOOG" assetCategory="STK" currency="USD"
+                     buySell="SELL"
+                     openDateTime="20240601;093000"
+                     dateTime="20250101;093000"
+                     quantity="-5"
+                     cost="-2000.00"
+                     fifoPnlRealized="500.00" />
+              </Lots>
+            </FlexStatement>
+          </FlexStatements>
+        </FlexQueryResponse>
+    """)
+    import tempfile, os
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".xml", delete=False) as f:
+        f.write(xml)
+        fname = f.name
+    try:
+        lots, _, _ = load_flex_query(fname)
+    finally:
+        os.unlink(fname)
+
+    assert len(lots) == 1
+    assert lots[0].symbol == "GOOG"
+
+
+def test_flex_skips_zero_quantity_lots():
+    xml = _textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <FlexQueryResponse>
+          <FlexStatements>
+            <FlexStatement accountId="X" fromDate="20250101" toDate="20251231">
+              <Lots>
+                <Lot symbol="MSFT" assetCategory="STK" currency="USD"
+                     buySell="SELL"
+                     openDateTime="20240101;093000"
+                     dateTime="20250101;093000"
+                     quantity="0"
+                     cost="0.00"
+                     fifoPnlRealized="0.00" />
+              </Lots>
+            </FlexStatement>
+          </FlexStatements>
+        </FlexQueryResponse>
+    """)
+    import tempfile, os
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".xml", delete=False) as f:
+        f.write(xml)
+        fname = f.name
+    try:
+        lots, _, _ = load_flex_query(fname)
+    finally:
+        os.unlink(fname)
+
+    assert lots == []
+
+
+def test_parse_flex_datetime_formats():
+    from datetime import date
+    assert _parse_flex_datetime("20250315;074110") == date(2025, 3, 15)
+    assert _parse_flex_datetime("20250315") == date(2025, 3, 15)
+    assert _parse_flex_datetime("") is None
+    assert _parse_flex_datetime("bad") is None
+
+
+def test_parse_per_share_from_desc():
+    assert _parse_per_share_from_desc("AAPL(US0378331005) CASH DIVIDEND USD 0.25 PER SHARE") == pytest.approx(0.25)
+    assert _parse_per_share_from_desc("CASH DIVIDEND EUR 1.50 PER SHARE") == pytest.approx(1.50)
+    assert _parse_per_share_from_desc("no amount here") is None
+
+
+def test_flex_wht_only_no_div_type_yields_empty_without_trades():
+    """When only WHT transactions exist and no Trade history, dividends cannot be derived."""
+    xml = _textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <FlexQueryResponse>
+          <FlexStatements>
+            <FlexStatement accountId="X" fromDate="20250101" toDate="20251231">
+              <CashTransactions>
+                <CashTransaction type="Withholding Tax" symbol="MSFT" currency="USD"
+                                 dateTime="20250310;000000" amount="-5.00"
+                                 description="MSFT(US5949181045) CASH DIVIDEND USD 0.83 PER SHARE - 15% TAX" />
+              </CashTransactions>
+            </FlexStatement>
+          </FlexStatements>
+        </FlexQueryResponse>
+    """)
+    import tempfile, os
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".xml", delete=False) as f:
+        f.write(xml)
+        fname = f.name
+    try:
+        _, dividends, _ = load_flex_query(fname)
+    finally:
+        os.unlink(fname)
+
+    # No Trade elements → shares_held_at returns None → gross cannot be derived
+    assert dividends == []
+
+
+def test_flex_proceeds_native_property():
+    from datetime import date
+    lot = FlexLot(
+        symbol="TST", currency="EUR",
+        acquired=date(2024, 1, 1), sold=date(2025, 1, 1),
+        quantity=10.0, cost_native=-1000.0, pnl_native=300.0,
+    )
+    assert lot.proceeds_native == pytest.approx(-700.0)
