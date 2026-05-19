@@ -38,6 +38,25 @@ The `.gitignore` already excludes `*.activity.csv`, `*_statement.csv`, `ibkr_*.c
   - Parses: trades (Stocks only), dividends, withholding tax, statement metadata
   - Returns `(list[IbkrTrade], list[IbkrDividend], IbkrStatementMeta)`
 
+- `ibkr_flex.py` — IBKR Flex Query XML parser (preferred for CGT and FURS reporting)
+  - `load_flex_query(path)` → `(list[FlexLot], list[IbkrDividend], IbkrStatementMeta)`
+    - `FlexLot`: IBKR-computed FIFO lot (`cost_native`, `pnl_native`, `proceeds_native = cost + pnl`)
+    - Lot elements cover buys from before the statement period — no "unmatched sell" gaps
+    - When the flex query includes `Dividends` CashTransaction type, dividends are parsed directly
+    - When only `Withholding Tax` is present, gross is derived in two-step priority:
+      1. **WHT arithmetic** (primary): parses `- XX% TAX` from description, computes
+         `shares = WHT / (per_share × rate)` — accepts result when within 2% of an integer
+      2. **Structural fallback**: counts shares from Trade elements (current period net position);
+         if none, checks SELL Lot elements where `openDateTime ≤ div_date < dateTime`
+         (handles buys from before the statement period that are sold after the dividend date)
+  - `parse_flex_interest(path)` → `list[FlexInterest]`
+    - Parses `Broker Interest Received` CashTransactions
+    - Matches `Withholding Tax` entries containing `CREDIT INT` by (currency, date)
+    - `FlexInterest` fields: `currency`, `payment_date`, `amount`, `withholding_tax`, `description`
+  - **WHT net-signed accumulation**: IBKR emits reversal/re-entry pairs for some events
+    (e.g. 3× debit + 2× credit = 1× net debit). All WHT amounts are summed with sign;
+    `abs()` is applied at the lookup sites. Do NOT sum only negative amounts.
+
 - `lots.py` — FIFO lot engine
   - Input: list of `IbkrTrade`, optional `fx_rates` dict
   - Sorts by (date, buy_before_sell) internally — callers do NOT need to pre-sort
@@ -83,7 +102,30 @@ In IBKR Account Management:
 - Flex Query XML (`.xml`): preferred for CGT — IBKR pre-computes FIFO `<Lot>` elements with
   cost basis and acquisition date even for lots opened before the statement period.
   Eliminates "unmatched sell" warnings. Configure flex query to include Trades + Lots +
-  CashTransactions (Dividends + Withholding Tax).
+  CashTransactions (Dividends + Withholding Tax + Broker Interest Received).
 - Activity Statement CSV (`.csv`): suitable when flex query is unavailable; requires combining
   multiple year exports for full FIFO history.
 - `--file` accepts comma-separated paths for combining multiple files of either format.
+
+## Fees-in-price (FURS requirement)
+
+FURS requires trade commissions to be baked into F4 (buy price) and F9 (sell price); F5 (commission)
+is reported as 0. The `_load_flex_as_trades` function in `cli.py` already implements this:
+
+- `buy.proceeds = -lot.cost_native` (IBKR `Lot.cost` already includes buy commission)
+- `sell.proceeds = lot.proceeds_native` (= `cost + fifoPnlRealized`, net of sell commission)
+- `commission = 0.0` on both synthetic trades
+
+`lot.cost_native / lot.quantity` gives the all-in F4 per-share price. Do not pass raw
+`tradePrice` from the Lot element — that is the execution price before fees.
+
+## Dividend derivation limitations
+
+The WHT arithmetic approach (`shares = WHT / (per_share × rate)`) covers most positions,
+including still-held shares that have no closed Lot in the current period. It fails when:
+- The description has no `- XX% TAX` pattern (rare in practice for IBKR WHT entries)
+- The inferred share count is not within 2% of an integer (indicates a non-standard WHT rate)
+- WHT is 0% (e.g. Cayman Islands) — no WHT entry exists, so no derivation path at all
+
+For 0%-WHT symbols (e.g. BABA), add `Dividends` CashTransaction type to the flex query
+configuration; otherwise these dividends cannot be derived from WHT-only exports.

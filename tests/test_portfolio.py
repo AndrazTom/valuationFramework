@@ -10,10 +10,12 @@ from valuation.portfolio.ibkr import (
     _parse_ibkr_sections,
     _extract_stock_trades,
     _symbol_from_dividend_desc,
+    load_open_positions,
     load_activity_statement,
     load_trades,
     IbkrTrade,
     IbkrDividend,
+    IbkrOpenPosition,
 )
 from valuation.portfolio.lots import build_lots_and_realized, non_eur_currency_dates
 from valuation.portfolio.tax_si import (
@@ -99,6 +101,29 @@ def test_load_trades_convenience_wrapper(tmp_path):
     csv_file.write_text(_SAMPLE_CSV, encoding="utf-8")
     trades = load_trades(csv_file)
     assert len(trades) == 4
+
+
+def test_load_open_positions_parses_stock_summaries(tmp_path):
+    csv = textwrap.dedent("""\
+        Statement,Header,Field Name,Field Value
+        Statement,Data,Period,"January 1, 2026 - May 18, 2026"
+        Account Information,Header,Field Name,Field Value
+        Account Information,Data,Base Currency,EUR
+        Open Positions,Header,DataDiscriminator,Asset Category,Currency,Symbol,Quantity,Mult,Cost Price,Cost Basis,Close Price,Value,Unrealized P/L,Code
+        Open Positions,Data,Summary,Stocks,USD,GOOGL,17,1,154.891745529,2633.159674,396.94,6747.98,4114.820326,
+        Open Positions,Total,,Stocks,USD,,,,,2633.159674,,6747.98,4114.820326,
+    """)
+    csv_file = tmp_path / "statement.csv"
+    csv_file.write_text(csv, encoding="utf-8")
+
+    positions, meta = load_open_positions(csv_file)
+
+    assert meta.to_date == date(2026, 5, 18)
+    assert len(positions) == 1
+    assert isinstance(positions[0], IbkrOpenPosition)
+    assert positions[0].symbol == "GOOGL"
+    assert positions[0].quantity == pytest.approx(17)
+    assert positions[0].cost_basis == pytest.approx(2633.159674)
 
 
 def test_load_activity_statement_with_bom(tmp_path):
@@ -460,6 +485,26 @@ def test_dividend_aapl_has_wht(tmp_path):
     assert aapl.currency == "USD"
 
 
+def test_dividend_wht_reversal_pairs_net_correctly(tmp_path):
+    csv = textwrap.dedent("""\
+        Dividends,Header,Currency,Date,Description,Amount
+        Dividends,Data,EUR,2025-05-21,BNP(FR0000131104) Cash Dividend EUR 4.79 per Share (Ordinary Dividend),153.28
+        Withholding Tax,Header,Currency,Date,Description,Amount,Code
+        Withholding Tax,Data,EUR,2025-05-21,BNP(FR0000131104) Cash Dividend EUR 4.79 per Share - FR Tax,-38.32,
+        Withholding Tax,Data,EUR,2025-05-21,BNP(FR0000131104) Cash Dividend EUR 4.79 per Share - FR Tax,-38.32,
+        Withholding Tax,Data,EUR,2025-05-21,BNP(FR0000131104) Cash Dividend EUR 4.79 per Share - FR Tax,-38.32,
+        Withholding Tax,Data,EUR,2025-05-21,BNP(FR0000131104) Cash Dividend EUR 4.79 per Share - FR Tax,38.32,
+        Withholding Tax,Data,EUR,2025-05-21,BNP(FR0000131104) Cash Dividend EUR 4.79 per Share - FR Tax,38.32,
+    """)
+    csv_file = tmp_path / "stmt.csv"
+    csv_file.write_text(csv, encoding="utf-8")
+
+    _, dividends, _ = load_activity_statement(csv_file)
+
+    assert len(dividends) == 1
+    assert dividends[0].withholding_tax == pytest.approx(38.32)
+
+
 def test_dividend_eur_security_has_no_wht(tmp_path):
     csv_file = tmp_path / "stmt.csv"
     csv_file.write_text(_DIVIDEND_CSV, encoding="utf-8")
@@ -683,7 +728,14 @@ def test_si_dividend_effective_rate_zero_gross():
 # ---------------------------------------------------------------------------
 
 import textwrap as _textwrap
-from valuation.portfolio.ibkr_flex import FlexLot, load_flex_query, _parse_flex_datetime, _parse_per_share_from_desc
+from valuation.portfolio.ibkr_flex import (
+    FlexInterest,
+    FlexLot,
+    load_flex_query,
+    parse_flex_interest,
+    _parse_flex_datetime,
+    _parse_per_share_from_desc,
+)
 
 
 _FLEX_XML_BASIC = _textwrap.dedent("""\
@@ -872,17 +924,18 @@ def test_parse_per_share_from_desc():
     assert _parse_per_share_from_desc("no amount here") is None
 
 
-def test_flex_wht_only_no_div_type_yields_empty_without_trades():
-    """When only WHT transactions exist and no Trade history, dividends cannot be derived."""
+def test_flex_wht_only_derives_gross_via_rate_arithmetic():
+    """When WHT description contains '- XX% TAX', gross is derived even without Trade/Lot history."""
+    # 6 shares × EUR 2.00/share × 15% = EUR 1.80 WHT exactly
     xml = _textwrap.dedent("""\
         <?xml version="1.0" encoding="UTF-8"?>
         <FlexQueryResponse>
           <FlexStatements>
             <FlexStatement accountId="X" fromDate="20250101" toDate="20251231">
               <CashTransactions>
-                <CashTransaction type="Withholding Tax" symbol="MSFT" currency="USD"
-                                 dateTime="20250310;000000" amount="-5.00"
-                                 description="MSFT(US5949181045) CASH DIVIDEND USD 0.83 PER SHARE - 15% TAX" />
+                <CashTransaction type="Withholding Tax" symbol="TST" currency="USD"
+                                 dateTime="20250310;000000" amount="-1.80"
+                                 description="TST(US1234567890) CASH DIVIDEND USD 2.00 PER SHARE - 15% TAX" />
               </CashTransactions>
             </FlexStatement>
           </FlexStatements>
@@ -897,8 +950,10 @@ def test_flex_wht_only_no_div_type_yields_empty_without_trades():
     finally:
         os.unlink(fname)
 
-    # No Trade elements → shares_held_at returns None → gross cannot be derived
-    assert dividends == []
+    assert len(dividends) == 1
+    assert dividends[0].symbol == "TST"
+    assert dividends[0].amount == pytest.approx(12.00)  # 6 × 2.00
+    assert dividends[0].withholding_tax == pytest.approx(1.80)
 
 
 def test_flex_wht_debit_credit_pairs_net_correctly():
@@ -957,3 +1012,153 @@ def test_flex_proceeds_native_property():
         quantity=10.0, cost_native=-1000.0, pnl_native=300.0,
     )
     assert lot.proceeds_native == pytest.approx(-700.0)
+
+
+def test_flex_wht_rate_noninteger_inferred_shares_yields_empty():
+    """When WHT arithmetic gives a non-integer share count, dividend is skipped."""
+    # 1.00 WHT at 15% = 6.67 shares for 1.00/share — not near an integer, should be skipped
+    xml = _textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <FlexQueryResponse>
+          <FlexStatements>
+            <FlexStatement accountId="X" fromDate="20250101" toDate="20251231">
+              <CashTransactions>
+                <CashTransaction type="Withholding Tax" symbol="XYZ" currency="USD"
+                                 dateTime="20250401;000000" amount="-1.00"
+                                 description="XYZ(US0000000000) CASH DIVIDEND USD 1.00 PER SHARE - 15% TAX" />
+              </CashTransactions>
+            </FlexStatement>
+          </FlexStatements>
+        </FlexQueryResponse>
+    """)
+    import tempfile, os
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".xml", delete=False) as f:
+        f.write(xml)
+        fname = f.name
+    try:
+        _, dividends, _ = load_flex_query(fname)
+    finally:
+        os.unlink(fname)
+
+    # 1.00 / (1.00 × 0.15) = 6.67 → not within 2% of 7 → skip
+    assert dividends == []
+
+
+def test_flex_shares_from_lot_elements_when_no_trades():
+    """Dividend gross is derived from Lot elements when buy predates the statement period."""
+    # 5 shares bought in 2024, sold in Aug 2025. Dividend paid May 2025 while lot open.
+    # No "% TAX" in description → forces Lot path.
+    xml = _textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <FlexQueryResponse>
+          <FlexStatements>
+            <FlexStatement accountId="X" fromDate="20250101" toDate="20251231">
+              <Trades>
+                <Trade symbol="OTHER" assetCategory="STK" currency="EUR"
+                       tradeDate="20250101" dateTime="20250101;093000" quantity="1" />
+              </Trades>
+              <Lots>
+                <Lot symbol="PAH" assetCategory="STK" currency="EUR"
+                     buySell="SELL"
+                     openDateTime="20240601;093000"
+                     dateTime="20250801;093000"
+                     quantity="-5"
+                     cost="-1000.00"
+                     fifoPnlRealized="200.00" />
+              </Lots>
+              <CashTransactions>
+                <CashTransaction type="Withholding Tax" symbol="PAH" currency="EUR"
+                                 dateTime="20250528;000000" amount="-13.19"
+                                 description="PAH(DE0007100338) CASH DIVIDEND EUR 10.00 PER SHARE" />
+              </CashTransactions>
+            </FlexStatement>
+          </FlexStatements>
+        </FlexQueryResponse>
+    """)
+    import tempfile, os
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".xml", delete=False) as f:
+        f.write(xml)
+        fname = f.name
+    try:
+        _, dividends, _ = load_flex_query(fname)
+    finally:
+        os.unlink(fname)
+
+    # Lot was open on 2025-05-28 (openDateTime=2024-06-01 ≤ 2025-05-28 < 2025-08-01)
+    # gross = 5 × 10.00 = 50.00
+    assert len(dividends) == 1
+    d = dividends[0]
+    assert d.symbol == "PAH"
+    assert d.amount == pytest.approx(50.00)
+    assert d.withholding_tax == pytest.approx(13.19)
+
+
+def test_flex_interest_parsed_basic():
+    """Broker Interest Received entries are parsed into FlexInterest records."""
+    xml = _textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <FlexQueryResponse>
+          <FlexStatements>
+            <FlexStatement accountId="U1234567" fromDate="20250101" toDate="20251231">
+              <CashTransactions>
+                <CashTransaction type="Broker Interest Received" currency="EUR"
+                                 dateTime="20251031;000000" amount="30.97"
+                                 description="EUR CREDIT INT FOR OCT-01 TO OCT-31" />
+                <CashTransaction type="Broker Interest Received" currency="EUR"
+                                 dateTime="20251130;000000" amount="50.07"
+                                 description="EUR CREDIT INT FOR NOV-01 TO NOV-30" />
+              </CashTransactions>
+            </FlexStatement>
+          </FlexStatements>
+        </FlexQueryResponse>
+    """)
+    import tempfile, os
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".xml", delete=False) as f:
+        f.write(xml)
+        fname = f.name
+    try:
+        records = parse_flex_interest(fname)
+    finally:
+        os.unlink(fname)
+
+    assert len(records) == 2
+    assert all(isinstance(r, FlexInterest) for r in records)
+    assert records[0].payment_date == date(2025, 10, 31)
+    assert records[0].amount == pytest.approx(30.97)
+    assert records[0].withholding_tax == pytest.approx(0.0)
+    assert records[1].amount == pytest.approx(50.07)
+
+
+def test_flex_interest_wht_matched():
+    """Withholding Tax entries with CREDIT INT are matched to interest records."""
+    xml = _textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <FlexQueryResponse>
+          <FlexStatements>
+            <FlexStatement accountId="U1234567" fromDate="20250101" toDate="20251231">
+              <CashTransactions>
+                <CashTransaction type="Broker Interest Received" currency="EUR"
+                                 dateTime="20251031;000000" amount="30.97"
+                                 description="EUR CREDIT INT FOR OCT-01 TO OCT-31" />
+                <CashTransaction type="Withholding Tax" currency="EUR"
+                                 dateTime="20251031;000000" amount="-6.19"
+                                 description="WITHHOLDING @ 20% ON CREDIT INT FOR OCT-01 TO OCT-31" />
+              </CashTransactions>
+            </FlexStatement>
+          </FlexStatements>
+        </FlexQueryResponse>
+    """)
+    import tempfile, os
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".xml", delete=False) as f:
+        f.write(xml)
+        fname = f.name
+    try:
+        records = parse_flex_interest(fname)
+    finally:
+        os.unlink(fname)
+
+    assert len(records) == 1
+    r = records[0]
+    assert r.currency == "EUR"
+    assert r.amount == pytest.approx(30.97)
+    assert r.withholding_tax == pytest.approx(6.19)

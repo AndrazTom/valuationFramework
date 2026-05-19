@@ -10,7 +10,13 @@ from pathlib import Path
 
 import pandas as pd
 
-from valuation.portfolio.ibkr import IbkrDividend, load_activity_statement
+from valuation.portfolio.ibkr import (
+    IbkrDividend,
+    IbkrOpenPosition,
+    IbkrStatementMeta,
+    load_activity_statement,
+    load_open_positions,
+)
 from valuation.portfolio.ibkr_flex import FlexLot, load_flex_query
 from valuation.portfolio.lots import Lot, RealizedGain, build_lots_and_realized, non_eur_currency_dates
 from valuation.portfolio.tax_si import (
@@ -48,6 +54,20 @@ def run_portfolio_show(
     paths = _resolve_statement_paths(file)
     if not paths:
         return 1
+
+    snapshot_positions, snapshot_meta = _load_latest_open_positions(paths)
+    if snapshot_positions:
+        holdings_table = _build_open_positions_table(
+            snapshot_positions,
+            as_of=snapshot_meta.to_date,
+        )
+        _print_and_save(
+            [("Holdings", holdings_table)],
+            outdir=outdir,
+            output_format=output_format,
+            slug="portfolio_holdings",
+        )
+        return 0
 
     trades, _dividends, meta = _load_combined_statement(paths)
     fx_rates = _maybe_fetch_fx(trades, fx_auto)
@@ -221,6 +241,44 @@ def _build_holdings_table(open_lots: list[Lot], *, use_cache: bool = True) -> pd
     return pd.DataFrame(rows)
 
 
+def _build_open_positions_table(
+    positions: list[IbkrOpenPosition],
+    *,
+    as_of: date | None,
+) -> pd.DataFrame:
+    """Build holdings from IBKR's explicit Open Positions snapshot."""
+    currencies = {p.currency for p in positions if p.currency != "EUR"}
+    fx_date = as_of or date.today()
+    fx_rates = _fetch_fx_for_position_currencies(currencies, fx_date)
+
+    rows = []
+    for p in sorted(positions, key=lambda p: p.symbol):
+        eur_rate = 1.0 if p.currency == "EUR" else fx_rates.get(p.currency)
+        avg_cost_eur = p.cost_price * eur_rate if eur_rate is not None else None
+        last_eur = p.close_price * eur_rate if eur_rate is not None else None
+        cost_basis_eur = p.cost_basis * eur_rate if eur_rate is not None else None
+        value_eur = p.value * eur_rate if eur_rate is not None else None
+        unrealized_eur = p.unrealized_pnl * eur_rate if eur_rate is not None else None
+
+        rows.append(
+            {
+                "symbol": p.symbol,
+                "currency": p.currency,
+                "shares": _fmt_qty(p.quantity),
+                "avg_cost_native": _fmt_currency(p.cost_price, p.currency),
+                "avg_cost_eur": _fmt_eur(avg_cost_eur),
+                "last_native": _fmt_currency(p.close_price, p.currency),
+                "last_eur": _fmt_eur(last_eur),
+                "cost_basis_eur": _fmt_eur(cost_basis_eur),
+                "value_eur": _fmt_eur(value_eur),
+                "unrealized_eur": _fmt_signed_eur(unrealized_eur),
+                "as_of": fx_date.isoformat(),
+                "needs_fx": eur_rate is None,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def _build_tax_table(realized: list[RealizedGain]) -> pd.DataFrame:
     rows = []
     for r in realized:
@@ -364,6 +422,19 @@ def _maybe_fetch_fx(trades, fx_auto: bool) -> dict | None:
     return client.build_fx_rates_dict(pairs)
 
 
+def _fetch_fx_for_position_currencies(currencies: set[str], on: date) -> dict[str, float]:
+    if not currencies:
+        return {}
+    from valuation.portfolio.fx import EcbFxClient
+    client = EcbFxClient()
+    result: dict[str, float] = {}
+    for currency in currencies:
+        rate = client.eur_per_unit(currency, on)
+        if rate is not None:
+            result[currency] = rate
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Price fetching
 # ---------------------------------------------------------------------------
@@ -454,6 +525,22 @@ def _resolve_statement_paths(file: str | None) -> list[Path]:
             return []
         paths.append(p)
     return paths
+
+
+def _load_latest_open_positions(paths: list[Path]) -> tuple[list[IbkrOpenPosition], IbkrStatementMeta]:
+    """Return Open Positions from the latest CSV activity statement, if available."""
+    candidates = []
+    for path in paths:
+        if path.suffix.lower() != ".csv":
+            continue
+        positions, meta = load_open_positions(path)
+        if positions:
+            candidates.append((meta.to_date or date.min, path, positions, meta))
+    if not candidates:
+        return [], IbkrStatementMeta(base_currency="EUR", account_id="", from_date=None, to_date=None)
+
+    _to_date, _path, positions, meta = max(candidates, key=lambda item: (item[0], item[1].name))
+    return positions, meta
 
 
 def _load_combined_statement(

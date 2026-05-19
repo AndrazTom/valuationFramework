@@ -26,6 +26,16 @@ _FLEX_DATE_FMTS = ("%Y%m%d;%H%M%S", "%Y%m%d")
 
 
 @dataclass(frozen=True)
+class FlexInterest:
+    """An interest payment parsed from Broker Interest Received CashTransactions."""
+    currency: str
+    payment_date: date
+    amount: float
+    withholding_tax: float
+    description: str
+
+
+@dataclass(frozen=True)
 class FlexLot:
     """A closed FIFO lot as reported by IBKR in <Lot> elements."""
     symbol: str
@@ -60,6 +70,18 @@ def load_flex_query(
     dividends = _parse_dividends(root)
 
     return lots, dividends, meta
+
+
+def parse_flex_interest(path: str | Path) -> list[FlexInterest]:
+    """Parse Broker Interest Received entries from an IBKR Flex Query XML file.
+
+    Returns a list of FlexInterest records sorted by payment_date.
+    withholding_tax is matched from 'Withholding Tax' entries whose description
+    contains 'CREDIT INT' on the same (currency, date).
+    """
+    tree = ET.parse(str(path))
+    root = tree.getroot()
+    return _parse_interest(root)
 
 
 # ---------------------------------------------------------------------------
@@ -267,19 +289,39 @@ def _infer_gross_from_wht_description(
     root,
     dt: date,
 ) -> float | None:
-    """Estimate gross = per_share × shares by inferring shares from trade history.
+    """Estimate gross = per_share × shares.
 
-    Looks at <Trade> and <Lot> elements to find how many shares were held
-    on the dividend payment date. Falls back to None when ambiguous.
+    Priority:
+    1. WHT arithmetic: when description contains '- XX% TAX', derive
+       shares = wht / (per_share × rate). Most reliable — IBKR applied the
+       exact rate so the arithmetic should yield a near-integer share count.
+    2. Structural: count shares from Trade elements (current period) or
+       SELL Lot elements (lots open at dt from prior periods).
     """
+    # WHT arithmetic (primary)
+    rate = _parse_wht_rate_from_desc(desc)
+    if rate is not None and rate > 0:
+        inferred = total_wht / (per_share * rate)
+        rounded = round(inferred)
+        if rounded > 0 and abs(inferred - rounded) / rounded < 0.02:
+            return round(per_share * rounded, 6)
+
+    # Structural fallback
     shares = _shares_held_at(root, symbol, dt)
-    if shares is None or shares <= 0:
-        return None
-    return round(per_share * shares, 6)
+    if shares is not None and shares > 0:
+        return round(per_share * shares, 6)
+
+    return None
 
 
 def _shares_held_at(root, symbol: str, as_of: date) -> float | None:
-    """Estimate shares held as of a date from Trade open/close indicators."""
+    """Estimate shares held as of a date from Trade and Lot elements.
+
+    Trade elements (current period buys/sells) are checked first. When no
+    Trade records exist for the symbol — e.g. the buy predates the statement
+    period — SELL Lot elements are checked: a lot was held at as_of when
+    openDateTime ≤ as_of < dateTime (closed after the dividend date).
+    """
     held = 0.0
     found = False
     for elem in root.iter("Trade"):
@@ -295,7 +337,75 @@ def _shares_held_at(root, symbol: str, as_of: date) -> float | None:
             continue
         held += qty
         found = True
-    return held if found else None
+    if found:
+        return held  # net position from trades (may be 0 if fully sold before as_of)
+
+    # No Trade elements for this symbol: fall back to SELL Lot elements.
+    lot_held = 0.0
+    for elem in root.iter("Lot"):
+        if elem.get("symbol", "") != symbol:
+            continue
+        if elem.get("buySell", "").upper() != "SELL":
+            continue
+        if elem.get("assetCategory", "STK") not in ("STK", ""):
+            continue
+        acquired = _parse_flex_datetime(elem.get("openDateTime", ""))
+        sold = _parse_flex_datetime(elem.get("dateTime", ""))
+        if acquired is None or sold is None:
+            continue
+        if acquired <= as_of < sold:
+            qty = _f(elem.get("quantity"))
+            if qty is not None and abs(qty) > 1e-9:
+                lot_held += abs(qty)
+                found = True
+    return lot_held if found else None
+
+
+# ---------------------------------------------------------------------------
+# Interest parsing
+# ---------------------------------------------------------------------------
+
+def _parse_interest(root) -> list[FlexInterest]:
+    """Parse CashTransaction elements for broker interest income.
+
+    Matches 'Broker Interest Received' entries with 'Withholding Tax' entries
+    whose description contains 'CREDIT INT' by (currency, date).
+    WHT amounts are accumulated as net signed sums (handles reversal pairs).
+    """
+    int_rows: dict[tuple, dict] = {}
+    wht_index: dict[tuple[str, date], float] = {}
+
+    for elem in root.iter("CashTransaction"):
+        tx_type = elem.get("type", "")
+        currency = elem.get("currency", "").strip()
+        desc = elem.get("description", "").strip()
+        amount = _f(elem.get("amount"))
+        dt = _parse_flex_datetime(elem.get("dateTime", ""))
+        if dt is None or amount is None:
+            continue
+
+        if tx_type == "Broker Interest Received" and amount > 0:
+            key = (currency, dt, desc)
+            if key not in int_rows:
+                int_rows[key] = {"currency": currency, "date": dt, "amount": 0.0, "description": desc}
+            int_rows[key]["amount"] += amount
+
+        elif tx_type == "Withholding Tax" and "CREDIT INT" in desc:
+            key = (currency, dt)
+            wht_index[key] = wht_index.get(key, 0.0) + amount  # net signed
+
+    result = []
+    for row in int_rows.values():
+        wht = abs(wht_index.get((row["currency"], row["date"]), 0.0))
+        result.append(FlexInterest(
+            currency=row["currency"],
+            payment_date=row["date"],
+            amount=row["amount"],
+            withholding_tax=wht,
+            description=row["description"],
+        ))
+
+    return sorted(result, key=lambda i: i.payment_date)
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +446,17 @@ def _parse_per_share_from_desc(desc: str) -> float | None:
     if m:
         try:
             return float(m.group(1))
+        except ValueError:
+            pass
+    return None
+
+
+def _parse_wht_rate_from_desc(desc: str) -> float | None:
+    """Extract WHT rate from description like 'USD 0.20 PER SHARE - 15% TAX'."""
+    m = re.search(r"[\-–]\s*([\d.]+)%\s*TAX", desc, re.IGNORECASE)
+    if m:
+        try:
+            return float(m.group(1)) / 100.0
         except ValueError:
             pass
     return None

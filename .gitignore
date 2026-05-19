@@ -22,3 +22,7 @@ outputs/
 *_statement.csv
 ibkr_*.csv
 ibkr_*.xml
+ibkr_*.htm
+ibkr_*.html
+U*.htm
+U*.html

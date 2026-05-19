@@ -38,6 +38,19 @@ class IbkrDividend:
 
 
 @dataclass(frozen=True)
+class IbkrOpenPosition:
+    symbol: str
+    asset_category: str
+    currency: str
+    quantity: float
+    cost_price: float
+    cost_basis: float
+    close_price: float
+    value: float
+    unrealized_pnl: float
+
+
+@dataclass(frozen=True)
 class IbkrStatementMeta:
     base_currency: str
     account_id: str
@@ -66,6 +79,14 @@ def load_trades(path: str | Path) -> list[IbkrTrade]:
     """Convenience wrapper — returns only trades (backwards-compat with old callers)."""
     trades, _, _ = load_activity_statement(path)
     return trades
+
+
+def load_open_positions(path: str | Path) -> tuple[list[IbkrOpenPosition], IbkrStatementMeta]:
+    """Parse the explicit Open Positions snapshot from an IBKR activity statement CSV."""
+    text = Path(path).read_text(encoding="utf-8-sig")
+    sections = _parse_ibkr_sections(text)
+    meta = _extract_meta(sections)
+    return _extract_open_positions(sections), meta
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +231,59 @@ def _extract_stock_trades(sections: dict[str, list[dict[str, str]]]) -> list[Ibk
 
 
 # ---------------------------------------------------------------------------
+# Open position extraction
+# ---------------------------------------------------------------------------
+
+def _extract_open_positions(sections: dict[str, list[dict[str, str]]]) -> list[IbkrOpenPosition]:
+    positions: list[IbkrOpenPosition] = []
+    for row in sections.get("Open Positions", []):
+        if row.get("DataDiscriminator", "").strip() != "Summary":
+            continue
+        if "Stocks" not in row.get("Asset Category", ""):
+            continue
+
+        symbol = row.get("Symbol", "").strip()
+        currency = row.get("Currency", "").strip()
+        if not symbol or not currency:
+            continue
+
+        quantity = _safe_float(_clean_number(row.get("Quantity", "0")))
+        cost_price = _safe_float(_clean_number(row.get("Cost Price", "0")))
+        cost_basis = _safe_float(_clean_number(row.get("Cost Basis", "0")))
+        close_price = _safe_float(_clean_number(row.get("Close Price", "0")))
+        value = _safe_float(_clean_number(row.get("Value", "0")))
+        unrealized = _safe_float(_clean_number(row.get("Unrealized P/L", "0")))
+
+        if (
+            quantity is None
+            or cost_price is None
+            or cost_basis is None
+            or close_price is None
+            or value is None
+            or unrealized is None
+        ):
+            continue
+        if abs(quantity) < 1e-9:
+            continue
+
+        positions.append(
+            IbkrOpenPosition(
+                symbol=symbol,
+                asset_category=row.get("Asset Category", "Stocks").strip(),
+                currency=currency,
+                quantity=quantity,
+                cost_price=cost_price,
+                cost_basis=cost_basis,
+                close_price=close_price,
+                value=value,
+                unrealized_pnl=unrealized,
+            )
+        )
+
+    return sorted(positions, key=lambda p: p.symbol)
+
+
+# ---------------------------------------------------------------------------
 # Dividend extraction
 # ---------------------------------------------------------------------------
 
@@ -223,7 +297,8 @@ def _extract_dividends(sections: dict[str, list[dict[str, str]]]) -> list[IbkrDi
     Withholding tax row format (Currency, Date, Description, Amount, Code):
       "AAPL (US0378331005) Cash Dividend USD 0.24 per Share - US Tax"
     """
-    # Build withholding tax index: (symbol, date) -> tax amount (positive)
+    # Build withholding tax index: (symbol, date) -> tax amount (net signed).
+    # IBKR can emit reversal/re-entry pairs; summing absolute debits inflates WHT.
     wht_index: dict[tuple[str, date], float] = {}
     for row in sections.get("Withholding Tax", []):
         wht_date = _parse_date_field(row.get("Date", ""))
@@ -233,9 +308,8 @@ def _extract_dividends(sections: dict[str, list[dict[str, str]]]) -> list[IbkrDi
         if not raw_symbol:
             continue
         amount = _safe_float(_clean_number(row.get("Amount", "0"))) or 0.0
-        # WHT is stored as a negative amount (deduction); take absolute value
         key = (raw_symbol, wht_date)
-        wht_index[key] = wht_index.get(key, 0.0) + abs(amount)
+        wht_index[key] = wht_index.get(key, 0.0) + amount
 
     dividends: list[IbkrDividend] = []
     for row in sections.get("Dividends", []):
@@ -251,7 +325,7 @@ def _extract_dividends(sections: dict[str, list[dict[str, str]]]) -> list[IbkrDi
         if amount <= 0:
             continue  # skip subtotals and reversals
 
-        wht = wht_index.get((symbol, div_date), 0.0)
+        wht = abs(wht_index.get((symbol, div_date), 0.0))
         dividends.append(
             IbkrDividend(
                 symbol=symbol,
