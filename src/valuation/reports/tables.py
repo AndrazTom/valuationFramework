@@ -81,7 +81,7 @@ DISPLAY_COLUMN_ALIASES = {
 DISPLAY_VALUE_ALIASES = {
     "operating_segment_pretax_earnings_usd": "segment pretax earnings",
     "residual_operating_and_other_usd": "residual opco + other",
-    "residual_to_pretax_earnings_multiple": "residual / pretax earnings",
+    "residual_to_aftertax_earnings_multiple": "residual / after-tax earnings",
     "residual_market_cap_weight": "residual % mkt cap",
     "public_equity_holdings_blended": "selected 13F equities",
     "quoted_holdings_plus_net_cash": "13F + net cash/T-bills",

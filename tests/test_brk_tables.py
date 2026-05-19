@@ -1440,12 +1440,12 @@ def test_build_operating_business_context_table_compares_residual_to_segment_ear
 
     residual = context[context["field"] == "residual_operating_and_other_usd"].iloc[0]["value"]
     pretax = context[context["field"] == "operating_segment_pretax_earnings_usd"].iloc[0]["value"]
-    multiple = context[context["field"] == "residual_to_pretax_earnings_multiple"].iloc[0]["value"]
+    multiple = context[context["field"] == "residual_to_aftertax_earnings_multiple"].iloc[0]["value"]
 
     assert context[context["field"] == "operating_segment_count"].iloc[0]["value"] == 2
     assert pretax == 50 * M
     assert residual == pytest.approx((1000.0 * M) - (300.0 * M) - 40.0)
-    assert multiple == pytest.approx(residual / pretax)
+    assert multiple == pytest.approx(residual / (pretax * 0.75))
 
 
 def test_build_brk_operating_reverse_dcf_table_basic():
@@ -1565,11 +1565,12 @@ def _make_sotp_bridge(
 
 
 def _make_operating_context(residual=350.0 * B, pretax=50.0 * B) -> pd.DataFrame:
-    multiple = residual / pretax if pretax else None
+    aftertax = pretax * 0.75 if pretax else None
+    multiple = residual / aftertax if aftertax else None
     return pd.DataFrame([
         {"field": "operating_segment_pretax_earnings_usd", "value": pretax},
         {"field": "residual_operating_and_other_usd", "value": residual},
-        {"field": "residual_to_pretax_earnings_multiple", "value": multiple},
+        {"field": "residual_to_aftertax_earnings_multiple", "value": multiple},
     ])
 
 
@@ -1612,7 +1613,7 @@ def test_build_brk_valuation_summary_table_happy_path():
     assert "residual_per_brk_b_usd" in fields
     assert "residual_market_cap_weight" in fields
     assert "segment_pretax_earnings_usd" in fields
-    assert "residual_to_pretax_earnings_multiple" in fields
+    assert "residual_to_aftertax_earnings_multiple" in fields
     assert "implied_growth_at_10_pct" in fields
     assert "zero_growth_value_per_brk_b_usd" in fields
 

@@ -1449,8 +1449,8 @@ def build_operating_business_context_table(
             {"field": "operating_segment_pretax_earnings_usd", "value": pretax_earnings},
             {"field": "residual_operating_and_other_usd", "value": residual},
             {
-                "field": "residual_to_pretax_earnings_multiple",
-                "value": _ratio(residual, pretax_earnings),
+                "field": "residual_to_aftertax_earnings_multiple",
+                "value": _ratio(residual, pretax_earnings * _BRK_OPCO_TAX_FACTOR) if pretax_earnings is not None else None,
             },
             {
                 "field": "residual_market_cap_weight",
@@ -1458,7 +1458,7 @@ def build_operating_business_context_table(
             },
             {
                 "field": "context_note",
-                "value": "Residual includes operating businesses plus non-13F assets, debt, taxes, and other items; segment earnings are pre-tax and not a standalone valuation",
+                "value": "Multiple uses after-tax earnings (pre-tax × 0.75, ~25% effective rate) to match the Gordon Growth model below. Residual includes operating businesses plus non-13F assets, debt, taxes, and other items.",
             },
         ]
     )
@@ -1556,7 +1556,7 @@ def build_brk_valuation_summary_table(
     residual_per_share = _metric_per_share(sotp_bridge, "residual_operating_and_other")
     residual_weight = _metric_weight(sotp_bridge, "residual_operating_and_other")
     pretax_earnings = _context_field_value(operating_context, "operating_segment_pretax_earnings_usd")
-    earnings_multiple = _context_field_value(operating_context, "residual_to_pretax_earnings_multiple")
+    earnings_multiple = _context_field_value(operating_context, "residual_to_aftertax_earnings_multiple")
 
     implied_growth_10 = None
     zero_growth_per_share_10 = None
@@ -1581,7 +1581,7 @@ def build_brk_valuation_summary_table(
         {"field": "residual_per_brk_b_usd", "value": residual_per_share},
         {"field": "residual_market_cap_weight", "value": residual_weight},
         {"field": "segment_pretax_earnings_usd", "value": pretax_earnings},
-        {"field": "residual_to_pretax_earnings_multiple", "value": earnings_multiple},
+        {"field": "residual_to_aftertax_earnings_multiple", "value": earnings_multiple},
         {"field": "implied_growth_at_10_pct", "value": implied_growth_10},
         {"field": "zero_growth_value_per_brk_b_usd", "value": zero_growth_per_share_10},
     ]
