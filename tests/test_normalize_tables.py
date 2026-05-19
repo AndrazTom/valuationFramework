@@ -505,3 +505,58 @@ def test_company_facts_to_statement_table_direct_quarter_metrics_do_not_subtract
     assert frame.iloc[0]["2025 Q2"] == 149.0
     assert frame.iloc[0]["2025 Q1"] == 151.0
     assert "2025 Q3" not in frame.columns
+
+
+def test_quarter_derivation_with_none_base_val_yields_none_not_zero():
+    """Q2 derived from (Q2_ytd - Q1) should be None when Q1 val is None, not 0 or Q2_ytd."""
+    company_facts = {
+        "facts": {
+            "us-gaap": {
+                "NetIncomeLoss": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": None,
+                                "fy": 2025,
+                                "fp": "Q1",
+                                "start": "2025-01-01",
+                                "end": "2025-03-31",
+                                "filed": "2025-05-01",
+                                "form": "10-Q",
+                            },
+                            {
+                                "val": 80.0,
+                                "fy": 2025,
+                                "fp": "Q2",
+                                "start": "2025-01-01",
+                                "end": "2025-06-30",
+                                "filed": "2025-08-01",
+                                "form": "10-Q",
+                            },
+                        ]
+                    }
+                }
+            }
+        }
+    }
+
+    frame = company_facts_to_statement_table(
+        company_facts,
+        [CompanyFactQuery("net_income", (("us-gaap", "NetIncomeLoss"),))],
+        period="quarterly",
+        value_kind="duration",
+        limit=4,
+    )
+
+    # Q1 has None val — should appear as None/NaN, not 0
+    if "2025 Q1" in frame.columns:
+        val = frame.iloc[0]["2025 Q1"]
+        assert val is None or (isinstance(val, float) and pd.isna(val)), (
+            f"Expected None/NaN for Q1 with None val, got {val!r}"
+        )
+    # Q2_ytd is 80 but Q1 is None → Q2 direct derivation not possible → None/NaN
+    if "2025 Q2" in frame.columns:
+        val = frame.iloc[0]["2025 Q2"]
+        assert val is None or (isinstance(val, float) and pd.isna(val)), (
+            f"Expected None/NaN for derived Q2 when Q1 val is None, got {val!r} (was 80.0 before fix)"
+        )

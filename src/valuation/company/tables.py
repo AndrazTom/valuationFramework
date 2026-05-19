@@ -550,6 +550,8 @@ def build_reverse_dcf_table(
     per_share_oe = owner_earnings / shares
     rows = []
     for r in required_returns:
+        if r <= 0:
+            continue
         implied_g = r - oe_yield
         zero_growth_price = per_share_oe / r
         rows.append(

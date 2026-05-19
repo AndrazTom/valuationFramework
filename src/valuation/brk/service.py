@@ -418,9 +418,9 @@ def find_recent_filings(
         if form in forms:
             matches.append(
                 {
-                    "filing_date": recent["filingDate"][index],
+                    "filing_date": recent.get("filingDate", [None] * len(form_rows))[index],
                     "report_date": recent.get("reportDate", [None] * len(form_rows))[index],
-                    "accession_number": recent["accessionNumber"][index],
+                    "accession_number": recent.get("accessionNumber", [None] * len(form_rows))[index],
                     "form": form,
                     "primary_document": recent.get("primaryDocument", [None] * len(form_rows))[index],
                 }

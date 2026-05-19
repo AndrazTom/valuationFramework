@@ -11,7 +11,7 @@ Rules:
 - when adding a new `company` section, test both file outputs and JSON bundle keys
 - CLI tests should stay offline and use monkeypatches or fixtures rather than live providers
 - keep assertions focused on backend behavior and stable contracts, not incidental table formatting
-- current full-suite baseline after hardening batch: `384 passed`
+- current full-suite baseline after hardening batch: `385 passed`
 
 Coverage map:
 
@@ -42,3 +42,4 @@ Coverage map:
 - `test_ratios.py` Yahoo path `oe_per_share` uses correct capex sign (abs normalization)
 - `test_brk_tables.py` covers `build_opco_segment_industry_multiples_table`: basic structure, correct multiples per segment, total sums, empty-on-no-segments
 - `test_portfolio.py` covers IBKR parser (Order/Execution deduplication, BOM, thousand-separators, dividends+WHT, metadata/period), FIFO engine (single buy, full/partial sell, spanning lots, multi-symbol, gain calculation, non-EUR/FX flag, same-day buy-before-sell ordering), ECB FX client (cache, weekend lookback, missing rate, build_fx_rates_dict, CSV parser), Slovenian CGT (rates, thresholds, leap-day anniversary), and dividend tax (WHT credit, effective rate)
+- `test_normalize_tables.py` covers `_derive_duration_entry` None-propagation: Q2 derived from (Q2_ytd - Q1) where Q1 val is None must yield None, not 0 or the YTD value

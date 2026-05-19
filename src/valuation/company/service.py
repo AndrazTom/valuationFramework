@@ -308,7 +308,8 @@ def _build_resolution(
 ) -> CompanyResolution:
     if sec_company is not None:
         ticker = sec_company.ticker
-        exchange = sec_company.exchange or (str(yahoo_quote.get("exchange")) if yahoo_quote else None)
+        _yq_exchange = yahoo_quote.get("exchange") if yahoo_quote else None
+        exchange = sec_company.exchange or (str(_yq_exchange) if _yq_exchange else None)
         company_name = sec_company.name
         country = str(company_profile.get("country")) if company_profile else None
         currency = str(company_profile.get("currency")) if company_profile and company_profile.get("currency") else None

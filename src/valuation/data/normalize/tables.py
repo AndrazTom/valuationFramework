@@ -607,8 +607,11 @@ def _derive_duration_entry(
     total_entry: Mapping[str, Any],
     base_entry: Mapping[str, Any],
 ) -> Mapping[str, Any]:
+    total_val = total_entry.get("val")
+    base_val = base_entry.get("val")
+    derived = None if (total_val is None or base_val is None) else total_val - base_val
     return {
-        "val": (total_entry.get("val") or 0) - (base_entry.get("val") or 0),
+        "val": derived,
         "end": total_entry.get("end"),
         "filed": total_entry.get("filed"),
         "form": total_entry.get("form"),

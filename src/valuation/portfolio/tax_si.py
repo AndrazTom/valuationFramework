@@ -64,8 +64,10 @@ def next_si_cgt_threshold(acquired: date, as_of: date) -> tuple[date, float] | N
             try:
                 next_date = date(acquired.year + min_years, acquired.month, acquired.day)
             except ValueError:
+                if acquired.month != 2 or acquired.day != 29:
+                    raise
                 # Feb 29 in a non-leap target year → Feb 28
-                next_date = date(acquired.year + min_years, acquired.month, acquired.day - 1)
+                next_date = date(acquired.year + min_years, 2, 28)
             return next_date, rate
     return None
 

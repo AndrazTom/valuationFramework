@@ -2019,49 +2019,47 @@ def build_opco_segment_industry_multiples_table(
             "implied_ev_low_usd": pretax * mult_low,
             "implied_ev_mid_usd": pretax * mult_mid,
             "implied_ev_high_usd": pretax * mult_high,
-            "implied_ev_mid_per_brk_b_usd": None,
+            "implied_ev_mid_per_brk_b_usd": float("nan"),
         })
 
     if not rows:
         return pd.DataFrame()
 
-    result = pd.DataFrame(rows)
-    total_pretax = float(result["pretax_earnings_usd"].sum())
-    total_low = float(result["implied_ev_low_usd"].sum())
-    total_mid = float(result["implied_ev_mid_usd"].sum())
-    total_high = float(result["implied_ev_high_usd"].sum())
+    def _ps(v: float) -> float:
+        return v / share_count if share_count and share_count > 0 else float("nan")
 
-    def _ps(v: float | None) -> float | None:
-        return v / share_count if v is not None and share_count and share_count > 0 else None
+    total_pretax = float(sum(r["pretax_earnings_usd"] for r in rows))
+    total_low = float(sum(r["implied_ev_low_usd"] for r in rows))
+    total_mid = float(sum(r["implied_ev_mid_usd"] for r in rows))
+    total_high = float(sum(r["implied_ev_high_usd"] for r in rows))
 
-    total_row: dict = {
+    all_rows = list(rows)
+    all_rows.append({
         "segment": "Total Operating Businesses",
         "pretax_earnings_usd": total_pretax,
-        "multiple_low": None,
-        "multiple_mid": None,
-        "multiple_high": None,
+        "multiple_low": float("nan"),
+        "multiple_mid": float("nan"),
+        "multiple_high": float("nan"),
         "implied_ev_low_usd": total_low,
         "implied_ev_mid_usd": total_mid,
         "implied_ev_high_usd": total_high,
         "implied_ev_mid_per_brk_b_usd": _ps(total_mid),
-    }
-    result = pd.concat([result, pd.DataFrame([total_row])], ignore_index=True)
+    })
 
     if market_residual is not None:
-        context_row: dict = {
+        all_rows.append({
             "segment": "Market-Implied Residual (context)",
-            "pretax_earnings_usd": None,
-            "multiple_low": None,
-            "multiple_mid": None,
-            "multiple_high": None,
-            "implied_ev_low_usd": market_residual,
-            "implied_ev_mid_usd": market_residual,
-            "implied_ev_high_usd": market_residual,
-            "implied_ev_mid_per_brk_b_usd": _ps(market_residual),
-        }
-        result = pd.concat([result, pd.DataFrame([context_row])], ignore_index=True)
+            "pretax_earnings_usd": float("nan"),
+            "multiple_low": float("nan"),
+            "multiple_mid": float("nan"),
+            "multiple_high": float("nan"),
+            "implied_ev_low_usd": float(market_residual),
+            "implied_ev_mid_usd": float(market_residual),
+            "implied_ev_high_usd": float(market_residual),
+            "implied_ev_mid_per_brk_b_usd": _ps(float(market_residual)),
+        })
 
-    return result
+    return pd.DataFrame(all_rows)
 
 
 def build_book_value_history_table(
