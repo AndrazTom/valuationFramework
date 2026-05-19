@@ -598,7 +598,7 @@ def run_brk_sotp(
         ("Operating Business Context", operating_context),
     ]
     if not reverse_dcf.empty:
-        sections.append(("Operating Business Reverse DCF", reverse_dcf))
+        sections.append(("Operating Business Reverse DCF", reverse_dcf, "Pre-tax earnings / pre-tax return. Apply ~0.75x tax-rate factor for an after-tax equivalent. Residual is market-implied (circular)."))
     _append_nonempty(sections, "OpCo Intrinsic Value Estimate", build_opco_valuation_sensitivity_table(
         bundle,
         reference,
@@ -878,7 +878,7 @@ def run_brk_valuation_report(
         ("Operating Business Context", operating_context),
     ]
     if not reverse_dcf.empty:
-        core_md.append(("Operating Business Reverse DCF", reverse_dcf))
+        core_md.append(("Operating Business Reverse DCF", reverse_dcf, "Pre-tax earnings / pre-tax return. Apply ~0.75x tax-rate factor for an after-tax equivalent. Residual is market-implied (circular)."))
     if not opco_intrinsic.empty:
         core_md.append(("OpCo Intrinsic Value Estimate", opco_intrinsic))
     if not segment_bottoms_up.empty:
@@ -978,8 +978,14 @@ def run_brk_valuation_report(
     ]
 
     # Core findings
-    for title, frame in core_md:
-        lines += [f"## {title}", "", render_markdown_table(frame), ""]
+    for item in core_md:
+        title, frame = item[0], item[1]
+        description = item[2] if len(item) > 2 else None
+        block = [f"## {title}", ""]
+        if description:
+            block += [f"_{description}_", ""]
+        block += [render_markdown_table(frame), ""]
+        lines += block
 
     # Supporting detail
     lines += ["---", "", "## Supporting Detail", ""]
@@ -1100,8 +1106,12 @@ def _brk_share_count_for_report(market_snapshot: dict) -> float | None:
 
 
 def _emit_sections(sections: Sequence[tuple[str, object]], output_dir: Path) -> None:
-    for title, frame in sections:
+    for item in sections:
+        title, frame = item[0], item[1]
+        description = item[2] if len(item) > 2 else None
         print(f"\n## {title}\n")
+        if description:
+            print(f"{description}\n")
         print(render_terminal_table(frame))
 
     for name, frame in _named_tables(sections):
@@ -1112,7 +1122,8 @@ def _emit_sections(sections: Sequence[tuple[str, object]], output_dir: Path) -> 
 
 
 def _named_tables(sections: Sequence[tuple[str, object]]):
-    for title, frame in sections:
+    for item in sections:
+        title, frame = item[0], item[1]
         slug = re.sub(r"[^a-z0-9]+", "_", title.lower()).strip("_")
         yield slug, frame
 

@@ -1513,9 +1513,8 @@ def build_brk_operating_reverse_dcf_table(
 
     share_count = _implied_brk_b_equivalent_shares(market_snapshot)
     earnings_yield = pretax_earnings / residual
-    note = "Pre-tax earnings / pre-tax return; apply ~0.75 tax-rate factor for after-tax equivalent. Residual is market-implied (circular)."
     rows = []
-    for i, r in enumerate(required_returns):
+    for r in required_returns:
         implied_g = r - earnings_yield
         zero_growth_value = pretax_earnings / r
         rows.append(
@@ -1524,7 +1523,6 @@ def build_brk_operating_reverse_dcf_table(
                 "implied_growth": implied_g,
                 "zero_growth_operating_value_usd": zero_growth_value,
                 "zero_growth_per_brk_b_usd": _per_share_value(zero_growth_value, share_count),
-                "model_note": note if i == 0 else "",
             }
         )
     return pd.DataFrame(rows)
