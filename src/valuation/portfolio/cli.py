@@ -21,6 +21,16 @@ from valuation.portfolio.tax_si import (
 
 _ENV_STATEMENT_PATH = "IBKR_STATEMENT_PATH"
 
+# IBKR uses exchange-local symbols; Yahoo needs exchange suffixes for non-US listings.
+# Add entries here when a symbol consistently fails Yahoo price lookup.
+_IBKR_YAHOO_OVERRIDES: dict[str, str] = {
+    "BNP": "BNP.PA",    # BNP Paribas — Euronext Paris
+    "FWRA": "FWRA.L",   # Invesco FTSE All-World — London
+    "VWCE": "VWCE.DE",  # Vanguard FTSE All-World — Xetra
+    "PAH3": "PAH3.DE",  # Porsche Automobil Holding — Frankfurt
+    "PAH3d": "PAH3.DE",
+}
+
 
 # ---------------------------------------------------------------------------
 # Command runners
@@ -34,11 +44,11 @@ def run_portfolio_show(
     fx_auto: bool = False,
 ) -> int:
     """Show open positions with cost basis, unrealized P&L, and Slovenian tax tier."""
-    path = _resolve_statement_path(file)
-    if path is None:
+    paths = _resolve_statement_paths(file)
+    if not paths:
         return 1
 
-    trades, _dividends, meta = load_activity_statement(path)
+    trades, _dividends, meta = _load_combined_statement(paths)
     fx_rates = _maybe_fetch_fx(trades, fx_auto)
     open_lots, _ = build_lots_and_realized(trades, fx_rates=fx_rates)
 
@@ -65,11 +75,11 @@ def run_portfolio_tax(
     fx_auto: bool = False,
 ) -> int:
     """Show realized gains for a tax year and compute Slovenian CGT owed."""
-    path = _resolve_statement_path(file)
-    if path is None:
+    paths = _resolve_statement_paths(file)
+    if not paths:
         return 1
 
-    trades, _dividends, meta = load_activity_statement(path)
+    trades, _dividends, meta = _load_combined_statement(paths)
     fx_rates = _maybe_fetch_fx(trades, fx_auto)
     _, realized = build_lots_and_realized(trades, fx_rates=fx_rates)
 
@@ -102,11 +112,11 @@ def run_portfolio_dividends(
     fx_auto: bool = False,
 ) -> int:
     """Show dividend income for a tax year and compute Slovenian dividend tax owed."""
-    path = _resolve_statement_path(file)
-    if path is None:
+    paths = _resolve_statement_paths(file)
+    if not paths:
         return 1
 
-    _trades, dividends, meta = load_activity_statement(path)
+    _trades, dividends, meta = _load_combined_statement(paths)
 
     # Filter to the requested year
     year_divs = [d for d in dividends if d.payment_date.year == year]
@@ -153,6 +163,20 @@ def _build_holdings_table(open_lots: list[Lot], *, use_cache: bool = True) -> pd
 
     prices = _fetch_prices(list(by_symbol.keys()), use_cache=use_cache)
 
+    # Collect all currencies quoted in the snapshots (may differ from trade currency)
+    quote_currencies: set[str] = set()
+    for symbol in by_symbol:
+        snap = prices.get(_ibkr_to_yahoo(symbol), {})
+        qc = (snap.get("currency") or "").upper()
+        if qc and qc != "EUR":
+            quote_currencies.add(qc)
+    # Also include trade currencies in case quote currency is missing from snapshot
+    for lots in by_symbol.values():
+        tc = (lots[0].currency or "").upper()
+        if tc and tc != "EUR":
+            quote_currencies.add(tc)
+    live_fx = _fetch_live_fx_for_currencies(quote_currencies)
+
     rows = []
     for symbol, lots in sorted(by_symbol.items()):
         total_qty = sum(l.quantity for l in lots)
@@ -167,7 +191,7 @@ def _build_holdings_table(open_lots: list[Lot], *, use_cache: bool = True) -> pd
         days_to_next = (threshold[0] - today).days if threshold else None
 
         snap = prices.get(_ibkr_to_yahoo(symbol), {})
-        last_price_eur = _to_eur_price(snap, lots[0].currency)
+        last_price_eur = _to_eur_price(snap, lots[0].currency, live_fx=live_fx)
         value_eur = last_price_eur * total_qty if last_price_eur is not None else None
         unrealized_eur = (
             (value_eur - total_cost_eur)
@@ -366,40 +390,122 @@ def _safe_fetch(client, symbol: str) -> dict | None:
         return None
 
 
-def _to_eur_price(snap: dict, trade_currency: str) -> float | None:
+def _to_eur_price(
+    snap: dict,
+    trade_currency: str,
+    *,
+    live_fx: dict[str, float] | None = None,
+) -> float | None:
     if not snap:
         return None
     last = snap.get("last_price")
     if last is None:
         return None
-    currency = snap.get("currency") or trade_currency
+    currency = (snap.get("currency") or trade_currency or "").upper()
     if currency == "EUR":
         return float(last)
+    if live_fx:
+        rate = live_fx.get(currency)
+        if rate is not None:
+            return float(last) * rate
     return None
+
+
+def _fetch_live_fx_for_currencies(currencies: set[str]) -> dict[str, float]:
+    """Fetch today's ECB spot rate for each non-EUR currency."""
+    if not currencies:
+        return {}
+    from valuation.portfolio.fx import EcbFxClient
+    client = EcbFxClient()
+    today = date.today()
+    result: dict[str, float] = {}
+    for cur in currencies:
+        if cur == "EUR":
+            continue
+        rate = client.eur_per_unit(cur, today)
+        if rate is not None:
+            result[cur] = rate
+    return result
 
 
 # ---------------------------------------------------------------------------
 # Output helpers
 # ---------------------------------------------------------------------------
 
-def _resolve_statement_path(file: str | None) -> Path | None:
+def _resolve_statement_paths(file: str | None) -> list[Path]:
+    """Resolve one or more statement paths from --file arg or env var.
+
+    --file accepts comma-separated paths for combining multi-year exports.
+    """
     raw = file or os.environ.get(_ENV_STATEMENT_PATH)
     if raw is None:
         print(
             f"Error: no IBKR statement file specified. "
-            f"Use --file <path> or set {_ENV_STATEMENT_PATH} in .env.",
+            f"Use --file <path>[,<path>...] or set {_ENV_STATEMENT_PATH} in .env.",
             file=sys.stderr,
         )
-        return None
-    p = Path(raw).expanduser()
-    if not p.is_file():
-        print(f"Error: statement file not found: {p}", file=sys.stderr)
-        return None
-    return p
+        return []
+    paths: list[Path] = []
+    for part in raw.split(","):
+        p = Path(part.strip()).expanduser()
+        if not p.is_file():
+            print(f"Error: statement file not found: {p}", file=sys.stderr)
+            return []
+        paths.append(p)
+    return paths
+
+
+def _load_combined_statement(
+    paths: list[Path],
+    fx_auto: bool = False,
+):
+    """Load and merge trades/dividends from one or more statement files.
+
+    Deduplicates trades by (symbol, trade_date, quantity, price) so overlapping
+    date ranges in adjacent year exports don't double-count.
+    Returns (trades, dividends, meta) where meta is from the last file.
+    """
+    from valuation.portfolio.ibkr import IbkrTrade, IbkrDividend, IbkrStatementMeta
+
+    all_trades: list[IbkrTrade] = []
+    all_dividends: list[IbkrDividend] = []
+    meta: IbkrStatementMeta | None = None
+
+    for path in sorted(paths):  # chronological by filename
+        trades, dividends, m = load_activity_statement(path)
+        all_trades.extend(trades)
+        all_dividends.extend(dividends)
+        meta = m
+
+    # Deduplicate trades: same symbol + date + quantity + price = same trade
+    seen_trades: set[tuple] = set()
+    deduped_trades: list[IbkrTrade] = []
+    for t in all_trades:
+        key = (t.symbol, t.trade_date, t.quantity, t.price)
+        if key not in seen_trades:
+            seen_trades.add(key)
+            deduped_trades.append(t)
+
+    # Deduplicate dividends: same symbol + date + amount
+    seen_divs: set[tuple] = set()
+    deduped_divs: list[IbkrDividend] = []
+    for d in all_dividends:
+        key = (d.symbol, d.payment_date, d.amount)
+        if key not in seen_divs:
+            seen_divs.add(key)
+            deduped_divs.append(d)
+
+    if meta is None:
+        from valuation.portfolio.ibkr import IbkrStatementMeta
+        meta = IbkrStatementMeta(base_currency="EUR", account_id="", from_date=None, to_date=None)
+
+    return deduped_trades, deduped_divs, meta
 
 
 def _ibkr_to_yahoo(symbol: str) -> str:
     """Normalize IBKR symbol format to Yahoo Finance format."""
+    if symbol in _IBKR_YAHOO_OVERRIDES:
+        return _IBKR_YAHOO_OVERRIDES[symbol]
     return symbol.replace(" ", "-")
 
 

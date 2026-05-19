@@ -13,6 +13,7 @@ build/
 dist/
 *.whl
 outputs/
+/portfolio/
 
 # IBKR activity statements — never commit brokerage data to a public repo
 *.flex.xml
