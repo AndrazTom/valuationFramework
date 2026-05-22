@@ -83,14 +83,18 @@ Set these in `.env` at the repo root (gitignored). Shell exports take precedence
 IBKR_FLEX_PATH=/home/you/ibkr/2025.xml
 
 # Your personal details for the XML header
-FURS_TAX_NUMBER=12345678        # davčna številka — required
-FURS_NAME=Ime Priimek           # required
-FURS_EMAIL=your@email.com       # appears in form body
-FURS_PHONE=+38641000000         # appears in form body
+FURS_TAX_NUMBER="12345678"        # davčna številka — required
+FURS_NAME="Ime Priimek"           # required
+FURS_ADDRESS="Street 1"
+FURS_CITY="City"
+FURS_POST_NUMBER="1000"
+FURS_POST_NAME="City"
+FURS_EMAIL="your@email.com"       # appears in form body
+FURS_PHONE="+38641000000"         # appears in form body
 ```
 
-Address fields (`<edp:address1>`, `<edp:city>`, etc.) are left blank — eDavki
-populates them from the tax register when you're logged in.
+If taxpayer/contact fields are missing, `furs-xml` still writes the XML and
+prints the `export FURS_...=...` commands needed before rerunning.
 
 ---
 
@@ -100,7 +104,11 @@ populates them from the tax register when you're logged in.
 
 - Filed on **Doh-KDVP** form, due **28 Feb** of the following year
 - This tool uses IBKR's FIFO lot cost basis with commissions baked into the
-  per-share buy/sell price (F5 = 0), as required by FURS
+  per-share buy/sell price. F5 is not a fee field and is emitted as 0.
+- KDVP column 10 / `TaxDecreaseConformance` is emitted as `true` (`DA`): this
+  asserts the loss-offset condition is met, i.e. no 30-day replacement-capital
+  disallowance applies. Review manually if you sold at a loss and repurchased
+  the same or equivalent security around the sale date.
 - CGT rates under ZDoh-2: **25% → 20% → 15% → 0%** at 5 / 10 / 15 complete years held
 - Losses offset gains within the same tax year only; no carry-forward
 - Real estate capital losses (same year) also offset securities CGT
@@ -109,8 +117,12 @@ populates them from the tax register when you're logged in.
 
 - Filed on **Doh-Div** form
 - Foreign WHT offsets the 25% Slovenian dividend tax (e.g. 15% US treaty rate → 10% top-up)
-- Payer details (name, address, tax ID) come from the `KNOWN_PAYERS` table in
-  `src/valuation/portfolio/furs_xml.py` — add any missing symbols there before filing
+- Payer details (name, address, tax ID) come from the bundled ib-edavki-style
+  `src/valuation/portfolio/data/companies.xml` table. Add missing or corrected
+  payers there before filing.
+- The bundled company and treaty-relief tables are copied from
+  [`ib-edavki`](https://github.com/jamsix/ib-edavki), with local additions for
+  payers present in this portfolio.
 
 ### Interest (Doh-Obr)
 
@@ -136,7 +148,7 @@ This tool is a calculation aid — always verify before filing.
 | Issue | Cause | Workaround |
 |---|---|---|
 | 0%-WHT dividends missing (e.g. BABA) | No WHT entry exists to derive gross from | Add `Dividends` CashTransaction type to Flex Query |
-| Payer details missing for a symbol | Symbol not in `KNOWN_PAYERS` | Add entry to `furs_xml.py` before filing |
+| Payer details missing for a symbol | Symbol/ISIN not in bundled `companies.xml` | Add entry to `src/valuation/portfolio/data/companies.xml` before filing |
 | FX values 0.0000 for non-EUR stocks | ECB rate fetch failed or `--no-fx-auto` used | Check network, or remove `--no-fx-auto` |
 | Small price differences vs ib-edavki | ECB vs IBKR FX rates differ slightly | Both are acceptable to FURS |
 

@@ -163,8 +163,10 @@ def run_portfolio_furs_xml(
         build_div_xml,
         build_kdvp_xml,
         build_obr_xml,
+        company_xml_snippet_for,
         load_taxpayer_from_env,
         lot_fx_pairs,
+        missing_dividend_payers,
     )
 
     paths = _resolve_statement_paths(file)
@@ -230,6 +232,7 @@ def run_portfolio_furs_xml(
         written.append(str(p))
 
     if "div" in forms_set:
+        _warn_missing_dividend_payers(deduped_divs, year, missing_dividend_payers, company_xml_snippet_for)
         xml_str = build_div_xml(deduped_divs, year, taxpayer, fx_rates)
         p = out_path / "Doh-Div.xml"
         p.write_text(xml_str, encoding="utf-8")
@@ -244,7 +247,62 @@ def run_portfolio_furs_xml(
     print(f"\nWrote FURS XML to {out_path}:")
     for p in written:
         print(f"  {p}")
+    sys.stdout.flush()
+    _warn_missing_furs_taxpayer_fields(taxpayer)
     return 0
+
+
+def _warn_missing_furs_taxpayer_fields(taxpayer: dict) -> None:
+    fields = [
+        ("FURS_NAME", "name"),
+        ("FURS_ADDRESS", "address"),
+        ("FURS_CITY", "city"),
+        ("FURS_POST_NUMBER", "post_number"),
+        ("FURS_POST_NAME", "post_name"),
+        ("FURS_EMAIL", "email"),
+        ("FURS_PHONE", "phone"),
+    ]
+    missing = [(env, key) for env, key in fields if not taxpayer.get(key)]
+    if not missing:
+        return
+
+    print(
+        "\nWarning: generated XML has blank taxpayer/contact fields. "
+        "You can edit the generated XML manually, or set these and rerun:",
+        file=sys.stderr,
+    )
+    for env, _ in missing:
+        print(f'  export {env}="..."', file=sys.stderr)
+
+
+def _warn_missing_dividend_payers(
+    dividends: list[IbkrDividend],
+    year: int,
+    missing_func,
+    snippet_func,
+) -> None:
+    missing = missing_func(dividends, year)
+    if not missing:
+        return
+
+    print(
+        "\nWarning: missing Doh-Div payer metadata in "
+        "src/valuation/portfolio/data/companies.xml.",
+        file=sys.stderr,
+    )
+    print(
+        "Doh-Div.xml was still generated, but these rows have incomplete payer "
+        "name/address/tax-number fields.",
+        file=sys.stderr,
+    )
+    print(
+        "Fix: add company entries like these to "
+        "src/valuation/portfolio/data/companies.xml before the closing </companies> tag:",
+        file=sys.stderr,
+    )
+    for dividend in missing:
+        print("", file=sys.stderr)
+        print(snippet_func(dividend), file=sys.stderr)
 
 
 def run_portfolio_reconcile(

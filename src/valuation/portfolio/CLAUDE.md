@@ -170,8 +170,9 @@ See `docs/portfolio.md` for the full Flex Query configuration table and export i
 
 ## Fees-in-price (FURS requirement)
 
-FURS requires trade commissions to be baked into F4 (buy price) and F9 (sell price); F5 (commission)
-is reported as 0. The `_load_flex_as_trades` function in `cli.py` already implements this:
+FURS requires trade commissions to be baked into F4 (buy price) and F9 (sell price).
+F5 is not a commission/fee field and is reported as 0. The `_load_flex_as_trades`
+function in `cli.py` already implements this:
 
 - `buy.proceeds = -lot.cost_native` (IBKR `Lot.cost` already includes buy commission)
 - `sell.proceeds = lot.proceeds_native` (= `cost + fifoPnlRealized`, net of sell commission)

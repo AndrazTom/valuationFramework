@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import os
 from datetime import date
+from functools import lru_cache
+from importlib import resources
+from xml.etree import ElementTree as ET
 
 from valuation.config import load_project_env
 from valuation.portfolio.ibkr import IbkrDividend
@@ -18,89 +21,6 @@ _IBKR_IE_PAYER_ID = "657406"
 _IBKR_IE_NAME = "Interactive Brokers Ireland Limited"
 _IBKR_IE_ADDRESS = "10 Earlsfort Terrace, Dublin 2 D02 T380"
 _IBKR_IE_COUNTRY = "IE"
-
-KNOWN_PAYERS: dict[str, dict] = {
-    "GOOGL": {
-        "identification_number": "61-1767919",
-        "name": "Alphabet Inc.",
-        "address": "1600 Amphitheatre Parkway, Mountain View, CA 94043",
-        "country": "US",
-        "source_country": "US",
-        "relief_statement": "10/01, 2b odstavek 10. člena",
-    },
-    "BNP": {
-        "identification_number": "FR7666204244",
-        "name": "BNP Paribas S.A.",
-        "address": "16, boulevard des Italiens, 75009 Paris, France",
-        "country": "FR",
-        "source_country": "FR",
-        "relief_statement": "4/05, 2a odstavek 10. člena",
-    },
-    "PAH3": {
-        "identification_number": "-",
-        "name": "Porsche Automobil Holding SE",
-        "address": "Porscheplatz 1, 70435 Stuttgart, Germany",
-        "country": "DE",
-        "source_country": "DE",
-        "relief_statement": "22/06, 2b odstavek 10. člena",
-    },
-    "PAH3d": {
-        "identification_number": "-",
-        "name": "Porsche Automobil Holding SE",
-        "address": "Porscheplatz 1, 70435 Stuttgart, Germany",
-        "country": "DE",
-        "source_country": "DE",
-        "relief_statement": "22/06, 2b odstavek 10. člena",
-    },
-    "DNQ": {
-        "identification_number": "923609016",
-        "name": "Equinor ASA",
-        "address": "Forusbeen 50, 4035 Stavanger, Norway",
-        "country": "NO",
-        "source_country": "NO",
-        "relief_statement": "7/09, 2c odstavek 10. člena",
-    },
-    "NESM": {
-        "identification_number": "CHE116281710",
-        "name": "Nestlé S.A. (Sponsored ADRs)",
-        "address": "Avenue Nestlé 55, 1800 Vevey, Switzerland",
-        "country": "CH",
-        "source_country": "CH",
-        "relief_statement": "15/97, 5/137, 2. odstavek 10. člena",
-    },
-    "BABA": {
-        "identification_number": "5493001NTNQJ",
-        "name": "Alibaba Group Holding Limited",
-        "address": "One Capital Place, P.O. Box 847, George Town, Grand Cayman",
-        "country": "KY",
-        "source_country": "KY",
-        "relief_statement": "",
-    },
-    "ASML": {
-        "identification_number": "NL803441526B",
-        "name": "ASML Holding N.V.",
-        "address": "De Run 6501 5504 DR, Veldhoven, Noord-Brabant",
-        "country": "NL",
-        "source_country": "NL",
-        "relief_statement": "4/05, 2b odstavek 10. člena",
-    },
-    "TSM": {
-        "identification_number": "-",
-        "name": "Taiwan Semiconductor Manufacturing Company Limited",
-        "address": "Hsinchu Science Park No. 8, Li-Hsin Road 6 Hsinchu 300-78",
-        "country": "TW",
-        "source_country": "TW",
-        "relief_statement": "",
-    },
-    "PYPL": {
-        "identification_number": "47-2989869",
-        "name": "Paypal Holdings, Inc.",
-        "address": "2211 North First Street, San Jose, CA 95131",
-        "country": "US",
-        "source_country": "US",
-        "relief_statement": "10/01, 2b odstavek 10. člena",
-    },
-}
 
 
 def load_taxpayer_from_env() -> dict:
@@ -113,9 +33,57 @@ def load_taxpayer_from_env() -> dict:
     return {
         "tax_number": os.environ.get("FURS_TAX_NUMBER", ""),
         "name": os.environ.get("FURS_NAME", ""),
+        "address": os.environ.get("FURS_ADDRESS", ""),
+        "city": os.environ.get("FURS_CITY", ""),
+        "post_number": os.environ.get("FURS_POST_NUMBER", ""),
+        "post_name": os.environ.get("FURS_POST_NAME", ""),
         "email": os.environ.get("FURS_EMAIL", ""),
         "phone": os.environ.get("FURS_PHONE", ""),
     }
+
+
+def dividend_payer_for(dividend: IbkrDividend) -> dict:
+    """Return Doh-Div payer metadata for an IBKR dividend.
+
+    Uses the bundled ib-edavki-style company table. Missing payers should be
+    added to ``valuation/portfolio/data/companies.xml``.
+    """
+    by_isin, by_symbol = _company_indexes()
+    payer = by_isin.get(dividend.isin.strip().upper()) if dividend.isin else None
+    if payer is None:
+        payer = by_symbol.get(dividend.symbol.strip().upper())
+    return payer or {}
+
+
+def missing_dividend_payers(dividends: list[IbkrDividend], year: int) -> list[IbkrDividend]:
+    """Return unique year dividends whose payer metadata is absent from companies.xml."""
+    result: list[IbkrDividend] = []
+    seen: set[tuple[str, str]] = set()
+    for dividend in dividends:
+        if dividend.payment_date.year != year:
+            continue
+        if dividend_payer_for(dividend):
+            continue
+        key = (dividend.symbol, dividend.isin)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(dividend)
+    return result
+
+
+def company_xml_snippet_for(dividend: IbkrDividend) -> str:
+    """Build a companies.xml template for a missing dividend payer."""
+    return "\n".join([
+        "  <company>",
+        f"    <isin>{_xe(dividend.isin)}</isin>",
+        f"    <symbol>{_xe(dividend.symbol)}</symbol>",
+        f"    <name>{_xe(dividend.symbol)}</name>",
+        "    <taxNumber></taxNumber>",
+        "    <address></address>",
+        f"    <country>{_xe(dividend.issuer_country)}</country>",
+        "  </company>",
+    ])
 
 
 def lot_fx_pairs(lots: list[FlexLot]) -> list[tuple[str, date]]:
@@ -137,6 +105,80 @@ def lot_fx_pairs(lots: list[FlexLot]) -> list[tuple[str, date]]:
     return result
 
 
+@lru_cache(maxsize=1)
+def _company_indexes() -> tuple[dict[str, dict], dict[str, dict]]:
+    relief = _relief_statements()
+    by_isin: dict[str, dict] = {}
+    by_symbol: dict[str, dict] = {}
+
+    for company in _iter_companies():
+        country = company.get("country", "")
+        payer = {
+            "identification_number": company.get("taxNumber", ""),
+            "name": company.get("name", ""),
+            "address": company.get("address", ""),
+            "country": country,
+            "source_country": country,
+            "relief_statement": relief.get(country, ""),
+        }
+        isin = company.get("isin", "").strip().upper()
+        symbol = company.get("symbol", "").strip().upper()
+        if isin:
+            by_isin[isin] = payer
+        if symbol:
+            by_symbol[symbol] = payer
+
+    return by_isin, by_symbol
+
+
+def _iter_companies() -> list[dict[str, str]]:
+    bundled = resources.files("valuation.portfolio.data").joinpath("companies.xml")
+    return _parse_companies_xml(bundled)
+
+
+def _parse_companies_xml(path) -> list[dict[str, str]]:
+    result: list[dict[str, str]] = []
+    try:
+        with path.open("rb") as f:
+            root = ET.parse(f).getroot()
+    except (FileNotFoundError, ET.ParseError):
+        return result
+
+    for company in root.findall("company"):
+        result.append({
+            "isin": _xml_text(company, "isin"),
+            "symbol": _xml_text(company, "symbol"),
+            "name": _xml_text(company, "name"),
+            "taxNumber": _xml_text(company, "taxNumber"),
+            "address": _xml_text(company, "address"),
+            "country": _xml_text(company, "country"),
+        })
+    return result
+
+
+@lru_cache(maxsize=1)
+def _relief_statements() -> dict[str, str]:
+    bundled = resources.files("valuation.portfolio.data").joinpath("relief-statements.xml")
+    try:
+        with bundled.open("rb") as f:
+            root = ET.parse(f).getroot()
+    except (FileNotFoundError, ET.ParseError):
+        return {}
+
+    result: dict[str, str] = {}
+    for statement in root.findall("reliefStatement"):
+        country = _xml_text(statement, "country")
+        text = _xml_text(statement, "statement")
+        if country and text:
+            result[country] = text
+    return result
+
+
+def _xml_text(parent, tag: str) -> str:
+    elem = parent.find(tag)
+    return (elem.text or "").strip() if elem is not None else ""
+
+
 def build_kdvp_xml(
     lots: list[FlexLot],
     year: int,
@@ -147,7 +189,7 @@ def build_kdvp_xml(
 
     Groups lots by ISIN/symbol, emits per-security buy/sell rows with running
     F8 balance. F4 (buy) and F9 (sell) are per-share EUR prices with
-    commissions included (F5=0), per FURS requirement.
+    commissions included. F5 is not a fee field, so this generator leaves it 0.
     """
     year_lots = [l for l in lots if l.sold.year == year]
 
@@ -207,7 +249,7 @@ def build_div_xml(
 ) -> str:
     """Build Doh-Div XML for the given tax year.
 
-    Payer details are looked up from KNOWN_PAYERS by IBKR symbol.
+    Payer details are looked up from the bundled companies.xml table.
     Dividends without an FX rate are skipped with a warning.
     """
     year_divs = [d for d in dividends if d.payment_date.year == year]
@@ -240,7 +282,7 @@ def build_div_xml(
             continue
         gross_eur = round(div.amount * eur_rate, 2)
         wht_eur = round(div.withholding_tax * eur_rate, 2)
-        payer = KNOWN_PAYERS.get(div.symbol, {})
+        payer = dividend_payer_for(div)
         source_country = payer.get("source_country") or div.issuer_country or ""
 
         out.append("\t\t<Dividend>")
@@ -301,6 +343,7 @@ def build_obr_xml(
     out.append("\t\t\t<ResidentOfRepublicOfSlovenia>true</ResidentOfRepublicOfSlovenia>")
     out.append("\t\t\t<Country>SI</Country>")
 
+    grouped_interest: dict[date, dict[str, float]] = {}
     for row in year_interest:
         eur_rate = (
             1.0
@@ -311,16 +354,23 @@ def build_obr_xml(
             continue
         gross_eur = round(row.amount * eur_rate, 2)
         wht_eur = round(row.withholding_tax * eur_rate, 2)
+        grouped = grouped_interest.setdefault(
+            row.payment_date,
+            {"gross_eur": 0.0, "wht_eur": 0.0},
+        )
+        grouped["gross_eur"] += gross_eur
+        grouped["wht_eur"] += wht_eur
 
+    for payment_date, amounts in sorted(grouped_interest.items()):
         out.append("\t\t\t<Interest>")
-        out.append(f"\t\t\t\t<Date>{row.payment_date.isoformat()}</Date>")
+        out.append(f"\t\t\t\t<Date>{payment_date.isoformat()}</Date>")
         out.append(f"\t\t\t\t<IdentificationNumber>{_IBKR_IE_PAYER_ID}</IdentificationNumber>")
         out.append(f"\t\t\t\t<Name>{_IBKR_IE_NAME}</Name>")
         out.append(f"\t\t\t\t<Address>{_IBKR_IE_ADDRESS}</Address>")
         out.append(f"\t\t\t\t<Country>{_IBKR_IE_COUNTRY}</Country>")
         out.append("\t\t\t\t<Type>2</Type>")
-        out.append(f"\t\t\t\t<Value>{gross_eur}</Value>")
-        out.append(f"\t\t\t\t<ForeignTax>{wht_eur}</ForeignTax>")
+        out.append(f"\t\t\t\t<Value>{_fmt2(amounts['gross_eur'])}</Value>")
+        out.append(f"\t\t\t\t<ForeignTax>{_fmt2(amounts['wht_eur'])}</ForeignTax>")
         out.append(f"\t\t\t\t<Country2>{_IBKR_IE_COUNTRY}</Country2>")
         out.append("\t\t\t</Interest>")
 
@@ -344,7 +394,9 @@ def _kdvp_item(out: list[str], sec_data: dict, fx_rates: dict | None) -> None:
     out.append("\t\t\t\t<HasForeignTax>false</HasForeignTax>")
     out.append("\t\t\t\t<HasLossTransfer>false</HasLossTransfer>")
     out.append("\t\t\t\t<ForeignTransfer>false</ForeignTransfer>")
-    out.append("\t\t\t\t<TaxDecreaseConformance>false</TaxDecreaseConformance>")
+    # KDVP column 10: true means the sale/loss satisfies the condition for
+    # reducing a positive tax base (no wash-sale/replacement-capital disallowance).
+    out.append("\t\t\t\t<TaxDecreaseConformance>true</TaxDecreaseConformance>")
     out.append("\t\t\t\t<Securities>")
     out.append(f"\t\t\t\t\t<ISIN>{sec_data['isin']}</ISIN>")
     out.append(f"\t\t\t\t\t<Code>{sec_data['symbol']}</Code>")
@@ -453,6 +505,10 @@ def _eur_per_share(
 
 def _fmtp(v: float | None) -> str:
     return f"{v:.4f}" if v is not None else "0.0000"
+
+
+def _fmt2(v: float) -> str:
+    return f"{v:.2f}"
 
 
 def _xe(s: str) -> str:

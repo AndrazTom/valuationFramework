@@ -1401,6 +1401,7 @@ def test_build_kdvp_xml_eur_security():
     assert "<Code>ASML</Code>" in xml
     assert "<F2>B</F2>" in xml
     assert "<F5>0</F5>" in xml
+    assert "<TaxDecreaseConformance>true</TaxDecreaseConformance>" in xml
     assert "<F8>2.0000</F8>" in xml   # balance after buy
     assert "<F8>0.0000</F8>" in xml   # balance after sell
     # F4 = 1351.05 / 2 = 675.525
@@ -1455,7 +1456,7 @@ def test_build_kdvp_xml_non_eur_with_fx():
 
 
 def test_build_div_xml_known_payer():
-    """build_div_xml emits correct Dividend element with payer details from KNOWN_PAYERS."""
+    """build_div_xml emits correct Dividend element with payer details from companies.xml."""
     from valuation.portfolio.furs_xml import build_div_xml
     from valuation.portfolio.ibkr import IbkrDividend
 
@@ -1477,6 +1478,78 @@ def test_build_div_xml_known_payer():
     assert "Alphabet Inc." in xml
     assert "<Value>3.68</Value>" in xml   # 4.00 * 0.92 = 3.68
     assert "<ForeignTax>0.55</ForeignTax>" in xml  # 0.60 * 0.92 = 0.552 → 0.55
+
+
+def test_dividend_payer_uses_bundled_ib_edavki_company_data_by_isin():
+    """Doh-Div payer metadata is resolved from bundled ib-edavki companies.xml."""
+    from valuation.portfolio.furs_xml import dividend_payer_for
+    from valuation.portfolio.ibkr import IbkrDividend
+
+    div = IbkrDividend(
+        symbol="NESM", currency="USD",
+        payment_date=date(2025, 5, 29),
+        amount=100.0, withholding_tax=35.0,
+        description="NESM CASH DIVIDEND",
+        isin="US6410694060",
+    )
+
+    payer = dividend_payer_for(div)
+
+    assert payer["name"] == "Nestlé S.A."
+    assert payer["identification_number"] == "CHE-105.909.036"
+    assert payer["country"] == "CH"
+    assert payer["relief_statement"] == "15/97, 5/137, 2. odstavek 10. člena"
+
+
+def test_missing_dividend_payer_snippet_instructs_companies_xml_entry():
+    """Missing Doh-Div payers produce a ready-to-edit companies.xml snippet."""
+    from valuation.portfolio.furs_xml import (
+        company_xml_snippet_for,
+        missing_dividend_payers,
+    )
+    from valuation.portfolio.ibkr import IbkrDividend
+
+    div = IbkrDividend(
+        symbol="MISS", currency="USD",
+        payment_date=date(2025, 4, 1),
+        amount=10.0, withholding_tax=1.5,
+        description="MISS CASH DIVIDEND",
+        isin="US0000000000",
+        issuer_country="US",
+    )
+
+    missing = missing_dividend_payers([div], 2025)
+    snippet = company_xml_snippet_for(div)
+
+    assert missing == [div]
+    assert "<isin>US0000000000</isin>" in snippet
+    assert "<symbol>MISS</symbol>" in snippet
+    assert "<country>US</country>" in snippet
+
+
+def test_missing_furs_taxpayer_fields_warns_with_exports(capsys):
+    """furs-xml warns how to fill blank taxpayer/contact XML fields."""
+    from valuation.portfolio.cli import _warn_missing_furs_taxpayer_fields
+
+    _warn_missing_furs_taxpayer_fields({
+        "tax_number": "12345678",
+        "name": "",
+        "address": "",
+        "city": "Pivka",
+        "post_number": "",
+        "post_name": "Pivka",
+        "email": "",
+        "phone": "040",
+    })
+
+    captured = capsys.readouterr()
+    assert "blank taxpayer/contact fields" in captured.err
+    assert 'export FURS_NAME="..."' in captured.err
+    assert 'export FURS_ADDRESS="..."' in captured.err
+    assert 'export FURS_POST_NUMBER="..."' in captured.err
+    assert 'export FURS_EMAIL="..."' in captured.err
+    assert "FURS_CITY" not in captured.err
+    assert "FURS_PHONE" not in captured.err
 
 
 def test_build_obr_xml_ibkr_payer():
@@ -1502,6 +1575,34 @@ def test_build_obr_xml_ibkr_payer():
     assert "<Value>30.97</Value>" in xml
     assert "<ForeignTax>6.19</ForeignTax>" in xml
     assert "<Country>IE</Country>" in xml
+
+
+def test_build_obr_xml_groups_same_date_interest_after_fx():
+    """Doh-Obr groups same-date multi-currency broker interest into one EUR row."""
+    from valuation.portfolio.furs_xml import build_obr_xml
+
+    interest = [
+        FlexInterest(
+            currency="EUR",
+            payment_date=date(2025, 3, 5),
+            amount=29.60,
+            withholding_tax=5.92,
+            description="EUR CREDIT INT FOR FEB-2025",
+        ),
+        FlexInterest(
+            currency="USD",
+            payment_date=date(2025, 3, 5),
+            amount=1.47,
+            withholding_tax=0.29,
+            description="USD CREDIT INT FOR FEB-2025",
+        ),
+    ]
+    taxpayer = {"tax_number": "0", "name": "T", "email": "t@t.si", "phone": "0"}
+    xml = build_obr_xml(interest, 2025, taxpayer, {("USD", "2025-03-05"): 0.9319728})
+
+    assert xml.count("<Interest>") == 1
+    assert "<Value>30.97</Value>" in xml
+    assert "<ForeignTax>6.19</ForeignTax>" in xml
 
 
 def test_parse_country_from_wht_desc():

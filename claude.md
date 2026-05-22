@@ -760,6 +760,10 @@ Two areas, one repo.
 - produce eDavki XML: `Doh-KDVP`, `Doh-Div`, `Doh-Obr`
 - correctness standard: outputs auditable from source broker rows; private files stay gitignored
 - user-facing guide: `docs/portfolio.md`
+- FURS XML is still in validation before treating it as filing-ready:
+  - `Doh-Obr` interest rows were aligned with the checked reference output
+  - `Doh-KDVP` fields were reviewed (`F5=0`, column 10 / `TaxDecreaseConformance=true` for normal non-wash-sale rows), but all-in `F4`/`F9` price differences versus the published eDavki export still need reconciliation
+  - `Doh-Div` still needs dividend-source reconciliation: WHT-only gross derivation differs for some payers and 0%-WHT rows such as BABA require Flex `Dividends` cash transactions
 
 ### Research
 - company and security analysis via SEC EDGAR + Yahoo Finance

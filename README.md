@@ -108,6 +108,8 @@ IBKR_FLEX_PATH=/path/to/your_flex.xml
 ```
 
 See [docs/portfolio.md — Flex Query setup](docs/portfolio.md#ibkr-flex-query-setup) for how to configure and export the query from IBKR.
+FURS dividend payer and treaty metadata is bundled from
+[`ib-edavki`](https://github.com/jamsix/ib-edavki), with local additions where needed.
 
 ```bash
 ./vf portfolio gains --year 2025                  # realized gains and Slovenian CGT view
