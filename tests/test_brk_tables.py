@@ -13,6 +13,7 @@ from valuation.brk.service import (
     BrkValuationBundle,
 )
 from valuation.brk.segments import BrkSegmentReportSet
+from valuation.brk.reference import build_brk_security_reference
 from valuation.brk.tables import (
     build_13f_summary_table,
     build_13f_history_summary_table,
@@ -21,7 +22,6 @@ from valuation.brk.tables import (
     build_13f_portfolio_change_summary_table,
     build_13f_live_price_summary_table,
     build_balance_sheet_context_table,
-    build_brk_valuation_context_table,
     build_brk_valuation_summary_table,
     build_segment_period_sections,
     build_holdings_vs_brk_price_change_table,
@@ -195,6 +195,19 @@ def test_build_top_holdings_table():
     frame = build_top_holdings_table(holdings, limit=2)
 
     assert list(frame["issuer"]) == ["A", "B"]
+    assert list(frame["reported_value_usd"]) == [1000, 900]
+    assert frame.iloc[0]["reported_portfolio_weight"] == pytest.approx(1000 / 2700)
+
+
+def test_build_brk_security_reference_maps_latest_new_holdings():
+    reference = build_brk_security_reference().set_index("cusip")
+
+    assert reference.loc["02079K107"]["ticker"] == "GOOG"
+    assert reference.loc["247361702"]["ticker"] == "DAL"
+    assert reference.loc["55616P104"]["ticker"] == "M"
+    assert reference.loc["650111107"]["ticker"] == "NYT"
+    assert reference.loc["530909100"]["ticker"] == "LLYVA"
+    assert reference.loc["530909308"]["ticker"] == "LLYVK"
 
 
 def test_build_13f_history_summary_table():
@@ -275,6 +288,43 @@ def test_build_13f_holdings_history_table_tracks_latest_top_holdings():
     assert axp_latest["value_change_from_prior_filing_usd"] == -50.0
 
 
+def test_build_13f_holdings_history_table_matches_cusip_across_filing_label_changes():
+    current = _make_filing(
+        "2026-05-15", "2026-03-31", "0005",
+        [
+            {
+                "security_id": "cusip:166764100",
+                "issuer": "CHEVRON CORPORATION",
+                "class_title": "COM",
+                "cusip": "166764100",
+                "value_usd": 1200,
+                "shares_or_principal": 12,
+            }
+        ],
+    )
+    prior = _make_filing(
+        "2026-02-17", "2025-12-31", "0004",
+        [
+            {
+                "security_id": "cusip:166764100",
+                "issuer": "CHEVRON CORP NEW",
+                "class_title": "COM NEW",
+                "cusip": "166764100",
+                "value_usd": 800,
+                "shares_or_principal": 8,
+            }
+        ],
+    )
+
+    frame = build_13f_holdings_history_table([current, prior], limit=1)
+    latest = frame[frame["filing_date"] == "2026-05-15"].iloc[0]
+    older = frame[frame["filing_date"] == "2026-02-17"].iloc[0]
+
+    assert latest["value_change_from_prior_filing_usd"] == 400
+    assert older["value_usd"] == 800
+    assert older["issuer"] == "CHEVRON CORP NEW"
+
+
 def _make_filing(filing_date, report_date, accession, holdings_rows):
     return Brk13FBundle(
         company=None,
@@ -315,6 +365,14 @@ def test_build_13f_issuer_change_summary_table_classifies_changes():
     assert frame[frame["cusip"] == "025816109"].iloc[0]["change_type"] == "decreased"
     assert frame[frame["cusip"] == "NEWCUSIP1"].iloc[0]["change_type"] == "new"
     assert frame[frame["cusip"] == "OLDCUSIP1"].iloc[0]["change_type"] == "eliminated"
+    new_row = frame[frame["cusip"] == "NEWCUSIP1"].iloc[0]
+    eliminated_row = frame[frame["cusip"] == "OLDCUSIP1"].iloc[0]
+    assert new_row["share_change"] == 50
+    assert new_row["value_change_usd"] == 500
+    assert eliminated_row["share_change"] == -10
+    assert eliminated_row["share_change_pct"] == -1
+    assert eliminated_row["value_change_usd"] == -300
+    assert eliminated_row["value_change_pct"] == -1
 
 
 def test_build_13f_issuer_change_summary_table_share_and_value_columns():
@@ -498,6 +556,9 @@ def test_build_top_holdings_live_table():
 
     assert list(frame["ticker"]) == ["AAPL", "AXP"]
     assert list(frame["reported_value_usd"]) == [1000, 900]
+    assert list(frame["market_value_live_usd"]) == [2000.0, 6000.0]
+    assert list(frame["reported_portfolio_weight"]) == pytest.approx([1000 / 1900, 900 / 1900])
+    assert "portfolio_weight_live" not in frame.columns
 
 
 def test_build_top_holdings_live_table_adds_price_change_column():
@@ -809,86 +870,6 @@ def test_build_segment_period_sections_returns_one_table_per_period():
     ]
 
 
-def test_build_brk_valuation_context_table():
-    reference = pd.DataFrame(
-        [
-            {"security_id": "cusip:037833100", "ticker": "AAPL", "exchange": "NASDAQ"},
-            {"security_id": "cusip:025816109", "ticker": "AXP", "exchange": "NYSE"},
-        ]
-    )
-    bundle = BrkValuationBundle(
-        overview=BrkOverviewBundle(
-            company=None,
-            market_snapshot={"ticker": "BRK-B", "last_price": 500.0, "market_cap": 1000.0 * M},
-            submissions={},
-            company_facts={},
-        ),
-        holdings=Brk13FBundle(
-            company=None,
-            filing_date="2026-02-17",
-            accession_number="0001",
-            information_table_filename="info.xml",
-            holdings=pd.DataFrame(
-                [
-                    {"security_id": "cusip:037833100", "issuer": "APPLE INC", "class_title": "COM", "cusip": "037833100", "value_usd": 100.0, "shares_or_principal": 0.2},
-                    {"security_id": "cusip:025816109", "issuer": "AMERICAN EXPRESS CO", "class_title": "COM", "cusip": "025816109", "value_usd": 90.0, "shares_or_principal": 0.1},
-                ]
-            ),
-        ),
-        liquidity=BrkLiquidityBundle(
-            company=None,
-            filings=[
-                BrkLiquidityFiling(
-                    filing_date="2026-03-02",
-                    accession_number="0002",
-                    form="10-K",
-                    balance_sheet=pd.DataFrame(
-                        [
-                            ["Cash and cash equivalents", "", "100", "90"],
-                            ["Short-term investments in U.S. Treasury Bills", "", "200", "180"],
-                            ["Investments in fixed maturity securities", "", "50", "40"],
-                            ["Payable for purchase of U.S. Treasury Bills", "", "10", "5"],
-                        ],
-                        columns=[
-                            "Consolidated Balance Sheets",
-                            "Consolidated Balance Sheets",
-                            "Dec. 31, 2025",
-                            "Dec. 31, 2024",
-                        ],
-                    ),
-                )
-            ],
-        ),
-        segments=BrkSegmentsBundle(
-            company=None,
-            filings=[
-                BrkSegmentFiling(
-                    filing_date="2026-03-02",
-                    accession_number="0003",
-                    form="10-K",
-                    reports=BrkSegmentReportSet(
-                        filing_date="2026-03-02",
-                        accession_number="0003",
-                        earnings_detail=pd.DataFrame(
-                            [
-                                {"report": "earnings", "member_path": "Operating Businesses | BNSF", "member_name": "BNSF", "metric": "Revenues", "duration_months": 12, "period_end": "2025-12-31", "value": 23 * M},
-                            ]
-                        ),
-                        reconciliation_detail=pd.DataFrame(),
-                        additional_detail=pd.DataFrame(),
-                    ),
-                )
-            ],
-        ),
-    )
-
-    context = build_brk_valuation_context_table(bundle, reference, yahoo_client=FakeYahooClient())
-
-    assert context[context["field"] == "13f_live_coverage_ratio"].iloc[0]["value"] == 1.0
-    assert context[context["field"] == "net_liquidity_total_usd"].iloc[0]["value"] == 340.0 * M
-    assert context[context["field"] == "segment_period_end"].iloc[0]["value"] == "2025-12-31"
-
-
 def test_build_13f_live_price_summary_table_reports_missing_status():
     holdings = pd.DataFrame(
         [
@@ -978,9 +959,15 @@ def test_build_market_implied_sotp_bridge_table():
     bridge = build_market_implied_sotp_bridge_table(bundle, reference, yahoo_client=FakeYahooClient())
 
     # cash=100M, T-bills=200M, payable=10M → net_core = 290M (fixed maturity excluded)
-    assert bridge[bridge["metric"] == "public_equity_holdings_blended"].iloc[0]["value_usd"] == 70.0
+    public_equity_row = bridge[bridge["metric"] == "public_equity_holdings_blended"].iloc[0]
+    assert public_equity_row["value_usd"] == 70.0
+    assert "remainder uses reported 13F values" in public_equity_row["note"]
     assert bridge[bridge["metric"] == "net_cash_and_treasury_bills"].iloc[0]["value_usd"] == pytest.approx(290.0 * M)
     assert bridge[bridge["metric"] == "residual_operating_and_other"].iloc[0]["value_usd"] == pytest.approx((1000.0 * M) - (290.0 * M) - 70.0)
+    residual_note = bridge[bridge["metric"] == "residual_operating_and_other"].iloc[0]["note"]
+    assert "Circular, not appraisal" in residual_note
+    assert "fixed maturities" in residual_note
+    assert "non-13F assets" in residual_note
     # fixed maturity appears as a context row, not subtracted
     assert bridge[bridge["metric"] == "fixed_maturity_securities_context"].iloc[0]["value_usd"] == pytest.approx(50.0 * M)
     # deferred tax row is absent when balance sheet has no deferred tax entry
@@ -1363,6 +1350,8 @@ def test_build_market_implied_sotp_bridge_table_deferred_tax_context():
     deferred_row = bridge[bridge["metric"] == "deferred_income_taxes_context"]
     assert not deferred_row.empty
     assert deferred_row.iloc[0]["value_usd"] == pytest.approx(35.0 * M)
+    assert "not bridge deduction" in deferred_row.iloc[0]["note"]
+    assert "public-equity tax sensitivity" in deferred_row.iloc[0]["note"]
 
 
 def test_build_operating_business_context_table_compares_residual_to_segment_earnings():
@@ -1441,11 +1430,14 @@ def test_build_operating_business_context_table_compares_residual_to_segment_ear
     residual = context[context["field"] == "residual_operating_and_other_usd"].iloc[0]["value"]
     pretax = context[context["field"] == "operating_segment_pretax_earnings_usd"].iloc[0]["value"]
     multiple = context[context["field"] == "residual_to_aftertax_earnings_multiple"].iloc[0]["value"]
+    note = context[context["field"] == "context_note"].iloc[0]["value"]
 
     assert context[context["field"] == "operating_segment_count"].iloc[0]["value"] == 2
     assert pretax == 50 * M
     assert residual == pytest.approx((1000.0 * M) - (300.0 * M) - 40.0)
     assert multiple == pytest.approx(residual / (pretax * 0.75))
+    assert "Rough residual earnings cross-check" in note
+    assert "Insurance Group" in note
 
 
 def test_build_brk_operating_reverse_dcf_table_basic():

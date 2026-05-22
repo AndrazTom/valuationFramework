@@ -22,6 +22,7 @@ BRK_SECURITY_REFERENCE_ROWS = [
     {"cusip": "H1467J104", "ticker": "CB", "exchange": "NYSE"},
     {"cusip": "500754106", "ticker": "KHC", "exchange": "NASDAQ"},
     {"cusip": "02079K305", "ticker": "GOOGL", "exchange": "NASDAQ"},
+    {"cusip": "02079K107", "ticker": "GOOG", "exchange": "NASDAQ"},
     {"cusip": "23918K108", "ticker": "DVA", "exchange": "NYSE"},
     {"cusip": "501044101", "ticker": "KR", "exchange": "NYSE"},
     {"cusip": "92826C839", "ticker": "V", "exchange": "NYSE"},
@@ -36,6 +37,15 @@ BRK_SECURITY_REFERENCE_ROWS = [
     {"cusip": "G0403H108", "ticker": "AON", "exchange": "NYSE"},
     {"cusip": "670346105", "ticker": "NUE", "exchange": "NYSE"},
     {"cusip": "526057104", "ticker": "LEN", "exchange": "NYSE"},
+    {"cusip": "526057302", "ticker": "LEN-B", "exchange": "NYSE"},
+    {"cusip": "247361702", "ticker": "DAL", "exchange": "NYSE"},
+    {"cusip": "650111107", "ticker": "NYT", "exchange": "NYSE"},
+    {"cusip": "55616P104", "ticker": "M", "exchange": "NYSE"},
+    {"cusip": "546347105", "ticker": "LPX", "exchange": "NYSE"},
+    {"cusip": "62944T105", "ticker": "NVR", "exchange": "NYSE"},
+    {"cusip": "47233W109", "ticker": "JEF", "exchange": "NYSE"},
+    {"cusip": "530909100", "ticker": "LLYVA", "exchange": "NASDAQ"},
+    {"cusip": "530909308", "ticker": "LLYVK", "exchange": "NASDAQ"},
 ]
 
 

@@ -74,8 +74,10 @@ DISPLAY_COLUMN_ALIASES = {
     "tax_as_pct_of_selected_13f": "tax / selected 13F",
     "tax_rate": "tax rate",
     "cagr_pct": "CAGR",
-    "portfolio_weight": "weight",
-    "portfolio_weight_live": "live weight",
+    "portfolio_weight": "reported weight",
+    "reported_portfolio_weight": "reported weight",
+    "reported_value_usd": "report value",
+    "market_value_live_usd": "live value",
     # Portfolio filing rows
     "row": "#",
     "tax_rate": "tax %",

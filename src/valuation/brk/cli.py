@@ -118,14 +118,16 @@ def register_brk_parser(subparsers) -> None:
         help="Number of 13F filings to include when --history is used.",
     )
     holdings_parser.add_argument(
-        "--live-prices",
-        action="store_true",
-        help="Attempt to revalue holdings using current market prices where a ticker is known.",
+        "--no-live-prices",
+        dest="live_prices",
+        action="store_false",
+        help="Skip current-price revaluation and show report-date holdings only.",
     )
+    holdings_parser.set_defaults(live_prices=True)
     holdings_parser.add_argument(
-        "--price-change-window",
         "--price-change",
         dest="price_change_window",
+        metavar="WINDOW",
         type=_price_change_window,
         help="Add a price-change column using one window: 1D, 5D, 1M, 3M, YTD, 1Y, 5Y, ALL.",
     )
@@ -187,9 +189,9 @@ def register_brk_parser(subparsers) -> None:
         help="Use annual 10-K or quarterly 10-Q inputs for liquidity and segment context.",
     )
     sotp_parser.add_argument(
-        "--price-change-window",
         "--price-change",
         dest="price_change_window",
+        metavar="WINDOW",
         type=_price_change_window,
         help="Optional comparison window for BRK.B versus resolved holdings basket.",
     )
@@ -347,8 +349,9 @@ def run_brk_holdings(
                 holdings=bundle.holdings,
             ),
         ),
-        ("Top Holdings", build_top_holdings_table(bundle.holdings, limit=limit)),
     ]
+    if not live_prices:
+        sections.append(("Top Holdings", build_top_holdings_table(bundle.holdings, limit=limit)))
     if history and history_bundle is not None:
         sections.extend(
             [
@@ -408,7 +411,7 @@ def run_brk_holdings(
                     ),
                 ),
                 (
-                    "Top Holdings Live",
+                    "Top Holdings",
                     build_top_holdings_live_table(
                         bundle.holdings,
                         reference,
@@ -422,7 +425,7 @@ def run_brk_holdings(
         )
         if price_change_window is not None:
             sections[-1] = (
-                f"Top Holdings Live ({price_change_window} Change)",
+                f"Top Holdings ({price_change_window} Change)",
                 sections[-1][1],
             )
             sections.append(

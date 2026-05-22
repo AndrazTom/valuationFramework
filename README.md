@@ -131,7 +131,7 @@ See `docs/portfolio.md` for env vars and FURS filing notes.
 ./vf brk valuation-report                    # self-contained Markdown valuation report
 ./vf brk holdings --limit 10
 ./vf brk holdings --history --filings-limit 4 --limit 10
-./vf brk holdings --live-prices --limit 10
+./vf brk holdings --no-live-prices --limit 10
 ./vf brk holdings --price-change 1M --limit 10
 ./vf brk liquidity --period annual --limit 4
 ./vf brk liquidity --period quarterly --limit 4
@@ -139,6 +139,12 @@ See `docs/portfolio.md` for env vars and FURS filing notes.
 ./vf brk segments --period quarterly --limit 4
 ./vf brk liquidity --period quarterly --start-year 2019 --start-quarter 1 --end-year 2023 --end-quarter 3
 ```
+
+`brk holdings` uses live prices by default where a latest-13F position maps to a market ticker.
+Its top-holdings table keeps the report value and reported portfolio weight beside the live
+price/value columns. Use `--no-live-prices` for report-date 13F rows only, `--history` for
+filing-over-filing 13F history/change tables, and `--price-change WINDOW` for the optional
+holdings-vs-BRK price-change comparison.
 
 ## Supported identifiers
 

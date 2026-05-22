@@ -359,7 +359,7 @@ def build_13f_summary_table(
 
 
 def build_top_holdings_table(holdings: pd.DataFrame, limit: int = 20) -> pd.DataFrame:
-    """Return the largest Berkshire 13F positions."""
+    """Return the largest Berkshire 13F positions from the filing."""
     if holdings.empty:
         return holdings
     limit = max(0, limit)
@@ -374,9 +374,10 @@ def build_top_holdings_table(holdings: pd.DataFrame, limit: int = 20) -> pd.Data
             "shares_or_principal",
         ]
     ].copy()
-    trimmed["portfolio_weight"] = trimmed["value_usd"].apply(
+    trimmed["reported_portfolio_weight"] = trimmed["value_usd"].apply(
         lambda value: (value / total_value) if total_value else None
     )
+    trimmed = trimmed.rename(columns={"value_usd": "reported_value_usd"})
     return trimmed.head(limit).reset_index(drop=True)
 
 
@@ -424,6 +425,10 @@ def build_13f_holdings_history_table(
     latest = aggregated_by_filing[0].head(limit).copy()
     selected_keys = [_holding_history_key(row) for _, row in latest.iterrows()]
     selected_key_set = set(selected_keys)
+    latest_row_by_key = {
+        _holding_history_key(row): row
+        for _, row in latest.iterrows()
+    }
     latest_rank_by_key = {
         key: rank
         for rank, key in enumerate(selected_keys, start=1)
@@ -444,19 +449,21 @@ def build_13f_holdings_history_table(
                 _holding_history_key(row): row
                 for _, row in aggregated_by_filing[filing_index + 1].iterrows()
             }
+        has_older_filing = filing_index + 1 < len(aggregated_by_filing)
         total_value = aggregated["value_usd"].dropna().sum()
         for key in selected_keys:
             row = current_by_key.get(key)
             if row is None:
+                latest_row = latest_row_by_key[key]
                 rows.append(
                     {
                         "latest_rank": latest_rank_by_key[key],
                         "filing_date": filing.filing_date,
                         "report_date": filing.report_date,
                         "accession_number": filing.accession_number,
-                        "issuer": _history_key_display_value(key, "issuer"),
-                        "class_title": _history_key_display_value(key, "class_title"),
-                        "cusip": _history_key_display_value(key, "cusip"),
+                        "issuer": latest_row.get("issuer"),
+                        "class_title": latest_row.get("class_title"),
+                        "cusip": latest_row.get("cusip"),
                         "value_usd": None,
                         "value_change_from_prior_filing_usd": None,
                         "shares_or_principal": None,
@@ -478,14 +485,22 @@ def build_13f_holdings_history_table(
                     "class_title": row.get("class_title"),
                     "cusip": row.get("cusip"),
                     "value_usd": value,
-                    "value_change_from_prior_filing_usd": _difference(
-                        value,
-                        older.get("value_usd") if older is not None else None,
+                    "value_change_from_prior_filing_usd": (
+                        _position_change(
+                            value,
+                            older.get("value_usd") if older is not None else None,
+                        )
+                        if has_older_filing
+                        else None
                     ),
                     "shares_or_principal": shares,
-                    "shares_change_from_prior_filing": _difference(
-                        shares,
-                        older.get("shares_or_principal") if older is not None else None,
+                    "shares_change_from_prior_filing": (
+                        _position_change(
+                            shares,
+                            older.get("shares_or_principal") if older is not None else None,
+                        )
+                        if has_older_filing
+                        else None
                     ),
                     "portfolio_weight": _ratio(value, total_value),
                 }
@@ -538,9 +553,9 @@ def build_13f_issuer_change_summary_table(
         else:
             change_type = "unchanged"
 
-        share_change = _difference(current_shares, prior_shares)
+        share_change = _position_change(current_shares, prior_shares)
         share_change_pct = _ratio(share_change, prior_shares)
-        value_change = _difference(current_value, prior_value)
+        value_change = _position_change(current_value, prior_value)
         value_change_pct = _ratio(value_change, prior_value)
         issuer = _none_if_nan((current_row if current_row is not None else prior_row).get("issuer"))
 
@@ -659,7 +674,7 @@ def build_top_holdings_live_table(
         price_change_window=price_change_window,
         enriched_holdings=enriched_holdings,
     )
-    total_live_value = enriched["market_value_live_usd"].dropna().sum()
+    total_reported_value = enriched["value_usd"].dropna().sum()
     selected_columns = [
         "issuer",
         "ticker",
@@ -673,8 +688,8 @@ def build_top_holdings_live_table(
     if price_change_window is not None:
         selected_columns.insert(5, "price_change_pct")
     trimmed = enriched[selected_columns].copy()
-    trimmed["portfolio_weight_live"] = trimmed["market_value_live_usd"].apply(
-        lambda value: (value / total_live_value) if total_live_value else None
+    trimmed["reported_portfolio_weight"] = trimmed["value_usd"].apply(
+        lambda value: (value / total_reported_value) if total_reported_value else None
     )
     trimmed = trimmed.rename(columns={"value_usd": "reported_value_usd"})
     return trimmed.head(limit).reset_index(drop=True)
@@ -1166,139 +1181,6 @@ def build_brk_valuation_assumptions_table(
     )
 
 
-def build_brk_component_bridge_table(
-    market_snapshot: dict,
-    public_equity_summary: pd.DataFrame,
-    latest_liquidity_snapshot: pd.DataFrame,
-) -> pd.DataFrame:
-    """Return an explicit Berkshire SOTP component bridge.
-
-    Splits the net liquidity into fixed maturity securities and net cash/T-bills
-    so the residual more closely approximates the operating business value.
-    """
-    market_cap = _market_cap_from_snapshot(market_snapshot)
-    shares = market_snapshot.get("shares")
-    public_equities = _field_value(public_equity_summary, "selected_13f_value_usd")
-    if public_equities is None:
-        public_equities = _field_value(public_equity_summary, "blended_13f_value_usd")
-
-    # Pull individual liquidity components for explicit breakdown
-    fixed_maturity = _frame_row_value(latest_liquidity_snapshot, "fixed_maturity_securities_usd")
-    cash = _frame_row_value(latest_liquidity_snapshot, "cash_and_equivalents_usd")
-    tbills = _frame_row_value(latest_liquidity_snapshot, "short_term_us_treasury_bills_usd")
-    tbill_payable = _frame_row_value(latest_liquidity_snapshot, "payable_for_purchase_of_us_treasury_bills_usd")
-
-    # Net cash and T-bills = cash + T-bills - T-bill purchase payable
-    net_cash_and_tbills: float | None = None
-    if cash is not None or tbills is not None:
-        base = _sum_defined(cash, tbills)
-        if tbill_payable is not None:
-            net_cash_and_tbills = _sum_defined(base, -float(tbill_payable))
-        else:
-            net_cash_and_tbills = base
-
-    # Residual after all explicit components
-    implied_other = None
-    if market_cap is not None:
-        implied_other = float(market_cap)
-        for value in (public_equities, fixed_maturity, net_cash_and_tbills):
-            if value is not None and pd.notna(value):
-                implied_other -= float(value)
-
-    def _share(value: float | None) -> float | None:
-        if value is None or market_cap is None or market_cap == 0:
-            return None
-        return value / market_cap
-
-    rows = [
-        {
-            "component": "market_cap",
-            "value_usd": market_cap,
-            "per_brk_b_share_usd": _per_share_value(market_cap, shares),
-            "share_of_market_cap_pct": 1.0 if market_cap else None,
-            "method": "Current Yahoo market cap anchor",
-        },
-        {
-            "component": "public_equities_13f_blended",
-            "value_usd": public_equities,
-            "per_brk_b_share_usd": _per_share_value(public_equities, shares),
-            "share_of_market_cap_pct": _share(public_equities),
-            "method": "Latest 13F using live prices where resolved and reported values otherwise",
-        },
-        {
-            "component": "fixed_maturity_securities",
-            "value_usd": fixed_maturity,
-            "per_brk_b_share_usd": _per_share_value(fixed_maturity, shares),
-            "share_of_market_cap_pct": _share(fixed_maturity),
-            "method": "Insurance portfolio fixed maturity bonds (filing balance sheet)",
-        },
-        {
-            "component": "net_cash_and_treasury_bills",
-            "value_usd": net_cash_and_tbills,
-            "per_brk_b_share_usd": _per_share_value(net_cash_and_tbills, shares),
-            "share_of_market_cap_pct": _share(net_cash_and_tbills),
-            "method": "Cash + T-bills net of T-bill purchase payable (filing balance sheet)",
-        },
-        {
-            "component": "implied_operating_businesses",
-            "value_usd": implied_other,
-            "per_brk_b_share_usd": _per_share_value(implied_other, shares),
-            "share_of_market_cap_pct": _share(implied_other),
-            "method": "Residual: market cap minus 13F equities, fixed maturity, and net cash/T-bills",
-        },
-    ]
-    return pd.DataFrame(rows)
-
-
-
-
-def build_brk_valuation_context_table(
-    bundle: BrkValuationBundle,
-    reference: pd.DataFrame,
-    *,
-    yahoo_client=None,
-    enriched_holdings: pd.DataFrame | None = None,
-    equity_valuation_basis: str = "live",
-    max_live_holdings: int | None = None,
-) -> pd.DataFrame:
-    """Return the key inputs behind Berkshire's current valuation bridge."""
-    holdings_metrics = _live_holdings_metrics(
-        bundle.holdings.holdings,
-        reference,
-        yahoo_client=yahoo_client,
-        enriched_holdings=enriched_holdings,
-        equity_valuation_basis=equity_valuation_basis,
-        max_live_holdings=max_live_holdings,
-    )
-    liquidity_summary = build_liquidity_summary_table(
-        build_liquidity_bridge_table(bundle.liquidity.filings)
-    )
-    latest_liquidity = liquidity_summary.iloc[0] if not liquidity_summary.empty else pd.Series(dtype=object)
-    latest_segments = _latest_segments_table(bundle.segments.filings)
-    segment_period_end = latest_segments.iloc[0]["period_end"] if not latest_segments.empty else None
-    market_snapshot = bundle.overview.market_snapshot
-    resolved_market_cap = _resolved_market_cap(market_snapshot)
-    brk_b_equivalent_shares = _implied_brk_b_equivalent_shares(market_snapshot)
-
-    return pd.DataFrame(
-        [
-            {"field": "brk_b_last_price", "value": market_snapshot.get("last_price")},
-            {"field": "market_cap", "value": resolved_market_cap},
-            {"field": "implied_brk_b_equivalent_shares", "value": brk_b_equivalent_shares},
-            {"field": "latest_price_date", "value": market_snapshot.get("latest_price_date")},
-            {"field": "13f_filing_date", "value": bundle.holdings.filing_date},
-            {"field": "13f_reported_value_usd", "value": holdings_metrics["reported_value_usd"]},
-            {"field": "13f_live_resolved_value_usd", "value": holdings_metrics["live_value_usd"]},
-            {"field": "13f_live_coverage_ratio", "value": holdings_metrics["coverage_ratio"]},
-            {"field": "13f_selected_value_usd", "value": holdings_metrics["selected_value_usd"]},
-            {"field": "13f_selected_basis", "value": holdings_metrics["selected_basis"]},
-            {"field": "liquidity_period_end", "value": latest_liquidity.get("period_end")},
-            {"field": "net_liquidity_total_usd", "value": _net_liquidity_total(latest_liquidity)},
-            {"field": "segment_period_end", "value": segment_period_end},
-        ]
-    )
-
-
 def build_market_implied_sotp_bridge_table(
     bundle: BrkValuationBundle,
     reference: pd.DataFrame,
@@ -1356,14 +1238,14 @@ def build_market_implied_sotp_bridge_table(
             "value_usd": cash_and_equivalents,
             "per_brk_b_share_usd": _per_share_value(cash_and_equivalents, share_count),
             "market_cap_weight": _ratio(cash_and_equivalents, market_cap),
-            "note": "Latest filing balance-sheet cash",
+            "note": "Latest balance-sheet cash",
         },
         {
             "metric": "short_term_us_treasury_bills",
             "value_usd": short_term_t_bills,
             "per_brk_b_share_usd": _per_share_value(short_term_t_bills, share_count),
             "market_cap_weight": _ratio(short_term_t_bills, market_cap),
-            "note": "Latest filing Treasury-bill position",
+            "note": "Latest Treasury-bill position",
         },
         {
             "metric": "payable_for_purchase_of_us_treasury_bills",
@@ -1377,14 +1259,14 @@ def build_market_implied_sotp_bridge_table(
             "value_usd": net_core_liquidity,
             "per_brk_b_share_usd": _per_share_value(net_core_liquidity, share_count),
             "market_cap_weight": _ratio(net_core_liquidity, market_cap),
-            "note": "Cash + Treasury bills - payable (excludes fixed maturity; see context row below)",
+            "note": "Cash + T-bills - payable; fixed maturities stay in residual",
         },
         {
             "metric": "quoted_holdings_plus_net_cash",
             "value_usd": quoted_plus_core_liquidity,
             "per_brk_b_share_usd": _per_share_value(quoted_plus_core_liquidity, share_count),
             "market_cap_weight": _ratio(quoted_plus_core_liquidity, market_cap),
-            "note": "Selected 13F public equities plus net cash and T-bills",
+            "note": "Selected 13F equities + net cash/T-bills",
         },
         {
             "metric": "market_cap",
@@ -1398,21 +1280,21 @@ def build_market_implied_sotp_bridge_table(
             "value_usd": residual,
             "per_brk_b_share_usd": _per_share_value(residual, share_count),
             "market_cap_weight": _ratio(residual, market_cap),
-            "note": "Market-implied plug (circular): market cap minus public equities and net cash/T-bills. Not an independent appraisal — reflects what the market already prices in for operating businesses, insurance portfolio (incl. fixed maturity), non-13F assets, debt, and deferred taxes",
+            "note": "Circular, not appraisal: market cap - 13F - net cash/T-bills; prices operating businesses, insurance incl. fixed maturities, non-13F assets, debt, deferred taxes",
         },
         {
             "metric": "fixed_maturity_securities_context",
             "value_usd": fixed_maturity,
             "per_brk_b_share_usd": _per_share_value(fixed_maturity, share_count),
             "market_cap_weight": _ratio(fixed_maturity, market_cap),
-            "note": "Context only — included in residual above; insurance-reserve-backed bond portfolio, not freely deployable capital",
+            "note": "Context in residual: insurance-reserve-backed bonds, not free capital",
         },
         {
             "metric": "deferred_income_taxes_context",
             "value_usd": deferred_tax,
             "per_brk_b_share_usd": _per_share_value(deferred_tax, share_count),
             "market_cap_weight": _ratio(deferred_tax, market_cap),
-            "note": "Context only — latest balance-sheet deferred income tax liability; not deducted from the bridge unless the residual definition changes. Use the public-equity tax sensitivity table for an embedded-gain estimate on selected 13F holdings",
+            "note": "Context, not bridge deduction: latest deferred-tax liability. 13F embedded-gain tax estimate is in public-equity tax sensitivity",
         },
     ]
     return pd.DataFrame(rows)
@@ -1458,7 +1340,7 @@ def build_operating_business_context_table(
             },
             {
                 "field": "context_note",
-                "value": "Multiple uses after-tax earnings (pre-tax × 0.75, ~25% effective rate) to match the Gordon Growth model below. Residual includes operating businesses plus non-13F assets, debt, taxes, and other items.",
+                "value": "Rough residual earnings cross-check. Segment earnings include Insurance Group; residual also includes non-13F assets, debt, taxes, and other items.",
             },
         ]
     )
@@ -2566,7 +2448,10 @@ def _public_equity_note(metrics: dict[str, object]) -> str:
     limit = metrics.get("live_pricing_limit")
     scope = "mapped holdings" if limit is None else f"top {limit} mapped holdings"
     if coverage is not None:
-        return f"Current-price 13F estimate for {scope}; live price coverage {float(coverage) * 100:.1f}%"
+        return (
+            f"Current-price 13F estimate for {scope}; live price coverage "
+            f"{float(coverage) * 100:.1f}%; remainder uses reported 13F values"
+        )
     return f"Current-price 13F estimate for {scope}; reported values used where prices are unresolved"
 
 
@@ -2689,34 +2574,21 @@ def _history_aggregate_for_filing(filing: Brk13FBundle) -> pd.DataFrame:
     ).reset_index(drop=True)
 
 
-def _holding_history_key(row) -> tuple[str | None, str | None, str | None, str | None]:
+def _holding_history_key(row) -> tuple[str | None, str | None]:
     return (
         _none_if_nan(row.get("security_id")),
-        _none_if_nan(row.get("issuer")),
-        _none_if_nan(row.get("class_title")),
         _none_if_nan(row.get("cusip")),
     )
 
 
-def _history_key_display_value(
-    key: tuple[str | None, str | None, str | None, str | None],
-    field: str,
-) -> str | None:
-    index_by_field = {
-        "security_id": 0,
-        "issuer": 1,
-        "class_title": 2,
-        "cusip": 3,
-    }
-    return key[index_by_field[field]]
-
-
-def _difference(value, previous):
-    if value is None or previous is None:
+def _position_change(value, previous):
+    if value is None and previous is None:
         return None
-    if pd.isna(value) or pd.isna(previous):
-        return None
-    return float(value) - float(previous)
+    if value is not None and pd.isna(value):
+        value = None
+    if previous is not None and pd.isna(previous):
+        previous = None
+    return float(value or 0) - float(previous or 0)
 
 
 def _none_if_nan(value):
@@ -2733,19 +2605,6 @@ def _ratio(value: float | None, total: float | None) -> float | None:
     if pd.isna(value) or pd.isna(total):
         return None
     return float(value) / float(total)
-
-
-def _net_liquidity_total(row: pd.Series) -> float | None:
-    if row.empty:
-        return None
-    payable = row.get("payable_for_purchase_of_us_treasury_bills_usd")
-    payable_component = -float(payable) if payable is not None and pd.notna(payable) else None
-    return _sum_defined(
-        row.get("cash_and_equivalents_usd"),
-        row.get("short_term_us_treasury_bills_usd"),
-        row.get("fixed_maturity_securities_usd"),
-        payable_component,
-    )
 
 
 def _sum_defined(*values):

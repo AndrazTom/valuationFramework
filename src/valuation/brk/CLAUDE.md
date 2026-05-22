@@ -13,7 +13,7 @@ Inherited generic commands:
 
 Berkshire-specific commands:
 - `./vf brk overview`
-- `./vf brk holdings [--live-prices] [--history --filings-limit N] [--price-change WINDOW] [--limit N]`
+- `./vf brk holdings [--no-live-prices] [--history --filings-limit N] [--price-change WINDOW] [--limit N]`
 - `./vf brk liquidity [--period annual|quarterly] [--limit N]`
 - `./vf brk segments [--period annual|quarterly] [--limit N]`
 - `./vf brk sotp [--details] [--price-change WINDOW] [--equity-valuation-basis reported|live] [--equity-live-limit N]`
@@ -32,8 +32,8 @@ Berkshire-specific commands:
 
 **Holdings:**
 - `build_13f_summary_table` — latest 13F filing metadata
-- `build_top_holdings_table` — top N holdings by portfolio weight + cumulative weight
-- `build_top_holdings_live_table` — live-enriched version with today's prices
+- `build_top_holdings_table` — top N report-date holdings with report value and reported weight
+- `build_top_holdings_live_table` — live-enriched version with report/live values and reported weight
 - `build_13f_live_price_summary_table` — live-price coverage summary
 - `build_13f_history_summary_table` — one row per filing period across history
 - `build_13f_holdings_history_table` — wide holding history across filings
@@ -56,7 +56,6 @@ Berkshire-specific commands:
 - `build_market_anchor_table` — current market cap and price reference
 - `build_brk_valuation_assumptions_table` — stated assumptions, including selected public-equity basis and live-pricing limit
 - `build_market_implied_sotp_bridge_table` — main SOTP bridge: market cap − selected 13F value − net cash/T-bills = residual
-- `build_brk_valuation_context_table` — bridge + residual context rows
 - `build_operating_business_context_table` — residual vs segment pre-tax earnings, P/B, OE
 - `build_brk_operating_reverse_dcf_table` — Gordon Growth implied growth at 8%/10%/12% required return
 - `build_brk_valuation_summary_table` — compact key-numbers summary for valuation report front page

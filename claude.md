@@ -245,7 +245,7 @@ As of 2026-05-18, `main` contains (on `brk`, pending merge):
 - `./vf brk overview`
 - `./vf brk holdings --limit 10`
 - `./vf brk holdings --history --filings-limit 4 --limit 10`
-- `./vf brk holdings --live-prices --limit 10`
+- `./vf brk holdings --no-live-prices --limit 10`
 - `./vf brk holdings --price-change 1M --limit 10`
 - `./vf brk sotp`
 - `./vf brk sotp --details`

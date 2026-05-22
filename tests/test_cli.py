@@ -572,7 +572,8 @@ def test_brk_holdings_cli_price_change_enables_live_table(monkeypatch, tmp_path:
 
     assert result == 0
     assert captured["window"] == "1M"
-    assert "Top Holdings Live (1M Change)" in captured["sections"]
+    assert "Top Holdings (1M Change)" in captured["sections"]
+    assert "Top Holdings" not in captured["sections"]
     assert "BRK vs Holdings Price Change (1M)" in captured["sections"]
 
 
@@ -619,6 +620,7 @@ def test_brk_holdings_cli_history_fetches_multiple_filings(monkeypatch, tmp_path
         [
             "brk",
             "holdings",
+            "--no-live-prices",
             "--history",
             "--filings-limit",
             "6",
